@@ -1,9 +1,11 @@
 use std::{
     cmp::{max, min},
     collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
+use chrono::Utc;
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
@@ -14,17 +16,15 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 use syntect::{
-    easy::HighlightLines,
-    highlighting::{Theme, ThemeSet},
-    parsing::SyntaxSet,
+    easy::HighlightLines, highlighting::Theme, highlighting::ThemeSet, parsing::SyntaxSet,
 };
 
 use crate::{
     comments::CommentStore,
     git_data::GitService,
     model::{
-        AggregatedDiff, ApprovalScope, CommentAnchor, CommitInfo, DiffLineKind, FilePatch,
-        ReviewState,
+        AggregatedDiff, CommentAnchor, CommentTarget, CommitInfo, DiffLineKind, FilePatch,
+        HunkLine, ReviewState, ReviewStatus,
     },
     store::StateStore,
 };
@@ -45,11 +45,108 @@ enum InputMode {
     Comment,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ThemeMode {
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    fn toggle(self) -> Self {
+        match self {
+            Self::Dark => Self::Light,
+            Self::Light => Self::Dark,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct UiTheme {
+    border: Color,
+    focus_border: Color,
+    text: Color,
+    muted: Color,
+    dimmed: Color,
+    highlight_bg: Color,
+    cursor_bg: Color,
+    visual_bg: Color,
+    reviewed: Color,
+    unreviewed: Color,
+    issue: Color,
+    resolved: Color,
+    unpushed: Color,
+    diff_add: Color,
+    diff_add_bg: Color,
+    diff_remove: Color,
+    diff_remove_bg: Color,
+    diff_meta: Color,
+    diff_header: Color,
+    dir: Color,
+}
+
+impl UiTheme {
+    fn from_mode(mode: ThemeMode) -> Self {
+        match mode {
+            ThemeMode::Dark => Self {
+                border: Color::Rgb(68, 68, 68),
+                focus_border: Color::Rgb(221, 189, 40),
+                text: Color::Rgb(228, 228, 228),
+                muted: Color::Rgb(170, 170, 170),
+                dimmed: Color::Rgb(115, 115, 115),
+                highlight_bg: Color::Rgb(36, 36, 42),
+                cursor_bg: Color::Rgb(52, 52, 62),
+                visual_bg: Color::Rgb(57, 67, 93),
+                reviewed: Color::Rgb(85, 190, 120),
+                unreviewed: Color::Rgb(236, 92, 92),
+                issue: Color::Rgb(238, 184, 64),
+                resolved: Color::Rgb(84, 178, 209),
+                unpushed: Color::Rgb(87, 181, 227),
+                diff_add: Color::Rgb(123, 214, 144),
+                diff_add_bg: Color::Rgb(19, 51, 30),
+                diff_remove: Color::Rgb(240, 124, 124),
+                diff_remove_bg: Color::Rgb(59, 23, 23),
+                diff_meta: Color::Rgb(235, 199, 86),
+                diff_header: Color::Rgb(101, 188, 227),
+                dir: Color::Rgb(150, 170, 230),
+            },
+            ThemeMode::Light => Self {
+                border: Color::Rgb(195, 195, 195),
+                focus_border: Color::Rgb(169, 120, 0),
+                text: Color::Rgb(40, 40, 40),
+                muted: Color::Rgb(90, 90, 90),
+                dimmed: Color::Rgb(140, 140, 140),
+                highlight_bg: Color::Rgb(236, 236, 236),
+                cursor_bg: Color::Rgb(226, 226, 226),
+                visual_bg: Color::Rgb(215, 225, 241),
+                reviewed: Color::Rgb(36, 141, 74),
+                unreviewed: Color::Rgb(194, 48, 48),
+                issue: Color::Rgb(170, 113, 0),
+                resolved: Color::Rgb(0, 122, 151),
+                unpushed: Color::Rgb(10, 131, 163),
+                diff_add: Color::Rgb(16, 127, 33),
+                diff_add_bg: Color::Rgb(230, 248, 233),
+                diff_remove: Color::Rgb(168, 42, 42),
+                diff_remove_bg: Color::Rgb(253, 235, 235),
+                diff_meta: Color::Rgb(145, 94, 0),
+                diff_header: Color::Rgb(0, 111, 151),
+                dir: Color::Rgb(80, 99, 172),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CommitRow {
     info: CommitInfo,
     selected: bool,
-    approved: bool,
+    status: ReviewStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +154,7 @@ struct TreeRow {
     label: String,
     path: Option<String>,
     selectable: bool,
+    modified_ts: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -75,7 +173,13 @@ struct PaneRects {
 #[derive(Debug, Clone)]
 struct RenderedDiffLine {
     line: Line<'static>,
+    raw_text: String,
     anchor: Option<CommentAnchor>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DiffVisualSelection {
+    anchor: usize,
 }
 
 /// High-level app state and interaction flow for the hunkr UI.
@@ -90,12 +194,16 @@ pub struct App {
     file_list_state: ListState,
     focused: FocusPane,
     input_mode: InputMode,
-    visual_anchor: Option<usize>,
+    theme_mode: ThemeMode,
+    commit_visual_anchor: Option<usize>,
+    diff_visual: Option<DiffVisualSelection>,
     aggregate: AggregatedDiff,
     selected_file: Option<String>,
     diff_positions: HashMap<String, DiffPosition>,
     diff_position: DiffPosition,
-    rendered_diff: Vec<RenderedDiffLine>,
+    rendered_diff: Arc<Vec<RenderedDiffLine>>,
+    rendered_diff_cache: HashMap<(String, ThemeMode), Arc<Vec<RenderedDiffLine>>>,
+    rendered_diff_key: Option<(String, ThemeMode)>,
     highlighter: DiffSyntaxHighlighter,
     pane_rects: PaneRects,
     status: String,
@@ -122,12 +230,16 @@ impl App {
             file_list_state: ListState::default(),
             focused: FocusPane::Commits,
             input_mode: InputMode::Normal,
-            visual_anchor: None,
+            theme_mode: ThemeMode::Dark,
+            commit_visual_anchor: None,
+            diff_visual: None,
             aggregate: AggregatedDiff::default(),
             selected_file: None,
             diff_positions: HashMap::new(),
             diff_position: DiffPosition::default(),
-            rendered_diff: Vec::new(),
+            rendered_diff: Arc::new(Vec::new()),
+            rendered_diff_cache: HashMap::new(),
+            rendered_diff_key: None,
             highlighter: DiffSyntaxHighlighter::new(),
             pane_rects: PaneRects::default(),
             status: String::new(),
@@ -138,7 +250,8 @@ impl App {
 
         app.reload_commits(true)?;
         if app.status.is_empty() {
-            app.status = "Ready. Select commits with <space>; press ? for key hints.".to_owned();
+            app.status =
+                "Ready. Select commit range with <space>/v, set statuses with r/i/s/u.".to_owned();
         }
         Ok(app)
     }
@@ -149,6 +262,7 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
         self.ensure_rendered_diff();
+        let theme = UiTheme::from_mode(self.theme_mode);
 
         let root_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -180,10 +294,10 @@ impl App {
             diff: main_chunks[1],
         };
 
-        self.render_files(frame, self.pane_rects.files);
-        self.render_commits(frame, self.pane_rects.commits);
-        self.render_diff(frame, self.pane_rects.diff);
-        self.render_footer(frame, root_chunks[1]);
+        self.render_files(frame, self.pane_rects.files, &theme);
+        self.render_commits(frame, self.pane_rects.commits, &theme);
+        self.render_diff(frame, self.pane_rects.diff, &theme);
+        self.render_footer(frame, root_chunks[1], &theme);
     }
 
     pub fn tick(&mut self) {
@@ -211,29 +325,45 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Char('q') => {
-                self.should_quit = true;
-            }
+            KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Tab | KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
-                self.focus_next();
+                self.focus_next()
             }
             KeyCode::BackTab | KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
-                self.focus_prev();
+                self.focus_prev()
             }
-            KeyCode::Char('f') => self.focused = FocusPane::Files,
-            KeyCode::Char('c') => self.focused = FocusPane::Commits,
-            KeyCode::Char('d') => self.focused = FocusPane::Diff,
-            KeyCode::Char('R') => {
-                if let Err(err) = self.reload_commits(true) {
-                    self.status = format!("reload failed: {err:#}");
-                }
+            KeyCode::Char('1') => self.focused = FocusPane::Files,
+            KeyCode::Char('2') => self.focused = FocusPane::Commits,
+            KeyCode::Char('3') => self.focused = FocusPane::Diff,
+            KeyCode::Char('f') if key.modifiers == KeyModifiers::NONE => {
+                self.focused = FocusPane::Files
             }
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
+                self.focused = FocusPane::Commits
+            }
+            KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => {
+                self.focused = FocusPane::Diff
+            }
+            KeyCode::Char('t') => self.toggle_theme(),
+            KeyCode::F(5) => self.refresh_now(),
+            KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => self.refresh_now(),
             KeyCode::Char('?') => {
-                self.status =
-                    "Hints are in footer: pane keys + selection + approvals + comments.".to_owned();
+                self.status = "Footer is contextual by focused pane.".to_owned();
             }
             _ => self.dispatch_focus_key(key),
         }
+    }
+
+    fn refresh_now(&mut self) {
+        if let Err(err) = self.reload_commits(true) {
+            self.status = format!("reload failed: {err:#}");
+        }
+    }
+
+    fn toggle_theme(&mut self) {
+        self.theme_mode = self.theme_mode.toggle();
+        self.rendered_diff_key = None;
+        self.status = format!("Theme switched to {}", self.theme_mode.label());
     }
 
     fn handle_comment_input(&mut self, key: KeyEvent) {
@@ -251,21 +381,23 @@ impl App {
                     return;
                 }
 
-                let anchor = self
-                    .rendered_diff
-                    .get(self.diff_position.cursor)
-                    .and_then(|line| line.anchor.clone());
-                if let Some(anchor) = anchor {
-                    match self.comments.append(&anchor, &self.comment_buffer) {
+                if let Some(target) = self.comment_target_from_selection() {
+                    let result = self.comments.append(&target, &self.comment_buffer);
+                    match result {
                         Ok(path) => {
-                            self.status = format!("Comment saved -> {}", path.display());
+                            self.set_status_for_ids(&target.commits, ReviewStatus::IssueFound);
+                            self.status = format!(
+                                "Comment saved -> {} ({} commit(s) marked ISSUE_FOUND)",
+                                path.display(),
+                                target.commits.len()
+                            );
                         }
                         Err(err) => {
                             self.status = format!("Failed to save comment: {err:#}");
                         }
                     }
                 } else {
-                    self.status = "No hunk/line anchor at cursor".to_owned();
+                    self.status = "No hunk/line anchor at cursor or selected range".to_owned();
                 }
 
                 self.input_mode = InputMode::Normal;
@@ -296,6 +428,14 @@ impl App {
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_file_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_file_cursor(-1),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.page_files(0.5)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.page_files(-0.5)
+            }
+            KeyCode::PageDown => self.page_files(1.0),
+            KeyCode::PageUp => self.page_files(-1.0),
             KeyCode::Char('g') => self.select_first_file(),
             KeyCode::Char('G') => self.select_last_file(),
             KeyCode::Enter | KeyCode::Char(' ') => self.focused = FocusPane::Diff,
@@ -307,44 +447,50 @@ impl App {
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_commit_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_commit_cursor(-1),
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.page_commits(0.5)
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.page_commits(-0.5)
+            }
+            KeyCode::PageDown => self.page_commits(1.0),
+            KeyCode::PageUp => self.page_commits(-1.0),
             KeyCode::Char('g') => self.select_first_commit(),
             KeyCode::Char('G') => self.select_last_commit(),
             KeyCode::Char('v') => {
-                if self.visual_anchor.is_some() {
-                    self.visual_anchor = None;
-                    self.status = "Visual range selection off".to_owned();
+                if self.commit_visual_anchor.is_some() {
+                    self.commit_visual_anchor = None;
+                    self.status = "Commit visual range off".to_owned();
                 } else {
-                    self.visual_anchor = self.commit_list_state.selected();
-                    self.status = "Visual range selection on".to_owned();
-                    self.apply_visual_range();
+                    self.commit_visual_anchor = self.commit_list_state.selected();
+                    self.status = "Commit visual range on".to_owned();
+                    self.apply_commit_visual_range();
                 }
             }
             KeyCode::Char('x') => {
                 for row in &mut self.commits {
                     row.selected = false;
                 }
-                self.visual_anchor = None;
+                self.commit_visual_anchor = None;
                 self.on_selection_changed();
             }
             KeyCode::Char(' ') => {
                 if let Some(idx) = self.commit_list_state.selected()
                     && let Some(row) = self.commits.get_mut(idx)
-                    && !row.approved
                 {
                     row.selected = !row.selected;
                 }
-                self.visual_anchor = None;
+                self.commit_visual_anchor = None;
                 self.on_selection_changed();
             }
-            KeyCode::Char('a') => {
-                self.approve_current_commit();
-            }
-            KeyCode::Char('A') => {
-                self.approve_selected_commits();
-            }
-            KeyCode::Char('B') => {
-                self.approve_branch_commits();
-            }
+            KeyCode::Char('u') => self.set_current_commit_status(ReviewStatus::Unreviewed),
+            KeyCode::Char('r') => self.set_current_commit_status(ReviewStatus::Reviewed),
+            KeyCode::Char('i') => self.set_current_commit_status(ReviewStatus::IssueFound),
+            KeyCode::Char('s') => self.set_current_commit_status(ReviewStatus::Resolved),
+            KeyCode::Char('U') => self.set_selected_commit_status(ReviewStatus::Unreviewed),
+            KeyCode::Char('R') => self.set_selected_commit_status(ReviewStatus::Reviewed),
+            KeyCode::Char('I') => self.set_selected_commit_status(ReviewStatus::IssueFound),
+            KeyCode::Char('S') => self.set_selected_commit_status(ReviewStatus::Resolved),
             _ => {}
         }
     }
@@ -364,17 +510,33 @@ impl App {
                 }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.page_diff(-0.5);
+                self.page_diff(-0.5)
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.page_diff(0.5);
+                self.page_diff(0.5)
             }
             KeyCode::PageUp => self.page_diff(-1.0),
             KeyCode::PageDown => self.page_diff(1.0),
+            KeyCode::Char('v') | KeyCode::Char('V') => {
+                if self.rendered_diff.is_empty() {
+                    return;
+                }
+                if self.diff_visual.is_some() {
+                    self.diff_visual = None;
+                    self.status = "Diff visual range off".to_owned();
+                } else {
+                    self.diff_visual = Some(DiffVisualSelection {
+                        anchor: self.diff_position.cursor,
+                    });
+                    self.status = "Diff visual range on".to_owned();
+                }
+            }
             KeyCode::Char('m') => {
                 self.input_mode = InputMode::Comment;
                 self.comment_buffer.clear();
-                self.status = "Comment mode: type comment, Enter to save, Esc to cancel".to_owned();
+                self.status =
+                    "Comment mode: type comment, Enter save, Esc cancel (supports visual range)"
+                        .to_owned();
             }
             _ => {}
         }
@@ -435,24 +597,41 @@ impl App {
         }
     }
 
-    fn render_files(&mut self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect) {
+    fn render_files(
+        &mut self,
+        frame: &mut Frame<'_>,
+        rect: ratatui::layout::Rect,
+        theme: &UiTheme,
+    ) {
         let title = format!("Changed Files ({})", self.aggregate.files.len());
         let border_style = if self.focused == FocusPane::Files {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(theme.focus_border)
         } else {
-            Style::default()
+            Style::default().fg(theme.border)
         };
+
+        let width = rect.width.saturating_sub(4) as usize;
+        let now_ts = Utc::now().timestamp();
 
         let items: Vec<ListItem<'static>> = self
             .file_rows
             .iter()
             .map(|row| {
                 let style = if row.selectable {
-                    Style::default()
+                    Style::default().fg(theme.text)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(theme.dir)
                 };
-                ListItem::new(Line::from(Span::styled(row.label.clone(), style)))
+                let line_text = if row.selectable {
+                    let right = row
+                        .modified_ts
+                        .map(|ts| format_relative_time(ts, now_ts))
+                        .unwrap_or_default();
+                    align_with_right(&row.label, &right, width)
+                } else {
+                    row.label.clone()
+                };
+                ListItem::new(Line::from(Span::styled(line_text, style)))
             })
             .collect();
 
@@ -463,23 +642,28 @@ impl App {
                     .borders(Borders::ALL)
                     .border_style(border_style),
             )
-            .highlight_style(Style::default().bg(Color::DarkGray))
+            .highlight_style(Style::default().bg(theme.highlight_bg))
             .highlight_symbol("-> ");
 
         frame.render_stateful_widget(list, rect, &mut self.file_list_state);
     }
 
-    fn render_commits(&mut self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect) {
+    fn render_commits(
+        &mut self,
+        frame: &mut Frame<'_>,
+        rect: ratatui::layout::Rect,
+        theme: &UiTheme,
+    ) {
         let selected = self.commits.iter().filter(|row| row.selected).count();
-        let unreviewed = self.commits.iter().filter(|row| !row.approved).count();
+        let (unreviewed, reviewed, issue_found, resolved) = self.status_counts();
         let title = format!(
-            "Commits [{} selected | {} unreviewed]",
-            selected, unreviewed
+            "Commits [{} sel | U:{} R:{} I:{} Z:{}]",
+            selected, unreviewed, reviewed, issue_found, resolved
         );
         let border_style = if self.focused == FocusPane::Commits {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(theme.focus_border)
         } else {
-            Style::default()
+            Style::default().fg(theme.border)
         };
 
         let items: Vec<ListItem<'static>> = self
@@ -487,23 +671,26 @@ impl App {
             .iter()
             .map(|row| {
                 let check = if row.selected { "[x]" } else { "[ ]" };
-                let badge = if row.approved {
-                    Span::styled("reviewed", Style::default().fg(Color::Green))
-                } else {
-                    Span::styled(
-                        "UNREVIEWED",
-                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    )
-                };
+                let badge = status_badge(row.status, theme);
+
                 let mut spans = vec![
-                    Span::raw(format!("{} {} ", check, row.info.short_id)),
-                    Span::raw(truncate(&row.info.summary, 36)),
+                    Span::styled(
+                        format!("{} {} ", check, row.info.short_id),
+                        Style::default().fg(theme.text),
+                    ),
+                    Span::styled(
+                        truncate(&row.info.summary, 34),
+                        Style::default().fg(theme.text),
+                    ),
                     Span::raw(" "),
                     badge,
                 ];
                 if row.info.unpushed {
                     spans.push(Span::raw(" "));
-                    spans.push(Span::styled("unpushed", Style::default().fg(Color::Cyan)));
+                    spans.push(Span::styled(
+                        "unpushed",
+                        Style::default().fg(theme.unpushed),
+                    ));
                 }
                 ListItem::new(Line::from(spans))
             })
@@ -516,17 +703,17 @@ impl App {
                     .borders(Borders::ALL)
                     .border_style(border_style),
             )
-            .highlight_style(Style::default().bg(Color::DarkGray))
+            .highlight_style(Style::default().bg(theme.highlight_bg))
             .highlight_symbol("-> ");
 
         frame.render_stateful_widget(list, rect, &mut self.commit_list_state);
     }
 
-    fn render_diff(&mut self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect) {
+    fn render_diff(&mut self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
         let border_style = if self.focused == FocusPane::Diff {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(theme.focus_border)
         } else {
-            Style::default()
+            Style::default().fg(theme.border)
         };
 
         let file_label = self
@@ -535,24 +722,29 @@ impl App {
             .unwrap_or_else(|| "(no file selected)".to_owned());
         let title = format!("Diff: {}", file_label);
 
+        let visual_range = self.diff_selected_range();
         let mut lines = Vec::with_capacity(self.rendered_diff.len());
         for (idx, rendered) in self.rendered_diff.iter().enumerate() {
-            if idx == self.diff_position.cursor && self.focused == FocusPane::Diff {
-                lines.push(
-                    rendered
-                        .line
-                        .clone()
-                        .patch_style(Style::default().bg(Color::DarkGray)),
-                );
-            } else {
-                lines.push(rendered.line.clone());
+            let mut line = rendered.line.clone();
+
+            if let Some((start, end)) = visual_range
+                && idx >= start
+                && idx <= end
+            {
+                line = line.patch_style(Style::default().bg(theme.visual_bg));
             }
+
+            if idx == self.diff_position.cursor && self.focused == FocusPane::Diff {
+                line = line.patch_style(Style::default().bg(theme.cursor_bg));
+            }
+            lines.push(line);
         }
 
         if lines.is_empty() {
-            lines.push(Line::from(
+            lines.push(Line::from(Span::styled(
                 "No selected commits or no textual diff for this file",
-            ));
+                Style::default().fg(theme.muted),
+            )));
         }
 
         let paragraph = Paragraph::new(lines)
@@ -567,7 +759,7 @@ impl App {
         frame.render_widget(paragraph, rect);
     }
 
-    fn render_footer(&self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect) {
+    fn render_footer(&self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
         let mode = match self.input_mode {
             InputMode::Normal => "NORMAL",
             InputMode::Comment => "COMMENT",
@@ -578,19 +770,38 @@ impl App {
             FocusPane::Diff => "diff",
         };
 
-        let key_hints = if self.input_mode == InputMode::Comment {
-            "Comment: type text, Enter save, Esc cancel"
+        let pane_hints = if self.input_mode == InputMode::Comment {
+            "Comment: Enter save | Esc cancel"
         } else {
-            "Pane: h/l or Tab | Nav: j/k g/G | Select commits: <space>/v | Approve: a A B | Comment: m | Refresh: R | Quit: q"
+            match self.focused {
+                FocusPane::Files => "Files: j/k g/G Ctrl-d/u PgUp/PgDn | Enter focus diff",
+                FocusPane::Commits => {
+                    "Commits: <space>/v/x select | u/r/i/s current | U/R/I/S selected"
+                }
+                FocusPane::Diff => "Diff: j/k g/G Ctrl-d/u PgUp/PgDn | v/V range | m comment",
+            }
         };
+
+        let global_hints =
+            "Global: 1/2/3 panes | Tab h/l cycle | t theme | F5/Ctrl-r refresh | q quit";
 
         let status = if self.input_mode == InputMode::Comment {
             format!(
-                "{} | mode={} focus={} > {}",
-                self.status, mode, focus, self.comment_buffer
+                "{} | mode={} focus={} theme={} > {}",
+                self.status,
+                mode,
+                focus,
+                self.theme_mode.label(),
+                self.comment_buffer
             )
         } else {
-            format!("{} | mode={} focus={}", self.status, mode, focus)
+            format!(
+                "{} | mode={} focus={} theme={}",
+                self.status,
+                mode,
+                focus,
+                self.theme_mode.label()
+            )
         };
 
         let chunks = ratatui::layout::Layout::default()
@@ -601,10 +812,14 @@ impl App {
             ])
             .split(rect);
 
-        let status_widget = Paragraph::new(status).style(Style::default().fg(Color::White));
-        let hint_widget = Paragraph::new(key_hints)
-            .style(Style::default().fg(Color::DarkGray))
-            .block(Block::default().borders(Borders::TOP));
+        let status_widget = Paragraph::new(status).style(Style::default().fg(theme.text));
+        let hint_widget = Paragraph::new(format!("{}\n{}", pane_hints, global_hints))
+            .style(Style::default().fg(theme.dimmed))
+            .block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Style::default().fg(theme.border)),
+            );
 
         frame.render_widget(status_widget, chunks[0]);
         frame.render_widget(hint_widget, chunks[1]);
@@ -623,6 +838,7 @@ impl App {
             }
         }
 
+        let had_existing_rows = !self.commits.is_empty();
         let mut known = BTreeSet::new();
         for row in &self.commits {
             known.insert(row.info.id.clone());
@@ -631,18 +847,18 @@ impl App {
         self.commits = history
             .into_iter()
             .map(|info| {
-                let approved = self.review_state.approvals.contains_key(&info.id);
-                let selected = if approved {
-                    false
-                } else if preserve_manual_selection && old_selected.contains(&info.id) {
+                let status = self.store.commit_status(&self.review_state, &info.id);
+                let selected = if preserve_manual_selection && old_selected.contains(&info.id) {
                     true
+                } else if !had_existing_rows {
+                    default_selected.contains(&info.id) && status == ReviewStatus::Unreviewed
                 } else {
-                    default_selected.contains(&info.id)
+                    false
                 };
                 CommitRow {
                     info,
                     selected,
-                    approved,
+                    status,
                 }
             })
             .collect();
@@ -654,7 +870,7 @@ impl App {
         let new_commits = self
             .commits
             .iter()
-            .filter(|row| !known.contains(&row.info.id) && !row.approved)
+            .filter(|row| !known.contains(&row.info.id) && row.status == ReviewStatus::Unreviewed)
             .count();
         if new_commits > 0 {
             self.status = format!("{} new unreviewed commit(s) detected", new_commits);
@@ -672,6 +888,10 @@ impl App {
             self.git.aggregate_for_commits(&selected_ordered)?
         };
 
+        self.rendered_diff_cache.clear();
+        self.rendered_diff_key = None;
+        self.diff_visual = None;
+
         self.rebuild_file_tree();
         self.ensure_selected_file_exists();
         self.ensure_rendered_diff();
@@ -679,13 +899,40 @@ impl App {
     }
 
     fn ensure_rendered_diff(&mut self) {
-        self.rendered_diff = self
-            .selected_file
-            .as_ref()
-            .and_then(|path| self.aggregate.files.get(path))
-            .map(|patch| self.build_diff_lines(patch))
-            .unwrap_or_default();
+        let Some(path) = self.selected_file.clone() else {
+            self.rendered_diff = Arc::new(Vec::new());
+            self.rendered_diff_key = None;
+            self.diff_position = DiffPosition::default();
+            return;
+        };
 
+        let key = (path.clone(), self.theme_mode);
+        if self.rendered_diff_key.as_ref() == Some(&key) {
+            return;
+        }
+
+        if let Some(cached) = self.rendered_diff_cache.get(&key) {
+            self.rendered_diff = cached.clone();
+            self.rendered_diff_key = Some(key);
+            self.sync_diff_cursor_to_content_bounds();
+            return;
+        }
+
+        let rendered = self
+            .aggregate
+            .files
+            .get(&path)
+            .map(|patch| Arc::new(self.build_diff_lines(patch)))
+            .unwrap_or_else(|| Arc::new(Vec::new()));
+
+        self.rendered_diff_cache
+            .insert(key.clone(), rendered.clone());
+        self.rendered_diff = rendered;
+        self.rendered_diff_key = Some(key);
+        self.sync_diff_cursor_to_content_bounds();
+    }
+
+    fn sync_diff_cursor_to_content_bounds(&mut self) {
         if self.rendered_diff.is_empty() {
             self.diff_position = DiffPosition::default();
             return;
@@ -700,31 +947,33 @@ impl App {
 
     fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
+        let theme = UiTheme::from_mode(self.theme_mode);
 
         for hunk in &patch.hunks {
+            let commit_line = format!("commit {} {}", hunk.commit_short, hunk.commit_summary);
             rendered.push(RenderedDiffLine {
                 line: Line::from(vec![
-                    Span::styled("commit ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("commit ", Style::default().fg(theme.muted)),
                     Span::styled(
                         hunk.commit_short.clone(),
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(theme.focus_border)
                             .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
-                    Span::styled(
-                        hunk.commit_summary.clone(),
-                        Style::default().fg(Color::White),
-                    ),
+                    Span::styled(hunk.commit_summary.clone(), Style::default().fg(theme.text)),
                 ]),
+                raw_text: commit_line,
                 anchor: None,
             });
 
+            let hunk_label = format!("hunk {}", hunk.header);
             rendered.push(RenderedDiffLine {
                 line: Line::from(vec![
-                    Span::styled("hunk ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(hunk.header.clone(), Style::default().fg(Color::Cyan)),
+                    Span::styled("hunk ", Style::default().fg(theme.muted)),
+                    Span::styled(hunk.header.clone(), Style::default().fg(theme.diff_header)),
                 ]),
+                raw_text: hunk_label,
                 anchor: Some(CommentAnchor {
                     commit_id: hunk.commit_id.clone(),
                     commit_summary: hunk.commit_summary.clone(),
@@ -745,13 +994,15 @@ impl App {
                     new_lineno: line.new_lineno,
                 };
                 rendered.push(RenderedDiffLine {
-                    line: self.render_code_line(&patch.path, line),
+                    line: self.render_code_line(&patch.path, line, &theme),
+                    raw_text: raw_diff_text(line),
                     anchor: Some(anchor),
                 });
             }
 
             rendered.push(RenderedDiffLine {
                 line: Line::from(""),
+                raw_text: String::new(),
                 anchor: None,
             });
         }
@@ -759,12 +1010,12 @@ impl App {
         rendered
     }
 
-    fn render_code_line(&self, path: &str, line: &crate::model::HunkLine) -> Line<'static> {
+    fn render_code_line(&self, path: &str, line: &HunkLine, theme: &UiTheme) -> Line<'static> {
         let (prefix, accent, bg) = match line.kind {
-            DiffLineKind::Add => ('+', Color::Green, Some(Color::Rgb(13, 41, 20))),
-            DiffLineKind::Remove => ('-', Color::Red, Some(Color::Rgb(45, 16, 16))),
-            DiffLineKind::Context => (' ', Color::DarkGray, None),
-            DiffLineKind::Meta => ('~', Color::Yellow, None),
+            DiffLineKind::Add => ('+', theme.diff_add, Some(theme.diff_add_bg)),
+            DiffLineKind::Remove => ('-', theme.diff_remove, Some(theme.diff_remove_bg)),
+            DiffLineKind::Context => (' ', theme.dimmed, None),
+            DiffLineKind::Meta => ('~', theme.diff_meta, None),
         };
 
         let mut spans = vec![Span::styled(
@@ -772,7 +1023,9 @@ impl App {
             Style::default().fg(accent).add_modifier(Modifier::BOLD),
         )];
 
-        let highlighted = self.highlighter.highlight(path, &line.text);
+        let highlighted = self
+            .highlighter
+            .highlight(self.theme_mode, path, &line.text);
         for mut span in highlighted {
             if let Some(bg_color) = bg {
                 span.style = span.style.bg(bg_color);
@@ -785,9 +1038,16 @@ impl App {
 
     fn rebuild_file_tree(&mut self) {
         let mut tree = FileTree::default();
-        for path in self.aggregate.file_paths() {
-            tree.insert(&path);
+        for (path, patch) in &self.aggregate.files {
+            let modified_ts = patch
+                .hunks
+                .iter()
+                .map(|h| h.commit_timestamp)
+                .max()
+                .unwrap_or(0);
+            tree.insert(path, modified_ts);
         }
+
         self.file_rows = tree.flattened_rows();
         if self.file_rows.is_empty() {
             self.file_list_state.select(None);
@@ -854,6 +1114,11 @@ impl App {
         self.select_file_row(idx as usize);
     }
 
+    fn page_files(&mut self, multiplier: f32) {
+        let step = page_step(self.pane_rects.files.height, multiplier);
+        self.move_file_cursor(step);
+    }
+
     fn select_first_file(&mut self) {
         if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
             self.select_file_row(idx);
@@ -867,10 +1132,7 @@ impl App {
     }
 
     fn select_file_row(&mut self, idx: usize) {
-        if idx >= self.file_rows.len() {
-            return;
-        }
-        if !self.file_rows[idx].selectable {
+        if idx >= self.file_rows.len() || !self.file_rows[idx].selectable {
             return;
         }
 
@@ -885,6 +1147,7 @@ impl App {
             .expect("selectable rows always contain path");
         self.selected_file = Some(path.clone());
         self.restore_diff_position(&path);
+        self.diff_visual = None;
         self.ensure_rendered_diff();
     }
 
@@ -897,9 +1160,14 @@ impl App {
         let next = (current + delta).clamp(0, len - 1) as usize;
         self.commit_list_state.select(Some(next));
 
-        if self.visual_anchor.is_some() {
-            self.apply_visual_range();
+        if self.commit_visual_anchor.is_some() {
+            self.apply_commit_visual_range();
         }
+    }
+
+    fn page_commits(&mut self, multiplier: f32) {
+        let step = page_step(self.pane_rects.commits.height, multiplier);
+        self.move_commit_cursor(step);
     }
 
     fn select_first_commit(&mut self) {
@@ -907,8 +1175,8 @@ impl App {
             return;
         }
         self.commit_list_state.select(Some(0));
-        if self.visual_anchor.is_some() {
-            self.apply_visual_range();
+        if self.commit_visual_anchor.is_some() {
+            self.apply_commit_visual_range();
         }
     }
 
@@ -917,8 +1185,8 @@ impl App {
             return;
         }
         self.commit_list_state.select(Some(self.commits.len() - 1));
-        if self.visual_anchor.is_some() {
-            self.apply_visual_range();
+        if self.commit_visual_anchor.is_some() {
+            self.apply_commit_visual_range();
         }
     }
 
@@ -927,17 +1195,14 @@ impl App {
             return;
         }
         self.commit_list_state.select(Some(idx));
-        if toggle
-            && let Some(row) = self.commits.get_mut(idx)
-            && !row.approved
-        {
+        if toggle && let Some(row) = self.commits.get_mut(idx) {
             row.selected = !row.selected;
             self.on_selection_changed();
         }
     }
 
-    fn apply_visual_range(&mut self) {
-        let Some(anchor) = self.visual_anchor else {
+    fn apply_commit_visual_range(&mut self) {
+        let Some(anchor) = self.commit_visual_anchor else {
             return;
         };
         let Some(cursor) = self.commit_list_state.selected() else {
@@ -950,95 +1215,55 @@ impl App {
         self.on_selection_changed();
     }
 
-    fn approve_current_commit(&mut self) {
+    fn set_current_commit_status(&mut self, status: ReviewStatus) {
         let Some(idx) = self.commit_list_state.selected() else {
             return;
         };
-        let Some(row) = self.commits.get_mut(idx) else {
+        let Some(row) = self.commits.get(idx) else {
             return;
         };
-        self.store.mark_approved(
-            &mut self.review_state,
-            &row.info.id,
-            ApprovalScope::Commit,
-            self.git.branch_name(),
-        );
-        row.approved = true;
-        row.selected = false;
-        self.visual_anchor = None;
-
-        let status = if let Err(err) = self.store.save(&self.review_state) {
-            format!("failed to persist approval: {err:#}")
-        } else {
-            format!("Approved {}", row.info.short_id)
-        };
-        self.on_selection_changed();
-        self.status = status;
+        let ids = BTreeSet::from([row.info.id.clone()]);
+        self.set_status_for_ids(&ids, status);
     }
 
-    fn approve_selected_commits(&mut self) {
-        let ids: Vec<String> = self
+    fn set_selected_commit_status(&mut self, status: ReviewStatus) {
+        let ids = self
             .commits
             .iter()
-            .filter(|row| row.selected && !row.approved)
+            .filter(|row| row.selected)
             .map(|row| row.info.id.clone())
-            .collect();
+            .collect::<BTreeSet<_>>();
         if ids.is_empty() {
-            self.status = "No selected commits to approve".to_owned();
+            self.status = "No selected commits".to_owned();
             return;
         }
-
-        self.store.mark_many_approved(
-            &mut self.review_state,
-            ids.clone(),
-            ApprovalScope::Selection,
-            self.git.branch_name(),
-        );
-
-        let id_set = ids.iter().cloned().collect::<BTreeSet<_>>();
-        apply_approved_ids(&mut self.commits, &id_set);
-
-        let status = if let Err(err) = self.store.save(&self.review_state) {
-            format!("failed to persist approvals: {err:#}")
-        } else {
-            format!("Approved {} selected commit(s)", ids.len())
-        };
-        self.visual_anchor = None;
-        self.on_selection_changed();
-        self.status = status;
+        self.set_status_for_ids(&ids, status);
     }
 
-    fn approve_branch_commits(&mut self) {
-        let ids: Vec<String> = self
-            .commits
-            .iter()
-            .filter(|row| !row.approved)
-            .map(|row| row.info.id.clone())
-            .collect();
-
-        if ids.is_empty() {
-            self.status = "All commits already approved".to_owned();
-            return;
-        }
-
-        self.store.mark_many_approved(
+    fn set_status_for_ids(&mut self, ids: &BTreeSet<String>, status: ReviewStatus) {
+        self.store.set_many_status(
             &mut self.review_state,
-            ids.clone(),
-            ApprovalScope::Branch,
+            ids.iter().cloned(),
+            status,
             self.git.branch_name(),
         );
 
-        let id_set = ids.iter().cloned().collect::<BTreeSet<_>>();
-        apply_approved_ids(&mut self.commits, &id_set);
-
-        let status = if let Err(err) = self.store.save(&self.review_state) {
-            format!("failed to persist branch approvals: {err:#}")
+        apply_status_ids(&mut self.commits, ids, status);
+        let save_result = self.store.save(&self.review_state);
+        let status_message = if let Err(err) = save_result {
+            format!("failed to persist status change: {err:#}")
         } else {
-            format!("Approved {} commit(s) on branch", ids.len())
+            format!("{} commit(s) -> {}", ids.len(), status.as_str())
         };
-        self.visual_anchor = None;
-        self.on_selection_changed();
-        self.status = status;
+
+        if status != ReviewStatus::Unreviewed {
+            self.commit_visual_anchor = None;
+        }
+        if let Err(err) = self.rebuild_selection_dependent_views() {
+            self.status = format!("failed to rebuild diff: {err:#}");
+            return;
+        }
+        self.status = status_message;
     }
 
     fn move_diff_cursor(&mut self, delta: isize) {
@@ -1061,8 +1286,7 @@ impl App {
     }
 
     fn page_diff(&mut self, multiplier: f32) {
-        let visible = self.pane_rects.diff.height.saturating_sub(2).max(1) as f32;
-        let step = (visible * multiplier).round() as isize;
+        let step = page_step(self.pane_rects.diff.height, multiplier);
         self.move_diff_cursor(step);
     }
 
@@ -1099,16 +1323,77 @@ impl App {
             FocusPane::Diff => FocusPane::Commits,
         }
     }
+
+    fn diff_selected_range(&self) -> Option<(usize, usize)> {
+        if self.rendered_diff.is_empty() {
+            return None;
+        }
+
+        if let Some(visual) = self.diff_visual {
+            Some((
+                min(visual.anchor, self.diff_position.cursor),
+                max(visual.anchor, self.diff_position.cursor),
+            ))
+        } else {
+            Some((self.diff_position.cursor, self.diff_position.cursor))
+        }
+    }
+
+    fn comment_target_from_selection(&self) -> Option<CommentTarget> {
+        let (start_idx, end_idx) = self.diff_selected_range()?;
+        let mut anchors = Vec::new();
+        let mut selected_lines = Vec::new();
+        let mut commits = BTreeSet::new();
+
+        for idx in start_idx..=end_idx {
+            let Some(line) = self.rendered_diff.get(idx) else {
+                continue;
+            };
+            if let Some(anchor) = &line.anchor {
+                commits.insert(anchor.commit_id.clone());
+                anchors.push(anchor.clone());
+                if !line.raw_text.trim().is_empty() {
+                    selected_lines.push(line.raw_text.clone());
+                }
+            }
+        }
+
+        let start = anchors.first()?.clone();
+        let end = anchors.last()?.clone();
+
+        Some(CommentTarget {
+            start,
+            end,
+            commits,
+            selected_lines,
+        })
+    }
+
+    fn status_counts(&self) -> (usize, usize, usize, usize) {
+        let mut unreviewed = 0;
+        let mut reviewed = 0;
+        let mut issue_found = 0;
+        let mut resolved = 0;
+        for row in &self.commits {
+            match row.status {
+                ReviewStatus::Unreviewed => unreviewed += 1,
+                ReviewStatus::Reviewed => reviewed += 1,
+                ReviewStatus::IssueFound => issue_found += 1,
+                ReviewStatus::Resolved => resolved += 1,
+            }
+        }
+        (unreviewed, reviewed, issue_found, resolved)
+    }
 }
 
 #[derive(Default)]
 struct FileTree {
     dirs: BTreeMap<String, FileTree>,
-    files: BTreeSet<String>,
+    files: BTreeMap<String, i64>,
 }
 
 impl FileTree {
-    fn insert(&mut self, path: &str) {
+    fn insert(&mut self, path: &str, modified_ts: i64) {
         let segments: Vec<&str> = path.split('/').collect();
         if segments.is_empty() {
             return;
@@ -1120,7 +1405,11 @@ impl FileTree {
         }
 
         if let Some(name) = segments.last() {
-            cursor.files.insert((*name).to_owned());
+            let entry = cursor
+                .files
+                .entry((*name).to_owned())
+                .or_insert(modified_ts);
+            *entry = max(*entry, modified_ts);
         }
     }
 
@@ -1141,11 +1430,12 @@ impl FileTree {
                 label: format!("{}[D] {}", "  ".repeat(depth), dir),
                 path: None,
                 selectable: false,
+                modified_ts: None,
             });
             child.flatten_into(rows, path, depth + 1);
         }
 
-        for file in &self.files {
+        for (file, modified_ts) in &self.files {
             let full = if prefix.is_empty() {
                 file.clone()
             } else {
@@ -1155,6 +1445,7 @@ impl FileTree {
                 label: format!("{}[F] {}", "  ".repeat(depth), file),
                 path: Some(full),
                 selectable: true,
+                modified_ts: Some(*modified_ts),
             });
         }
     }
@@ -1162,24 +1453,35 @@ impl FileTree {
 
 struct DiffSyntaxHighlighter {
     syntaxes: SyntaxSet,
-    theme: Theme,
+    dark_theme: Theme,
+    light_theme: Theme,
 }
 
 impl DiffSyntaxHighlighter {
     fn new() -> Self {
         let syntaxes = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();
-        let theme = theme_set
+        let dark_theme = theme_set
             .themes
             .get("base16-ocean.dark")
             .cloned()
             .or_else(|| theme_set.themes.values().next().cloned())
             .unwrap_or_default();
+        let light_theme = theme_set
+            .themes
+            .get("InspiredGitHub")
+            .cloned()
+            .or_else(|| theme_set.themes.values().next().cloned())
+            .unwrap_or_default();
 
-        Self { syntaxes, theme }
+        Self {
+            syntaxes,
+            dark_theme,
+            light_theme,
+        }
     }
 
-    fn highlight(&self, path: &str, line: &str) -> Vec<Span<'static>> {
+    fn highlight(&self, mode: ThemeMode, path: &str, line: &str) -> Vec<Span<'static>> {
         let syntax = self
             .syntaxes
             .find_syntax_for_file(path)
@@ -1187,7 +1489,11 @@ impl DiffSyntaxHighlighter {
             .flatten()
             .unwrap_or_else(|| self.syntaxes.find_syntax_plain_text());
 
-        let mut highlighter = HighlightLines::new(syntax, &self.theme);
+        let theme = match mode {
+            ThemeMode::Dark => &self.dark_theme,
+            ThemeMode::Light => &self.light_theme,
+        };
+        let mut highlighter = HighlightLines::new(syntax, theme);
         let highlighted = highlighter
             .highlight_line(line, &self.syntaxes)
             .unwrap_or_default();
@@ -1237,6 +1543,52 @@ fn truncate(text: &str, max_chars: usize) -> String {
     out
 }
 
+fn align_with_right(left: &str, right: &str, width: usize) -> String {
+    if right.is_empty() {
+        return truncate(left, width.max(1));
+    }
+
+    let left_width = left.chars().count();
+    let right_width = right.chars().count();
+    if left_width + right_width + 1 >= width {
+        return format!(
+            "{} {}",
+            truncate(left, width.saturating_sub(right_width + 1)),
+            right
+        );
+    }
+
+    let spaces = " ".repeat(width - left_width - right_width);
+    format!("{}{}{}", left, spaces, right)
+}
+
+fn format_relative_time(timestamp: i64, now: i64) -> String {
+    let delta = now.saturating_sub(timestamp).max(0);
+    if delta < 60 {
+        format!("{}s ago", delta)
+    } else if delta < 3_600 {
+        format!("{}m ago", delta / 60)
+    } else if delta < 86_400 {
+        format!("{}h ago", delta / 3_600)
+    } else if delta < 2_592_000 {
+        format!("{}d ago", delta / 86_400)
+    } else if delta < 31_536_000 {
+        format!("{}mo ago", delta / 2_592_000)
+    } else {
+        format!("{}y ago", delta / 31_536_000)
+    }
+}
+
+fn raw_diff_text(line: &HunkLine) -> String {
+    let prefix = match line.kind {
+        DiffLineKind::Add => '+',
+        DiffLineKind::Remove => '-',
+        DiffLineKind::Context => ' ',
+        DiffLineKind::Meta => '~',
+    };
+    format!("{}{}", prefix, line.text)
+}
+
 fn selected_ids_oldest_first(rows: &[CommitRow]) -> Vec<String> {
     rows.iter()
         .rev()
@@ -1248,24 +1600,47 @@ fn selected_ids_oldest_first(rows: &[CommitRow]) -> Vec<String> {
 fn apply_range_selection(rows: &mut [CommitRow], start: usize, end: usize) {
     let (start, end) = (min(start, end), max(start, end));
     for (idx, row) in rows.iter_mut().enumerate() {
-        row.selected = !row.approved && idx >= start && idx <= end;
+        row.selected = idx >= start && idx <= end;
     }
 }
 
-fn apply_approved_ids(rows: &mut [CommitRow], ids: &BTreeSet<String>) {
+fn apply_status_ids(rows: &mut [CommitRow], ids: &BTreeSet<String>, status: ReviewStatus) {
     for row in rows {
         if ids.contains(&row.info.id) {
-            row.approved = true;
-            row.selected = false;
+            row.status = status;
         }
     }
+}
+
+fn status_badge(status: ReviewStatus, theme: &UiTheme) -> Span<'static> {
+    match status {
+        ReviewStatus::Unreviewed => Span::styled(
+            "UNREVIEWED",
+            Style::default()
+                .fg(theme.unreviewed)
+                .add_modifier(Modifier::BOLD),
+        ),
+        ReviewStatus::Reviewed => Span::styled("REVIEWED", Style::default().fg(theme.reviewed)),
+        ReviewStatus::IssueFound => Span::styled(
+            "ISSUE_FOUND",
+            Style::default()
+                .fg(theme.issue)
+                .add_modifier(Modifier::BOLD),
+        ),
+        ReviewStatus::Resolved => Span::styled("RESOLVED", Style::default().fg(theme.resolved)),
+    }
+}
+
+fn page_step(height: u16, multiplier: f32) -> isize {
+    let visible = height.saturating_sub(2).max(1) as f32;
+    (visible * multiplier).round() as isize
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn commit_row(id: &str, selected: bool, approved: bool) -> CommitRow {
+    fn commit_row(id: &str, selected: bool, status: ReviewStatus) -> CommitRow {
         CommitRow {
             info: CommitInfo {
                 id: id.to_owned(),
@@ -1276,7 +1651,7 @@ mod tests {
                 unpushed: true,
             },
             selected,
-            approved,
+            status,
         }
     }
 
@@ -1293,8 +1668,8 @@ mod tests {
     #[test]
     fn file_tree_builds_directories_and_files() {
         let mut tree = FileTree::default();
-        tree.insert("src/app.rs");
-        tree.insert("src/ui/view.rs");
+        tree.insert("src/app.rs", 100);
+        tree.insert("src/ui/view.rs", 200);
         let rows = tree.flattened_rows();
 
         assert!(rows.iter().any(|r| r.label.contains("[D] src")));
@@ -1323,9 +1698,9 @@ mod tests {
     #[test]
     fn selected_ids_are_reported_oldest_first() {
         let rows = vec![
-            commit_row("newest", true, false),
-            commit_row("middle", false, false),
-            commit_row("oldest", true, false),
+            commit_row("newest", true, ReviewStatus::Unreviewed),
+            commit_row("middle", false, ReviewStatus::Reviewed),
+            commit_row("oldest", true, ReviewStatus::Unreviewed),
         ];
         assert_eq!(
             selected_ids_oldest_first(&rows),
@@ -1334,40 +1709,40 @@ mod tests {
     }
 
     #[test]
-    fn range_selection_skips_already_approved_commits() {
-        let mut rows = vec![
-            commit_row("a", false, false),
-            commit_row("b", false, true),
-            commit_row("c", false, false),
-        ];
-        apply_range_selection(&mut rows, 0, 2);
-
-        assert!(rows[0].selected);
-        assert!(!rows[1].selected);
-        assert!(rows[2].selected);
-    }
-
-    #[test]
     fn range_selection_handles_reverse_bounds() {
         let mut rows = vec![
-            commit_row("a", false, false),
-            commit_row("b", false, false),
-            commit_row("c", false, false),
+            commit_row("a", false, ReviewStatus::Unreviewed),
+            commit_row("b", false, ReviewStatus::Reviewed),
+            commit_row("c", false, ReviewStatus::Unreviewed),
         ];
         apply_range_selection(&mut rows, 2, 0);
         assert!(rows.iter().all(|row| row.selected));
     }
 
     #[test]
-    fn apply_approved_ids_marks_rows_and_clears_selection() {
-        let mut rows = vec![commit_row("a", true, false), commit_row("b", true, false)];
+    fn apply_status_ids_changes_only_targeted_commits() {
+        let mut rows = vec![
+            commit_row("a", true, ReviewStatus::Unreviewed),
+            commit_row("b", true, ReviewStatus::Reviewed),
+        ];
         let ids = BTreeSet::from(["b".to_owned()]);
 
-        apply_approved_ids(&mut rows, &ids);
+        apply_status_ids(&mut rows, &ids, ReviewStatus::IssueFound);
 
-        assert!(rows[0].selected);
-        assert!(!rows[0].approved);
-        assert!(!rows[1].selected);
-        assert!(rows[1].approved);
+        assert_eq!(rows[0].status, ReviewStatus::Unreviewed);
+        assert_eq!(rows[1].status, ReviewStatus::IssueFound);
+    }
+
+    #[test]
+    fn align_with_right_keeps_right_text_visible() {
+        let rendered = align_with_right("[F] file.rs", "3h ago", 24);
+        assert!(rendered.ends_with("3h ago"));
+    }
+
+    #[test]
+    fn relative_time_formats_expected_units() {
+        assert_eq!(format_relative_time(100, 130), "30s ago");
+        assert_eq!(format_relative_time(100, 220), "2m ago");
+        assert_eq!(format_relative_time(100, 3700), "1h ago");
     }
 }

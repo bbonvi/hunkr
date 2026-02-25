@@ -7,7 +7,7 @@ use std::{
 use anyhow::Context;
 use chrono::Utc;
 
-use crate::model::CommentAnchor;
+use crate::model::CommentTarget;
 
 const COMMENTS_DIR: &str = "comments";
 
@@ -30,7 +30,7 @@ impl CommentStore {
         }
     }
 
-    pub fn append(&mut self, anchor: &CommentAnchor, text: &str) -> anyhow::Result<PathBuf> {
+    pub fn append(&mut self, target: &CommentTarget, text: &str) -> anyhow::Result<PathBuf> {
         fs::create_dir_all(&self.root)
             .with_context(|| format!("failed to create {}", self.root.display()))?;
 
@@ -52,29 +52,47 @@ impl CommentStore {
             .open(&file_path)
             .with_context(|| format!("failed to open {}", file_path.display()))?;
 
-        let now = Utc::now().to_rfc3339();
-        let line_anchor = match (anchor.old_lineno, anchor.new_lineno) {
-            (Some(old), Some(new)) => format!("old {} / new {}", old, new),
-            (Some(old), None) => format!("old {}", old),
-            (None, Some(new)) => format!("new {}", new),
-            (None, None) => "n/a".to_owned(),
-        };
-
         writeln!(file, "## Comment {}", self.counter).context("failed to write comment heading")?;
-        writeln!(file, "- Time: {}", now).context("failed to write time")?;
+        writeln!(file, "- Time: {}", Utc::now().to_rfc3339()).context("failed to write time")?;
+        writeln!(file, "- File: `{}`", target.start.file_path).context("failed to write file")?;
         writeln!(
             file,
-            "- Commit: `{}` - {}",
-            anchor.commit_id, anchor.commit_summary
+            "- Commits: {}",
+            target
+                .commits
+                .iter()
+                .map(|id| format!("`{}`", id))
+                .collect::<Vec<_>>()
+                .join(", ")
         )
-        .context("failed to write commit")?;
-        writeln!(file, "- File: `{}`", anchor.file_path).context("failed to write file path")?;
-        writeln!(file, "- Hunk: `{}`", anchor.hunk_header).context("failed to write hunk")?;
-        writeln!(file, "- Line: `{}`", line_anchor).context("failed to write line anchor")?;
+        .context("failed to write commits")?;
+        writeln!(
+            file,
+            "- Start: `{}` ({})",
+            target.start.hunk_header,
+            format_anchor_lines(target.start.old_lineno, target.start.new_lineno)
+        )
+        .context("failed to write start")?;
+        writeln!(
+            file,
+            "- End: `{}` ({})",
+            target.end.hunk_header,
+            format_anchor_lines(target.end.old_lineno, target.end.new_lineno)
+        )
+        .context("failed to write end")?;
         writeln!(file).context("failed to write spacing")?;
         writeln!(file, "{}", text.trim()).context("failed to write comment text")?;
-        writeln!(file).context("failed to write trailing newline")?;
 
+        if !target.selected_lines.is_empty() {
+            writeln!(file).context("failed to write spacing")?;
+            writeln!(file, "```diff").context("failed to write code fence")?;
+            for line in &target.selected_lines {
+                writeln!(file, "{}", line).context("failed to write selected line")?;
+            }
+            writeln!(file, "```").context("failed to close code fence")?;
+        }
+
+        writeln!(file).context("failed to write trailing newline")?;
         Ok(file_path)
     }
 
@@ -93,6 +111,15 @@ impl CommentStore {
     }
 }
 
+fn format_anchor_lines(old_lineno: Option<u32>, new_lineno: Option<u32>) -> String {
+    match (old_lineno, new_lineno) {
+        (Some(old), Some(new)) => format!("old {} / new {}", old, new),
+        (Some(old), None) => format!("old {}", old),
+        (None, Some(new)) => format!("new {}", new),
+        (None, None) => "n/a".to_owned(),
+    }
+}
+
 fn sanitize(input: &str) -> String {
     input
         .chars()
@@ -106,9 +133,12 @@ fn sanitize(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use tempfile::tempdir;
 
     use super::*;
+    use crate::model::CommentAnchor;
 
     #[test]
     fn append_creates_one_session_file() {
@@ -122,10 +152,16 @@ mod tests {
             old_lineno: Some(1),
             new_lineno: Some(8),
         };
+        let target = CommentTarget {
+            start: anchor.clone(),
+            end: anchor,
+            commits: BTreeSet::from(["abc1234".to_owned()]),
+            selected_lines: vec!["+let x = 1;".to_owned(), "-let x = 0;".to_owned()],
+        };
 
-        let first = store.append(&anchor, "Need better naming").expect("append");
+        let first = store.append(&target, "Need better naming").expect("append");
         let second = store
-            .append(&anchor, "Also split this function")
+            .append(&target, "Also split this function")
             .expect("append");
 
         assert_eq!(first, second);
@@ -134,5 +170,13 @@ mod tests {
         assert!(content.contains("## Comment 1"));
         assert!(content.contains("## Comment 2"));
         assert!(content.contains("Need better naming"));
+        assert!(content.contains("```diff"));
+        assert!(content.contains("+let x = 1;"));
+    }
+
+    #[test]
+    fn format_anchor_lines_works() {
+        assert_eq!(format_anchor_lines(Some(1), Some(2)), "old 1 / new 2");
+        assert_eq!(format_anchor_lines(None, None), "n/a");
     }
 }

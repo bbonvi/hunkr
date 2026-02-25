@@ -218,6 +218,7 @@ impl GitService {
                         commit_id: commit_id.clone(),
                         commit_short: short.clone(),
                         commit_summary: summary.clone(),
+                        commit_timestamp: commit.time().seconds(),
                         header: String::from_utf8_lossy(hunk.header())
                             .trim_end_matches('\n')
                             .to_owned(),
@@ -238,6 +239,7 @@ impl GitService {
                             commit_id: commit_id.clone(),
                             commit_short: short.clone(),
                             commit_summary: summary.clone(),
+                            commit_timestamp: commit.time().seconds(),
                             header: "@@ -0,0 +0,0 @@".to_owned(),
                             old_start: 0,
                             new_start: 0,
@@ -278,6 +280,7 @@ impl GitService {
                     commit_id: commit_id.clone(),
                     commit_short: short.clone(),
                     commit_summary: summary.clone(),
+                    commit_timestamp: commit.time().seconds(),
                     header: "@@ binary @@".to_owned(),
                     old_start: 0,
                     new_start: 0,

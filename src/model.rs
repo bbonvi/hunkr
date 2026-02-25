@@ -1,35 +1,48 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-/// Scope used when a reviewer approves one or more commits.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ApprovalScope {
-    Commit,
-    Selection,
-    Branch,
+/// Workflow status for each commit in review.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReviewStatus {
+    Unreviewed,
+    Reviewed,
+    IssueFound,
+    Resolved,
 }
 
-/// Approval metadata persisted per commit id.
+impl ReviewStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unreviewed => "UNREVIEWED",
+            Self::Reviewed => "REVIEWED",
+            Self::IssueFound => "ISSUE_FOUND",
+            Self::Resolved => "RESOLVED",
+        }
+    }
+}
+
+/// Persisted status metadata for one commit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApprovalEntry {
-    pub scope: ApprovalScope,
+pub struct CommitStatusEntry {
+    pub status: ReviewStatus,
     pub branch: String,
-    pub approved_at: String,
+    pub updated_at: String,
 }
 
 /// Persistent review state for one project.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReviewState {
     pub version: u32,
-    pub approvals: BTreeMap<String, ApprovalEntry>,
+    pub statuses: BTreeMap<String, CommitStatusEntry>,
 }
 
 impl Default for ReviewState {
     fn default() -> Self {
         Self {
-            version: 1,
-            approvals: BTreeMap::new(),
+            version: 2,
+            statuses: BTreeMap::new(),
         }
     }
 }
@@ -69,6 +82,7 @@ pub struct Hunk {
     pub commit_id: String,
     pub commit_short: String,
     pub commit_summary: String,
+    pub commit_timestamp: i64,
     pub header: String,
     pub old_start: u32,
     pub new_start: u32,
@@ -103,4 +117,13 @@ pub struct CommentAnchor {
     pub hunk_header: String,
     pub old_lineno: Option<u32>,
     pub new_lineno: Option<u32>,
+}
+
+/// Comment target can be a single line or a visual range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommentTarget {
+    pub start: CommentAnchor,
+    pub end: CommentAnchor,
+    pub commits: BTreeSet<String>,
+    pub selected_lines: Vec<String>,
 }
