@@ -2099,10 +2099,10 @@ fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {
 
 fn status_short_label(status: ReviewStatus) -> &'static str {
     match status {
-        ReviewStatus::Unreviewed => "UNREV",
-        ReviewStatus::Reviewed => "REVIEW",
-        ReviewStatus::IssueFound => "ISSUE",
-        ReviewStatus::Resolved => "DONE",
+        ReviewStatus::Unreviewed => "UNREVIEWED",
+        ReviewStatus::Reviewed => "REVIEWED",
+        ReviewStatus::IssueFound => "ISSUE_FOUND",
+        ReviewStatus::Resolved => "RESOLVED",
     }
 }
 
@@ -2618,6 +2618,14 @@ mod tests {
             .map(|s| s.content.to_string())
             .collect::<String>();
         assert!(flattened.ends_with("1h ago"));
+    }
+
+    #[test]
+    fn status_badges_use_exact_workflow_labels() {
+        assert_eq!(status_short_label(ReviewStatus::Unreviewed), "UNREVIEWED");
+        assert_eq!(status_short_label(ReviewStatus::Reviewed), "REVIEWED");
+        assert_eq!(status_short_label(ReviewStatus::IssueFound), "ISSUE_FOUND");
+        assert_eq!(status_short_label(ReviewStatus::Resolved), "RESOLVED");
     }
 
     #[test]
