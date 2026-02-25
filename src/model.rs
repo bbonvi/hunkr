@@ -119,9 +119,29 @@ pub struct CommentAnchor {
     pub new_lineno: Option<u32>,
 }
 
+/// Scope of a review comment target.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CommentTargetKind {
+    Commit,
+    #[default]
+    Hunk,
+}
+
+impl CommentTargetKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Commit => "COMMIT",
+            Self::Hunk => "HUNK",
+        }
+    }
+}
+
 /// Comment target can be a single line or a visual range.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommentTarget {
+    #[serde(default)]
+    pub kind: CommentTargetKind,
     pub start: CommentAnchor,
     pub end: CommentAnchor,
     pub commits: BTreeSet<String>,

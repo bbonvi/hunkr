@@ -23,14 +23,15 @@ use crate::{
     comments::CommentStore,
     git_data::GitService,
     model::{
-        AggregatedDiff, CommentAnchor, CommentTarget, CommitInfo, DiffLineKind, FilePatch,
-        HunkLine, ReviewComment, ReviewState, ReviewStatus,
+        AggregatedDiff, CommentAnchor, CommentTarget, CommentTargetKind, CommitInfo, DiffLineKind,
+        FilePatch, HunkLine, ReviewComment, ReviewState, ReviewStatus,
     },
     store::StateStore,
 };
 
 const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
+const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -668,7 +669,7 @@ impl App {
                 self.input_mode = InputMode::CommentCreate;
                 self.comment_buffer.clear();
                 self.status =
-                    "Comment mode: type comment, Enter save, Esc cancel (supports visual range)"
+                    "Comment mode: type comment, Enter save, Esc cancel (commit/hunk/range)"
                         .to_owned();
             }
             KeyCode::Char('e') => {
@@ -1064,7 +1065,7 @@ impl App {
             ]),
             Line::from(vec![
                 key_chip("m", theme),
-                Span::raw(" add comment to cursor/range"),
+                Span::raw(" add comment to commit/hunk/range"),
             ]),
             Line::from(vec![
                 key_chip("e", theme),
@@ -1250,8 +1251,17 @@ impl App {
             .filter(|comment| comment.target.end.file_path == patch.path)
             .collect();
         let mut last_commit_banner: Option<String> = None;
+        let mut inserted_commit_comments = BTreeSet::new();
 
         for hunk in &patch.hunks {
+            let commit_anchor = CommentAnchor {
+                commit_id: hunk.commit_id.clone(),
+                commit_summary: hunk.commit_summary.clone(),
+                file_path: patch.path.clone(),
+                hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+                old_lineno: None,
+                new_lineno: None,
+            };
             if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
                 let age = format_relative_time(hunk.commit_timestamp, now_ts);
                 let commit_line = format!(
@@ -1274,9 +1284,23 @@ impl App {
                         Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
                     ]),
                     raw_text: commit_line,
-                    anchor: None,
+                    anchor: Some(commit_anchor.clone()),
                     comment_id: None,
                 });
+
+                let mut commit_comments: Vec<&ReviewComment> = file_comments
+                    .iter()
+                    .copied()
+                    .filter(|comment| {
+                        comment_targets_commit_end(comment, &patch.path, &hunk.commit_id)
+                    })
+                    .collect();
+                commit_comments.sort_by_key(|comment| comment.id);
+                for comment in commit_comments {
+                    if inserted_commit_comments.insert(comment.id) {
+                        push_comment_lines(&mut rendered, comment, &theme, now_ts);
+                    }
+                }
             }
             last_commit_banner = Some(hunk.commit_id.clone());
 
@@ -1713,31 +1737,62 @@ impl App {
 
     fn comment_target_from_selection(&self) -> Option<CommentTarget> {
         let (start_idx, end_idx) = self.diff_selected_range()?;
-        let mut anchors = Vec::new();
-        let mut selected_lines = Vec::new();
-        let mut commits = BTreeSet::new();
+        let mut commit_anchors = Vec::new();
+        let mut hunk_anchors = Vec::new();
+        let mut commit_lines = Vec::new();
+        let mut hunk_lines = Vec::new();
 
         for idx in start_idx..=end_idx {
             let Some(line) = self.rendered_diff.get(idx) else {
                 continue;
             };
             if let Some(anchor) = &line.anchor {
-                commits.insert(anchor.commit_id.clone());
-                anchors.push(anchor.clone());
-                if !line.raw_text.trim().is_empty() {
-                    selected_lines.push(line.raw_text.clone());
+                if is_commit_anchor(anchor) {
+                    commit_anchors.push(anchor.clone());
+                    if !line.raw_text.trim().is_empty() {
+                        commit_lines.push(line.raw_text.clone());
+                    }
+                } else {
+                    hunk_anchors.push(anchor.clone());
+                    if !line.raw_text.trim().is_empty() {
+                        hunk_lines.push(line.raw_text.clone());
+                    }
                 }
             }
         }
 
-        let start = anchors.first()?.clone();
-        let end = anchors.last()?.clone();
+        if hunk_anchors.is_empty() && commit_anchors.is_empty() {
+            return None;
+        }
+
+        if hunk_anchors.is_empty() {
+            let anchor = commit_anchors.last()?.clone();
+            return Some(CommentTarget {
+                kind: CommentTargetKind::Commit,
+                start: anchor.clone(),
+                end: anchor.clone(),
+                commits: BTreeSet::from([anchor.commit_id.clone()]),
+                selected_lines: if commit_lines.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![commit_lines.last()?.clone()]
+                },
+            });
+        }
+
+        let start = hunk_anchors.first()?.clone();
+        let end = hunk_anchors.last()?.clone();
+        let commits = hunk_anchors
+            .iter()
+            .map(|anchor| anchor.commit_id.clone())
+            .collect::<BTreeSet<_>>();
 
         Some(CommentTarget {
+            kind: CommentTargetKind::Hunk,
             start,
             end,
             commits,
-            selected_lines,
+            selected_lines: hunk_lines,
         })
     }
 
@@ -2104,6 +2159,10 @@ fn push_comment_lines(
                     .fg(theme.focus_border)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(
+                format!("[{}] ", comment.target.kind.as_str()),
+                Style::default().fg(theme.accent),
+            ),
             Span::styled(location, Style::default().fg(theme.muted)),
             Span::raw(" "),
             Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
@@ -2136,13 +2195,26 @@ fn comment_anchor_matches(actual: &CommentAnchor, expected: &CommentAnchor) -> b
         && actual.new_lineno == expected.new_lineno
 }
 
+fn is_commit_anchor(anchor: &CommentAnchor) -> bool {
+    anchor.hunk_header == COMMIT_ANCHOR_HEADER
+        && anchor.old_lineno.is_none()
+        && anchor.new_lineno.is_none()
+}
+
+fn comment_targets_commit_end(comment: &ReviewComment, path: &str, commit_id: &str) -> bool {
+    comment.target.kind == CommentTargetKind::Commit
+        && comment.target.end.file_path == path
+        && comment.target.end.commit_id == commit_id
+}
+
 fn comment_targets_hunk_end(
     comment: &ReviewComment,
     path: &str,
     commit_id: &str,
     hunk_header: &str,
 ) -> bool {
-    comment.target.end.file_path == path
+    comment.target.kind == CommentTargetKind::Hunk
+        && comment.target.end.file_path == path
         && comment.target.end.commit_id == commit_id
         && comment.target.end.hunk_header == hunk_header
 }
@@ -2157,6 +2229,17 @@ fn format_anchor_lines(old_lineno: Option<u32>, new_lineno: Option<u32>) -> Stri
 }
 
 fn comment_location_label(comment: &ReviewComment) -> String {
+    if comment.target.kind == CommentTargetKind::Commit {
+        let short = comment
+            .target
+            .end
+            .commit_id
+            .chars()
+            .take(7)
+            .collect::<String>();
+        return format!("commit {short}");
+    }
+
     let start = format_anchor_lines(
         comment.target.start.old_lineno,
         comment.target.start.new_lineno,
@@ -2243,10 +2326,27 @@ mod tests {
         ReviewComment {
             id: 7,
             target: CommentTarget {
+                kind: CommentTargetKind::Hunk,
                 start,
                 end,
                 commits: BTreeSet::from(["abc".to_owned()]),
                 selected_lines: vec!["+x".to_owned()],
+            },
+            text: text.to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
+        }
+    }
+
+    fn sample_commit_comment(anchor: CommentAnchor, text: &str) -> ReviewComment {
+        ReviewComment {
+            id: 9,
+            target: CommentTarget {
+                kind: CommentTargetKind::Commit,
+                start: anchor.clone(),
+                end: anchor.clone(),
+                commits: BTreeSet::from([anchor.commit_id.clone()]),
+                selected_lines: vec!["---- commit abc1234 add parser (1m ago)".to_owned()],
             },
             text: text.to_owned(),
             created_at: "2026-01-01T00:00:00Z".to_owned(),
@@ -2394,6 +2494,27 @@ mod tests {
     }
 
     #[test]
+    fn commit_anchor_marker_is_detected() {
+        let commit_anchor = CommentAnchor {
+            commit_id: "abc1234".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+            old_lineno: None,
+            new_lineno: None,
+        };
+        let hunk_anchor = CommentAnchor {
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+            ..commit_anchor.clone()
+        };
+
+        assert!(is_commit_anchor(&commit_anchor));
+        assert!(!is_commit_anchor(&hunk_anchor));
+    }
+
+    #[test]
     fn comment_anchor_match_requires_exact_line_mapping() {
         let base = CommentAnchor {
             commit_id: "abc".to_owned(),
@@ -2432,6 +2553,45 @@ mod tests {
             comment_location_label(&comment),
             "range old 1/new 1 -> old 3/new 4"
         );
+    }
+
+    #[test]
+    fn comment_location_formats_commit_targets() {
+        let anchor = CommentAnchor {
+            commit_id: "abc1234deadbeef".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+            old_lineno: None,
+            new_lineno: None,
+        };
+        let comment = sample_commit_comment(anchor, "commit-level note");
+
+        assert_eq!(comment_location_label(&comment), "commit abc1234");
+    }
+
+    #[test]
+    fn comment_commit_membership_uses_commit_anchor() {
+        let anchor = CommentAnchor {
+            commit_id: "abc1234deadbeef".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+            old_lineno: None,
+            new_lineno: None,
+        };
+        let comment = sample_commit_comment(anchor, "commit-level note");
+
+        assert!(comment_targets_commit_end(
+            &comment,
+            "src/lib.rs",
+            "abc1234deadbeef"
+        ));
+        assert!(!comment_targets_commit_end(
+            &comment,
+            "src/lib.rs",
+            "fffffff"
+        ));
     }
 
     #[test]

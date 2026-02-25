@@ -7,7 +7,7 @@ use std::{
 use anyhow::Context;
 use chrono::Utc;
 
-use crate::model::{CommentTarget, ReviewComment};
+use crate::model::{CommentTarget, CommentTargetKind, ReviewComment};
 
 const COMMENTS_DIR: &str = "comments";
 const COMMENTS_INDEX_FILE: &str = "index.json";
@@ -139,6 +139,8 @@ impl CommentStore {
             .context("failed to write event heading")?;
         writeln!(file, "- Time: {}", Utc::now().to_rfc3339()).context("failed to write time")?;
         writeln!(file, "- Comment ID: `#{}`", comment.id).context("failed to write id")?;
+        writeln!(file, "- Target: {}", comment.target.kind.as_str())
+            .context("failed to write target")?;
         writeln!(file, "- File: `{}`", comment.target.start.file_path)
             .context("failed to write file")?;
         writeln!(
@@ -153,6 +155,14 @@ impl CommentStore {
                 .join(", ")
         )
         .context("failed to write commits")?;
+        if comment.target.kind == CommentTargetKind::Commit {
+            writeln!(
+                file,
+                "- Commit Summary: {}",
+                comment.target.start.commit_summary
+            )
+            .context("failed to write commit summary")?;
+        }
         writeln!(
             file,
             "- Start: `{}` ({})",
@@ -242,7 +252,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::model::CommentAnchor;
+    use crate::model::{CommentAnchor, CommentTargetKind};
 
     fn make_target() -> CommentTarget {
         let anchor = CommentAnchor {
@@ -254,6 +264,7 @@ mod tests {
             new_lineno: Some(8),
         };
         CommentTarget {
+            kind: CommentTargetKind::Hunk,
             start: anchor.clone(),
             end: anchor,
             commits: BTreeSet::from(["abc1234".to_owned()]),
@@ -288,5 +299,48 @@ mod tests {
     fn format_anchor_lines_works() {
         assert_eq!(format_anchor_lines(Some(1), Some(2)), "old 1 / new 2");
         assert_eq!(format_anchor_lines(None, None), "n/a");
+    }
+
+    #[test]
+    fn legacy_comment_index_without_kind_defaults_to_hunk() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path().join(COMMENTS_DIR);
+        fs::create_dir_all(&root).expect("mkdir comments");
+        let index = root.join(COMMENTS_INDEX_FILE);
+        let legacy = r#"
+[
+  {
+    "id": 1,
+    "target": {
+      "start": {
+        "commit_id": "abc1234",
+        "commit_summary": "summary",
+        "file_path": "src/lib.rs",
+        "hunk_header": "@@ -1,1 +1,1 @@",
+        "old_lineno": 1,
+        "new_lineno": 1
+      },
+      "end": {
+        "commit_id": "abc1234",
+        "commit_summary": "summary",
+        "file_path": "src/lib.rs",
+        "hunk_header": "@@ -1,1 +1,1 @@",
+        "old_lineno": 1,
+        "new_lineno": 1
+      },
+      "commits": ["abc1234"],
+      "selected_lines": ["+x"]
+    },
+    "text": "legacy",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z"
+  }
+]
+"#;
+        fs::write(index, legacy).expect("write legacy index");
+
+        let store = CommentStore::new(tmp.path(), "main").expect("load");
+        let comment = store.comments().first().expect("comment");
+        assert_eq!(comment.target.kind, CommentTargetKind::Hunk);
     }
 }

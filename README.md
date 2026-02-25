@@ -27,6 +27,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Inline key hints are contextual to the focused pane
 - Hunk comments are rendered inline in the diff and can be edited/deleted in place
 - Hunk comments can be anchored to commit/file/hunk/line or visual range and auto-export to Markdown
+- Commit-header comments are supported in diff viewer (comment directly on commit banner lines)
 
 ## Data storage
 
@@ -35,6 +36,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - `.hunkr/state.json`: persisted commit statuses
 - `.hunkr/comments/index.json`: persisted comment index for inline rendering/edit/delete
 - `.hunkr/comments/<timestamp>-<branch>-review.md`: review comment sessions
+- Markdown events explicitly label target type (`COMMIT` vs `HUNK`)
 
 This storage is project-local and independent of Git remotes.
 
@@ -71,7 +73,7 @@ Diff pane:
 - `Ctrl-d` / `Ctrl-u`: half-page scroll
 - `PageDown` / `PageUp`: page scroll
 - `v` / `V`: visual line-range selection
-- `m`: add comment for current anchor or selected visual range
+- `m`: add comment for current commit/hunk anchor or selected visual range
 - `e`: edit comment under cursor
 - `D`: delete comment under cursor
 
