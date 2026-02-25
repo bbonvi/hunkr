@@ -32,6 +32,8 @@ use crate::{
 const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
+const LIST_HIGHLIGHT_SYMBOL: &str = ">> ";
+const LIST_HIGHLIGHT_SYMBOL_WIDTH: u16 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -763,7 +765,7 @@ impl App {
             Style::default().fg(theme.border)
         };
 
-        let width = rect.width.saturating_sub(4) as usize;
+        let width = list_content_width(rect.width);
         let now_ts = Utc::now().timestamp();
 
         let items: Vec<ListItem<'static>> = self
@@ -800,7 +802,7 @@ impl App {
                     .border_style(border_style),
             )
             .highlight_style(Style::default().bg(theme.highlight_bg))
-            .highlight_symbol(">> ");
+            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
 
         frame.render_stateful_widget(list, rect, &mut self.file_list_state);
     }
@@ -836,7 +838,7 @@ impl App {
             Style::default().fg(theme.border)
         };
 
-        let width = rect.width.saturating_sub(4) as usize;
+        let width = list_content_width(rect.width);
         let now_ts = Utc::now().timestamp();
         let items: Vec<ListItem<'static>> = self
             .commits
@@ -853,7 +855,7 @@ impl App {
                     .border_style(border_style),
             )
             .highlight_style(Style::default().bg(theme.highlight_bg))
-            .highlight_symbol(">> ");
+            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
 
         frame.render_stateful_widget(list, rect, &mut self.commit_list_state);
     }
@@ -1645,12 +1647,32 @@ impl App {
         );
 
         apply_status_transition(&mut self.commits, ids, status);
+        let mut comment_cleanup_error = None;
+        let removed_comments = if auto_deselect_status(status) {
+            let reason = format!("Auto-removed: commit marked {}", status.as_str());
+            match self.comments.delete_comments_for_commits(ids, &reason) {
+                Ok(count) => count,
+                Err(err) => {
+                    comment_cleanup_error = Some(err);
+                    0
+                }
+            }
+        } else {
+            0
+        };
+
         let save_result = self.store.save(&self.review_state);
-        let status_message = if let Err(err) = save_result {
+        let mut status_message = if let Err(err) = save_result {
             format!("failed to persist status change: {err:#}")
         } else {
             format!("{} commit(s) -> {}", ids.len(), status.as_str())
         };
+        if removed_comments > 0 {
+            status_message.push_str(&format!(", {} comment(s) cleared", removed_comments));
+        }
+        if let Some(err) = comment_cleanup_error {
+            status_message.push_str(&format!(", comment cleanup failed: {err:#}"));
+        }
 
         if status != ReviewStatus::Unreviewed {
             self.commit_visual_anchor = None;
@@ -1999,6 +2021,12 @@ fn line_with_right(
         Span::raw(spaces),
         Span::styled(right, right_style),
     ])
+}
+
+fn list_content_width(rect_width: u16) -> usize {
+    rect_width
+        .saturating_sub(2 + LIST_HIGHLIGHT_SYMBOL_WIDTH)
+        .max(1) as usize
 }
 
 fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {
@@ -2402,6 +2430,12 @@ mod tests {
         assert_eq!(list_index_at(0, rect, 3), None);
         assert_eq!(list_index_at(5, rect, 3), None);
         assert_eq!(list_index_at(1, rect, 3), Some(3));
+    }
+
+    #[test]
+    fn list_content_width_accounts_for_border_and_highlight_symbol() {
+        assert_eq!(list_content_width(20), 15);
+        assert_eq!(list_content_width(4), 1);
     }
 
     #[test]

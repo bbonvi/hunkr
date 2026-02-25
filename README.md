@@ -19,6 +19,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Review statuses: `UNREVIEWED`, `REVIEWED`, `ISSUE_FOUND`, `RESOLVED`
 - Leaving a comment automatically marks referenced commit(s) as `ISSUE_FOUND`
 - Commit status can be changed from any status to any status
+- Commits moved to `REVIEWED` or `RESOLVED` are auto-deselected and their linked comments are auto-cleared
 - Unreviewed/issue/resolved/reviewed are explicitly badged in commit list
 - File-switch memory: each file remembers last diff cursor/scroll position
 - File tree shows relative last-modified time (from latest selected commit touching the file)

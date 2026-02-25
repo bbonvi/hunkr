@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -101,6 +102,41 @@ impl CommentStore {
         self.save_index()?;
         self.append_markdown_event("DELETE", &removed, Some("Comment removed"))?;
         Ok(true)
+    }
+
+    pub fn delete_comments_for_commits(
+        &mut self,
+        commit_ids: &BTreeSet<String>,
+        reason: &str,
+    ) -> anyhow::Result<usize> {
+        if commit_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut removed = Vec::new();
+        self.comments.retain(|comment| {
+            let should_remove = comment
+                .target
+                .commits
+                .iter()
+                .any(|commit_id| commit_ids.contains(commit_id));
+            if should_remove {
+                removed.push(comment.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        if removed.is_empty() {
+            return Ok(0);
+        }
+
+        self.save_index()?;
+        for comment in &removed {
+            self.append_markdown_event("DELETE", comment, Some(reason))?;
+        }
+        Ok(removed.len())
     }
 
     fn save_index(&self) -> anyhow::Result<()> {
@@ -255,8 +291,12 @@ mod tests {
     use crate::model::{CommentAnchor, CommentTargetKind};
 
     fn make_target() -> CommentTarget {
+        make_target_for_commit("abc1234")
+    }
+
+    fn make_target_for_commit(commit_id: &str) -> CommentTarget {
         let anchor = CommentAnchor {
-            commit_id: "abc1234".to_string(),
+            commit_id: commit_id.to_string(),
             commit_summary: "add parser".to_string(),
             file_path: "src/lib.rs".to_string(),
             hunk_header: "@@ -1,3 +1,8 @@".to_string(),
@@ -267,7 +307,7 @@ mod tests {
             kind: CommentTargetKind::Hunk,
             start: anchor.clone(),
             end: anchor,
-            commits: BTreeSet::from(["abc1234".to_owned()]),
+            commits: BTreeSet::from([commit_id.to_owned()]),
             selected_lines: vec!["+let x = 1;".to_owned(), "-let x = 0;".to_owned()],
         }
     }
@@ -342,5 +382,29 @@ mod tests {
         let store = CommentStore::new(tmp.path(), "main").expect("load");
         let comment = store.comments().first().expect("comment");
         assert_eq!(comment.target.kind, CommentTargetKind::Hunk);
+    }
+
+    #[test]
+    fn delete_comments_for_commits_removes_matching_comments() {
+        let tmp = tempdir().expect("tempdir");
+        let mut store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
+        store
+            .add_comment(&make_target_for_commit("a1"), "first")
+            .expect("add first");
+        store
+            .add_comment(&make_target_for_commit("b2"), "second")
+            .expect("add second");
+        assert_eq!(store.comments().len(), 2);
+
+        let removed = store
+            .delete_comments_for_commits(
+                &BTreeSet::from(["b2".to_owned()]),
+                "Auto-removed: commit marked REVIEWED",
+            )
+            .expect("delete by commit");
+
+        assert_eq!(removed, 1);
+        assert_eq!(store.comments().len(), 1);
+        assert_eq!(store.comments()[0].target.start.commit_id, "a1");
     }
 }
