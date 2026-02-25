@@ -1,0 +1,135 @@
+use std::{fs, path::Path, process::Command};
+
+use hunkr::git_data::GitService;
+use tempfile::tempdir;
+
+#[test]
+fn aggregate_hunks_follow_selected_commit_order() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "src.txt", "let a = 1;\n", "first");
+    commit_file(
+        repo_dir.path(),
+        "src.txt",
+        "let a = 1;\nlet b = 2;\n",
+        "second",
+    );
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[1].id.clone(), history[0].id.clone()];
+
+    let aggregated = service.aggregate_for_commits(&selected).expect("aggregate");
+    let patch = aggregated.files.get("src.txt").expect("src patch");
+
+    let mut order = Vec::new();
+    for h in &patch.hunks {
+        if order.last() != Some(&h.commit_summary) {
+            order.push(h.commit_summary.clone());
+        }
+    }
+
+    assert!(order.len() >= 2);
+    assert_eq!(order[0], "first");
+    assert_eq!(order[1], "second");
+}
+
+#[test]
+fn aggregate_rename_uses_new_file_path() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "old.txt", "hello\n", "add old");
+
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["mv", "old.txt", "new.txt"]));
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["commit", "-m", "rename"]));
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[0].id.clone()];
+
+    let aggregated = service.aggregate_for_commits(&selected).expect("aggregate");
+    let patch = aggregated
+        .files
+        .get("new.txt")
+        .expect("renamed path present");
+
+    assert!(patch.hunks.iter().any(|h| h.commit_summary == "rename"));
+}
+
+#[test]
+fn aggregate_binary_change_emits_placeholder_hunk() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+
+    fs::write(repo_dir.path().join("asset.bin"), [0u8, 159, 146, 150, 0]).expect("write asset");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["add", "asset.bin"]));
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["commit", "-m", "add binary"]));
+
+    fs::write(
+        repo_dir.path().join("asset.bin"),
+        [0u8, 159, 146, 150, 1, 0],
+    )
+    .expect("write asset");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["add", "asset.bin"]));
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["commit", "-m", "update binary"]));
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[0].id.clone()];
+
+    let aggregated = service.aggregate_for_commits(&selected).expect("aggregate");
+    let patch = aggregated
+        .files
+        .get("asset.bin")
+        .expect("binary path present");
+
+    assert!(
+        patch
+            .hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .any(|line| { line.text.contains("binary or metadata-only change") })
+    );
+}
+
+fn init_repo(path: &Path) {
+    run(Command::new("git")
+        .current_dir(path)
+        .args(["init", "-b", "main"]));
+    run(Command::new("git")
+        .current_dir(path)
+        .args(["config", "user.email", "dev@example.com"]));
+    run(Command::new("git")
+        .current_dir(path)
+        .args(["config", "user.name", "Dev"]));
+}
+
+fn commit_file(path: &Path, file: &str, contents: &str, message: &str) {
+    fs::write(path.join(file), contents).expect("write file");
+    run(Command::new("git").current_dir(path).args(["add", file]));
+    run(Command::new("git")
+        .current_dir(path)
+        .args(["commit", "-m", message]));
+}
+
+fn run(cmd: &mut Command) {
+    let output = cmd.output().expect("spawn command");
+    assert!(
+        output.status.success(),
+        "command failed: status={:?}, stderr={} ",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
