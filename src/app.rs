@@ -928,6 +928,44 @@ impl App {
             .scroll((self.diff_position.scroll as u16, 0));
 
         frame.render_widget(paragraph, rect);
+        self.render_diff_scrollbar(frame, rect, theme);
+    }
+
+    fn render_diff_scrollbar(
+        &self,
+        frame: &mut Frame<'_>,
+        rect: ratatui::layout::Rect,
+        theme: &UiTheme,
+    ) {
+        if rect.width < 3 || rect.height < 3 {
+            return;
+        }
+
+        let inner_height = rect.height.saturating_sub(2) as usize;
+        if inner_height == 0 {
+            return;
+        }
+
+        let total = self.rendered_diff.len().max(1);
+        let (thumb_start, thumb_len) =
+            scrollbar_thumb(total, inner_height, self.diff_position.scroll);
+
+        let x = rect.x.saturating_add(rect.width.saturating_sub(2));
+        let y = rect.y.saturating_add(1);
+        let track_style = Style::default().fg(theme.dimmed);
+        let thumb_style = Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD);
+
+        let buffer = frame.buffer_mut();
+        for row in 0..inner_height {
+            buffer.set_string(x, y + row as u16, "│", track_style);
+        }
+        for row in thumb_start..thumb_start.saturating_add(thumb_len) {
+            if row < inner_height {
+                buffer.set_string(x, y + row as u16, "█", thumb_style);
+            }
+        }
     }
 
     fn render_footer(&self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
@@ -2029,6 +2067,26 @@ fn list_content_width(rect_width: u16) -> usize {
         .max(1) as usize
 }
 
+fn scrollbar_thumb(total: usize, viewport: usize, scroll: usize) -> (usize, usize) {
+    if viewport == 0 {
+        return (0, 0);
+    }
+    if total <= viewport {
+        return (0, viewport);
+    }
+
+    let max_scroll = total - viewport;
+    let clamped_scroll = scroll.min(max_scroll);
+    let thumb_len = ((viewport * viewport) / total).clamp(1, viewport);
+    let track_len = viewport - thumb_len;
+    let thumb_start = if max_scroll == 0 {
+        0
+    } else {
+        (clamped_scroll * track_len) / max_scroll
+    };
+    (thumb_start, thumb_len)
+}
+
 fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {
     Span::styled(
         format!(" {} ", label),
@@ -2436,6 +2494,21 @@ mod tests {
     fn list_content_width_accounts_for_border_and_highlight_symbol() {
         assert_eq!(list_content_width(20), 15);
         assert_eq!(list_content_width(4), 1);
+    }
+
+    #[test]
+    fn scrollbar_thumb_fills_viewport_when_content_fits() {
+        assert_eq!(scrollbar_thumb(10, 20, 0), (0, 20));
+    }
+
+    #[test]
+    fn scrollbar_thumb_moves_from_top_to_bottom() {
+        let (start_top, len) = scrollbar_thumb(100, 20, 0);
+        let (start_bottom, len_bottom) = scrollbar_thumb(100, 20, 80);
+        assert_eq!(len, 4);
+        assert_eq!(len_bottom, 4);
+        assert_eq!(start_top, 0);
+        assert_eq!(start_bottom, 16);
     }
 
     #[test]

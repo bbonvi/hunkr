@@ -13,7 +13,8 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - 3-pane TUI:
   - left/top: changed-file tree (only files/directories changed by selected commits)
   - left/bottom: commit history with multi-select and review status
-  - right: syntax-highlighted diff viewer
+- right: syntax-highlighted diff viewer
+- right pane includes a simple vertical scrollbar for quick position awareness
 - Theme modes: dark and light (`dark` by default)
 - Initial default selection: unpushed + unreviewed commits; newly arriving commits are highlighted but not auto-selected
 - Review statuses: `UNREVIEWED`, `REVIEWED`, `ISSUE_FOUND`, `RESOLVED`
