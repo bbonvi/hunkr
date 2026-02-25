@@ -1,9 +1,3 @@
-mod app;
-mod comments;
-mod git_data;
-mod model;
-mod store;
-
 use std::io::{self, Stdout};
 use std::time::Duration;
 
@@ -15,7 +9,7 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::app::App;
+use hunkr::app::App;
 
 fn main() -> anyhow::Result<()> {
     let mut terminal = init_terminal().context("failed to initialize terminal")?;
