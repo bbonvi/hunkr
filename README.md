@@ -31,7 +31,6 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 
 `hunkr` keeps all local data in:
 
-- `.hunkr/state.json`: persisted approval state
 - `.hunkr/state.json`: persisted commit statuses
 - `.hunkr/comments/<timestamp>-<branch>-review.md`: review comment sessions
 
@@ -46,6 +45,7 @@ Global:
 - `Tab` / `h` / `l`: cycle focus between panes
 - `f` / `c` / `d`: jump focus to files/commits/diff
 - `t`: toggle theme
+- `?`: toggle quick-help overlay
 - `F5` / `Ctrl-r`: refresh commits/diffs
 
 Navigation:

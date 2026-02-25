@@ -13,7 +13,7 @@ use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 use syntect::{
     easy::HighlightLines, highlighting::Theme, highlighting::ThemeSet, parsing::SyntaxSet,
@@ -71,6 +71,9 @@ impl ThemeMode {
 struct UiTheme {
     border: Color,
     focus_border: Color,
+    accent: Color,
+    panel_title_bg: Color,
+    panel_title_fg: Color,
     text: Color,
     muted: Color,
     dimmed: Color,
@@ -97,6 +100,9 @@ impl UiTheme {
             ThemeMode::Dark => Self {
                 border: Color::Rgb(68, 68, 68),
                 focus_border: Color::Rgb(221, 189, 40),
+                accent: Color::Rgb(120, 196, 255),
+                panel_title_bg: Color::Rgb(32, 32, 38),
+                panel_title_fg: Color::Rgb(219, 219, 219),
                 text: Color::Rgb(228, 228, 228),
                 muted: Color::Rgb(170, 170, 170),
                 dimmed: Color::Rgb(115, 115, 115),
@@ -119,6 +125,9 @@ impl UiTheme {
             ThemeMode::Light => Self {
                 border: Color::Rgb(195, 195, 195),
                 focus_border: Color::Rgb(169, 120, 0),
+                accent: Color::Rgb(0, 123, 184),
+                panel_title_bg: Color::Rgb(241, 241, 241),
+                panel_title_fg: Color::Rgb(52, 52, 52),
                 text: Color::Rgb(40, 40, 40),
                 muted: Color::Rgb(90, 90, 90),
                 dimmed: Color::Rgb(140, 140, 140),
@@ -208,6 +217,7 @@ pub struct App {
     pane_rects: PaneRects,
     status: String,
     comment_buffer: String,
+    show_help: bool,
     last_refresh: Instant,
     should_quit: bool,
 }
@@ -244,6 +254,7 @@ impl App {
             pane_rects: PaneRects::default(),
             status: String::new(),
             comment_buffer: String::new(),
+            show_help: false,
             last_refresh: Instant::now(),
             should_quit: false,
         };
@@ -267,6 +278,7 @@ impl App {
         let root_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
+                ratatui::layout::Constraint::Length(2),
                 ratatui::layout::Constraint::Min(1),
                 ratatui::layout::Constraint::Length(3),
             ])
@@ -278,7 +290,7 @@ impl App {
                 ratatui::layout::Constraint::Percentage(35),
                 ratatui::layout::Constraint::Percentage(65),
             ])
-            .split(root_chunks[0]);
+            .split(root_chunks[1]);
 
         let left_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -294,10 +306,64 @@ impl App {
             diff: main_chunks[1],
         };
 
+        self.render_header(frame, root_chunks[0], &theme);
         self.render_files(frame, self.pane_rects.files, &theme);
         self.render_commits(frame, self.pane_rects.commits, &theme);
         self.render_diff(frame, self.pane_rects.diff, &theme);
-        self.render_footer(frame, root_chunks[1], &theme);
+        self.render_footer(frame, root_chunks[2], &theme);
+        if self.show_help {
+            self.render_help_overlay(frame, &theme);
+        }
+    }
+
+    fn render_header(&self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
+        let selected = self.commits.iter().filter(|row| row.selected).count();
+        let (unreviewed, reviewed, issue_found, resolved) = self.status_counts();
+        let focus = match self.focused {
+            FocusPane::Files => "FILES",
+            FocusPane::Commits => "COMMITS",
+            FocusPane::Diff => "DIFF",
+        };
+        let headline = Line::from(vec![
+            Span::styled(
+                " HUNKR ",
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("branch:{} ", self.git.branch_name()),
+                Style::default().fg(theme.text),
+            ),
+            Span::styled(
+                format!("focus:{} ", focus),
+                Style::default().fg(theme.accent),
+            ),
+            Span::styled(
+                format!("selected:{} ", selected),
+                Style::default().fg(theme.muted),
+            ),
+            Span::styled(
+                format!(
+                    "U:{} R:{} I:{} Z:{} ",
+                    unreviewed, reviewed, issue_found, resolved
+                ),
+                Style::default().fg(theme.muted),
+            ),
+            Span::styled(
+                format!("theme:{} ", self.theme_mode.label()),
+                Style::default().fg(theme.dimmed),
+            ),
+        ]);
+
+        let header = Paragraph::new(headline).block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(theme.border)),
+        );
+        frame.render_widget(header, rect);
     }
 
     pub fn tick(&mut self) {
@@ -348,7 +414,12 @@ impl App {
             KeyCode::F(5) => self.refresh_now(),
             KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => self.refresh_now(),
             KeyCode::Char('?') => {
-                self.status = "Footer is contextual by focused pane.".to_owned();
+                self.show_help = !self.show_help;
+                self.status = if self.show_help {
+                    "Help overlay opened".to_owned()
+                } else {
+                    "Help overlay closed".to_owned()
+                };
             }
             _ => self.dispatch_focus_key(key),
         }
@@ -603,7 +674,20 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let title = format!("Changed Files ({})", self.aggregate.files.len());
+        let title = Line::from(vec![
+            Span::styled(
+                " 1 FILES ",
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("{} changed", self.aggregate.files.len()),
+                Style::default().fg(theme.muted),
+            ),
+        ]);
         let border_style = if self.focused == FocusPane::Files {
             Style::default().fg(theme.focus_border)
         } else {
@@ -617,21 +701,24 @@ impl App {
             .file_rows
             .iter()
             .map(|row| {
-                let style = if row.selectable {
-                    Style::default().fg(theme.text)
-                } else {
-                    Style::default().fg(theme.dir)
-                };
-                let line_text = if row.selectable {
+                if row.selectable {
                     let right = row
                         .modified_ts
                         .map(|ts| format_relative_time(ts, now_ts))
                         .unwrap_or_default();
-                    align_with_right(&row.label, &right, width)
+                    ListItem::new(line_with_right(
+                        row.label.clone(),
+                        Style::default().fg(theme.text),
+                        right,
+                        Style::default().fg(theme.dimmed),
+                        width,
+                    ))
                 } else {
-                    row.label.clone()
-                };
-                ListItem::new(Line::from(Span::styled(line_text, style)))
+                    ListItem::new(Line::from(Span::styled(
+                        row.label.clone(),
+                        Style::default().fg(theme.dir).add_modifier(Modifier::BOLD),
+                    )))
+                }
             })
             .collect();
 
@@ -640,10 +727,11 @@ impl App {
                 Block::default()
                     .title(title)
                     .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
                     .border_style(border_style),
             )
             .highlight_style(Style::default().bg(theme.highlight_bg))
-            .highlight_symbol("-> ");
+            .highlight_symbol(">> ");
 
         frame.render_stateful_widget(list, rect, &mut self.file_list_state);
     }
@@ -656,44 +744,35 @@ impl App {
     ) {
         let selected = self.commits.iter().filter(|row| row.selected).count();
         let (unreviewed, reviewed, issue_found, resolved) = self.status_counts();
-        let title = format!(
-            "Commits [{} sel | U:{} R:{} I:{} Z:{}]",
-            selected, unreviewed, reviewed, issue_found, resolved
-        );
+        let title = Line::from(vec![
+            Span::styled(
+                " 2 COMMITS ",
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!(
+                    "sel:{}  U:{} R:{} I:{} Z:{}",
+                    selected, unreviewed, reviewed, issue_found, resolved
+                ),
+                Style::default().fg(theme.muted),
+            ),
+        ]);
         let border_style = if self.focused == FocusPane::Commits {
             Style::default().fg(theme.focus_border)
         } else {
             Style::default().fg(theme.border)
         };
 
+        let width = rect.width.saturating_sub(4) as usize;
+        let now_ts = Utc::now().timestamp();
         let items: Vec<ListItem<'static>> = self
             .commits
             .iter()
-            .map(|row| {
-                let check = if row.selected { "[x]" } else { "[ ]" };
-                let badge = status_badge(row.status, theme);
-
-                let mut spans = vec![
-                    Span::styled(
-                        format!("{} {} ", check, row.info.short_id),
-                        Style::default().fg(theme.text),
-                    ),
-                    Span::styled(
-                        truncate(&row.info.summary, 34),
-                        Style::default().fg(theme.text),
-                    ),
-                    Span::raw(" "),
-                    badge,
-                ];
-                if row.info.unpushed {
-                    spans.push(Span::raw(" "));
-                    spans.push(Span::styled(
-                        "unpushed",
-                        Style::default().fg(theme.unpushed),
-                    ));
-                }
-                ListItem::new(Line::from(spans))
-            })
+            .map(|row| ListItem::new(compose_commit_line(row, width, now_ts, theme)))
             .collect();
 
         let list = List::new(items)
@@ -701,10 +780,11 @@ impl App {
                 Block::default()
                     .title(title)
                     .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
                     .border_style(border_style),
             )
             .highlight_style(Style::default().bg(theme.highlight_bg))
-            .highlight_symbol("-> ");
+            .highlight_symbol(">> ");
 
         frame.render_stateful_widget(list, rect, &mut self.commit_list_state);
     }
@@ -720,7 +800,26 @@ impl App {
             .selected_file
             .clone()
             .unwrap_or_else(|| "(no file selected)".to_owned());
-        let title = format!("Diff: {}", file_label);
+        let selected = self
+            .diff_selected_range()
+            .map(|(start, end)| end.saturating_sub(start) + 1)
+            .unwrap_or(0);
+        let title = Line::from(vec![
+            Span::styled(
+                " 3 DIFF ",
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(file_label, Style::default().fg(theme.text)),
+            Span::raw(" "),
+            Span::styled(
+                format!("{} line(s) selected", selected),
+                Style::default().fg(theme.muted),
+            ),
+        ]);
 
         let visual_range = self.diff_selected_range();
         let mut lines = Vec::with_capacity(self.rendered_diff.len());
@@ -752,6 +851,7 @@ impl App {
                 Block::default()
                     .title(title)
                     .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
                     .border_style(border_style),
             )
             .scroll((self.diff_position.scroll as u16, 0));
@@ -770,20 +870,54 @@ impl App {
             FocusPane::Diff => "diff",
         };
 
-        let pane_hints = if self.input_mode == InputMode::Comment {
-            "Comment: Enter save | Esc cancel"
+        let pane_line = if self.input_mode == InputMode::Comment {
+            Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" save ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" cancel comment", Style::default().fg(theme.muted)),
+            ])
         } else {
             match self.focused {
-                FocusPane::Files => "Files: j/k g/G Ctrl-d/u PgUp/PgDn | Enter focus diff",
-                FocusPane::Commits => {
-                    "Commits: <space>/v/x select | u/r/i/s current | U/R/I/S selected"
-                }
-                FocusPane::Diff => "Diff: j/k g/G Ctrl-d/u PgUp/PgDn | v/V range | m comment",
+                FocusPane::Files => Line::from(vec![
+                    key_chip("j/k", theme),
+                    Span::styled(" move ", Style::default().fg(theme.muted)),
+                    key_chip("Ctrl-d/u", theme),
+                    Span::styled(" jump ", Style::default().fg(theme.muted)),
+                    key_chip("Enter", theme),
+                    Span::styled(" focus diff", Style::default().fg(theme.muted)),
+                ]),
+                FocusPane::Commits => Line::from(vec![
+                    key_chip("space", theme),
+                    Span::styled(" select ", Style::default().fg(theme.muted)),
+                    key_chip("u/r/i/s", theme),
+                    Span::styled(" current ", Style::default().fg(theme.muted)),
+                    key_chip("U/R/I/S", theme),
+                    Span::styled(" selected", Style::default().fg(theme.muted)),
+                ]),
+                FocusPane::Diff => Line::from(vec![
+                    key_chip("v", theme),
+                    Span::styled(" range ", Style::default().fg(theme.muted)),
+                    key_chip("m", theme),
+                    Span::styled(" comment ", Style::default().fg(theme.muted)),
+                    key_chip("Ctrl-d/u", theme),
+                    Span::styled(" jump", Style::default().fg(theme.muted)),
+                ]),
             }
         };
 
-        let global_hints =
-            "Global: 1/2/3 panes | Tab h/l cycle | t theme | F5/Ctrl-r refresh | q quit";
+        let global_line = Line::from(vec![
+            key_chip("1/2/3", theme),
+            Span::styled(" panes ", Style::default().fg(theme.dimmed)),
+            key_chip("Tab h/l", theme),
+            Span::styled(" cycle ", Style::default().fg(theme.dimmed)),
+            key_chip("t", theme),
+            Span::styled(" theme ", Style::default().fg(theme.dimmed)),
+            key_chip("?", theme),
+            Span::styled(" help ", Style::default().fg(theme.dimmed)),
+            key_chip("q", theme),
+            Span::styled(" quit", Style::default().fg(theme.dimmed)),
+        ]);
 
         let status = if self.input_mode == InputMode::Comment {
             format!(
@@ -813,7 +947,7 @@ impl App {
             .split(rect);
 
         let status_widget = Paragraph::new(status).style(Style::default().fg(theme.text));
-        let hint_widget = Paragraph::new(format!("{}\n{}", pane_hints, global_hints))
+        let hint_widget = Paragraph::new(vec![pane_line, global_line])
             .style(Style::default().fg(theme.dimmed))
             .block(
                 Block::default()
@@ -823,6 +957,69 @@ impl App {
 
         frame.render_widget(status_widget, chunks[0]);
         frame.render_widget(hint_widget, chunks[1]);
+    }
+
+    fn render_help_overlay(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
+        let area = centered_rect(70, 62, frame.area());
+        frame.render_widget(Clear, area);
+
+        let help_lines = vec![
+            Line::from(vec![Span::styled(
+                "HUNKR QUICK GUIDE",
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            )]),
+            Line::from(""),
+            Line::from(vec![
+                key_chip("1/2/3", theme),
+                Span::raw(" focus files/commits/diff"),
+            ]),
+            Line::from(vec![key_chip("space", theme), Span::raw(" select commits")]),
+            Line::from(vec![
+                key_chip("v", theme),
+                Span::raw(" visual select (commits or diff)"),
+            ]),
+            Line::from(vec![
+                key_chip("u/r/i/s", theme),
+                Span::raw(" set commit status"),
+            ]),
+            Line::from(vec![
+                key_chip("m", theme),
+                Span::raw(" add comment to cursor/range"),
+            ]),
+            Line::from(vec![key_chip("t", theme), Span::raw(" toggle theme")]),
+            Line::from(vec![
+                key_chip("Ctrl-d/u", theme),
+                Span::raw(" big jump in focused pane"),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("UNREVIEWED", Style::default().fg(theme.unreviewed)),
+                Span::raw("  "),
+                Span::styled("REVIEWED", Style::default().fg(theme.reviewed)),
+                Span::raw("  "),
+                Span::styled("ISSUE_FOUND", Style::default().fg(theme.issue)),
+                Span::raw("  "),
+                Span::styled("RESOLVED", Style::default().fg(theme.resolved)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(theme.muted)),
+                key_chip("?", theme),
+                Span::styled(" to close", Style::default().fg(theme.muted)),
+            ]),
+        ];
+
+        let widget = Paragraph::new(help_lines).block(
+            Block::default()
+                .title(" Help ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(theme.focus_border)),
+        );
+        frame.render_widget(widget, area);
     }
 
     fn reload_commits(&mut self, preserve_manual_selection: bool) -> anyhow::Result<()> {
@@ -948,11 +1145,17 @@ impl App {
     fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
         let theme = UiTheme::from_mode(self.theme_mode);
+        let now_ts = Utc::now().timestamp();
 
         for hunk in &patch.hunks {
-            let commit_line = format!("commit {} {}", hunk.commit_short, hunk.commit_summary);
+            let age = format_relative_time(hunk.commit_timestamp, now_ts);
+            let commit_line = format!(
+                "---- commit {} {} ({})",
+                hunk.commit_short, hunk.commit_summary, age
+            );
             rendered.push(RenderedDiffLine {
                 line: Line::from(vec![
+                    Span::styled("---- ", Style::default().fg(theme.dimmed)),
                     Span::styled("commit ", Style::default().fg(theme.muted)),
                     Span::styled(
                         hunk.commit_short.clone(),
@@ -962,15 +1165,17 @@ impl App {
                     ),
                     Span::raw(" "),
                     Span::styled(hunk.commit_summary.clone(), Style::default().fg(theme.text)),
+                    Span::raw(" "),
+                    Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
                 ]),
                 raw_text: commit_line,
                 anchor: None,
             });
 
-            let hunk_label = format!("hunk {}", hunk.header);
+            let hunk_label = format!("@@ {}", hunk.header);
             rendered.push(RenderedDiffLine {
                 line: Line::from(vec![
-                    Span::styled("hunk ", Style::default().fg(theme.muted)),
+                    Span::styled("@@ ", Style::default().fg(theme.muted)),
                     Span::styled(hunk.header.clone(), Style::default().fg(theme.diff_header)),
                 ]),
                 raw_text: hunk_label,
@@ -1018,10 +1223,26 @@ impl App {
             DiffLineKind::Meta => ('~', theme.diff_meta, None),
         };
 
-        let mut spans = vec![Span::styled(
-            prefix.to_string(),
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        )];
+        let old_col = line
+            .old_lineno
+            .map(|n| format!("{:>4}", n))
+            .unwrap_or_else(|| "    ".to_owned());
+        let new_col = line
+            .new_lineno
+            .map(|n| format!("{:>4}", n))
+            .unwrap_or_else(|| "    ".to_owned());
+
+        let mut spans = vec![
+            Span::styled(
+                format!("{} {} ", old_col, new_col),
+                Style::default().fg(theme.dimmed),
+            ),
+            Span::styled(
+                prefix.to_string(),
+                Style::default().fg(accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+        ];
 
         let highlighted = self
             .highlighter
@@ -1543,23 +1764,127 @@ fn truncate(text: &str, max_chars: usize) -> String {
     out
 }
 
-fn align_with_right(left: &str, right: &str, width: usize) -> String {
+fn line_with_right(
+    left: String,
+    left_style: Style,
+    right: String,
+    right_style: Style,
+    width: usize,
+) -> Line<'static> {
     if right.is_empty() {
-        return truncate(left, width.max(1));
+        return Line::from(Span::styled(truncate(&left, width.max(1)), left_style));
     }
-
-    let left_width = left.chars().count();
     let right_width = right.chars().count();
-    if left_width + right_width + 1 >= width {
-        return format!(
-            "{} {}",
-            truncate(left, width.saturating_sub(right_width + 1)),
-            right
-        );
+    if right_width + 1 >= width {
+        return Line::from(Span::styled(truncate(&right, width.max(1)), right_style));
     }
 
-    let spaces = " ".repeat(width - left_width - right_width);
-    format!("{}{}{}", left, spaces, right)
+    let max_left = width - right_width - 1;
+    let left_render = truncate(&left, max_left.max(1));
+    let left_width = left_render.chars().count();
+    let spaces = if left_width + right_width + 1 >= width {
+        " ".to_owned()
+    } else {
+        " ".repeat(width - left_width - right_width)
+    };
+
+    Line::from(vec![
+        Span::styled(left_render, left_style),
+        Span::raw(spaces),
+        Span::styled(right, right_style),
+    ])
+}
+
+fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", label),
+        Style::default()
+            .fg(theme.panel_title_fg)
+            .bg(theme.panel_title_bg)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn status_short_label(status: ReviewStatus) -> &'static str {
+    match status {
+        ReviewStatus::Unreviewed => "UNREV",
+        ReviewStatus::Reviewed => "REVIEW",
+        ReviewStatus::IssueFound => "ISSUE",
+        ReviewStatus::Resolved => "DONE",
+    }
+}
+
+fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
+    match status {
+        ReviewStatus::Unreviewed => Style::default()
+            .fg(theme.unreviewed)
+            .add_modifier(Modifier::BOLD),
+        ReviewStatus::Reviewed => Style::default().fg(theme.reviewed),
+        ReviewStatus::IssueFound => Style::default()
+            .fg(theme.issue)
+            .add_modifier(Modifier::BOLD),
+        ReviewStatus::Resolved => Style::default().fg(theme.resolved),
+    }
+}
+
+fn compose_commit_line(
+    row: &CommitRow,
+    width: usize,
+    now_ts: i64,
+    theme: &UiTheme,
+) -> Line<'static> {
+    let marker = if row.selected { "[x]" } else { "[ ]" };
+    let left = format!("{} {} {}", marker, row.info.short_id, row.info.summary);
+    let status_label = format!("[{}]", status_short_label(row.status));
+    let unpushed = if row.info.unpushed { " [^]" } else { "" };
+    let right = format_relative_time(row.info.timestamp, now_ts);
+    let reserved =
+        1 + status_label.chars().count() + unpushed.chars().count() + 1 + right.chars().count();
+    let max_left = width.saturating_sub(reserved).max(1);
+    let left_render = truncate(&left, max_left);
+    let static_used = left_render.chars().count()
+        + status_label.chars().count()
+        + unpushed.chars().count()
+        + right.chars().count()
+        + 1;
+    let spaces = if static_used >= width {
+        " ".to_owned()
+    } else {
+        " ".repeat(width - static_used)
+    };
+
+    Line::from(vec![
+        Span::styled(left_render, Style::default().fg(theme.text)),
+        Span::raw(" "),
+        Span::styled(status_label, status_style(row.status, theme)),
+        Span::styled(unpushed.to_owned(), Style::default().fg(theme.unpushed)),
+        Span::raw(spaces),
+        Span::styled(right, Style::default().fg(theme.dimmed)),
+    ])
+}
+
+fn centered_rect(
+    width_percent: u16,
+    height_percent: u16,
+    area: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    let vertical = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Percentage((100 - height_percent) / 2),
+            ratatui::layout::Constraint::Percentage(height_percent),
+            ratatui::layout::Constraint::Percentage((100 - height_percent) / 2),
+        ])
+        .split(area);
+
+    ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            ratatui::layout::Constraint::Percentage((100 - width_percent) / 2),
+            ratatui::layout::Constraint::Percentage(width_percent),
+            ratatui::layout::Constraint::Percentage((100 - width_percent) / 2),
+        ])
+        .split(vertical[1])[1]
 }
 
 fn format_relative_time(timestamp: i64, now: i64) -> String {
@@ -1609,25 +1934,6 @@ fn apply_status_ids(rows: &mut [CommitRow], ids: &BTreeSet<String>, status: Revi
         if ids.contains(&row.info.id) {
             row.status = status;
         }
-    }
-}
-
-fn status_badge(status: ReviewStatus, theme: &UiTheme) -> Span<'static> {
-    match status {
-        ReviewStatus::Unreviewed => Span::styled(
-            "UNREVIEWED",
-            Style::default()
-                .fg(theme.unreviewed)
-                .add_modifier(Modifier::BOLD),
-        ),
-        ReviewStatus::Reviewed => Span::styled("REVIEWED", Style::default().fg(theme.reviewed)),
-        ReviewStatus::IssueFound => Span::styled(
-            "ISSUE_FOUND",
-            Style::default()
-                .fg(theme.issue)
-                .add_modifier(Modifier::BOLD),
-        ),
-        ReviewStatus::Resolved => Span::styled("RESOLVED", Style::default().fg(theme.resolved)),
     }
 }
 
@@ -1734,9 +2040,33 @@ mod tests {
     }
 
     #[test]
-    fn align_with_right_keeps_right_text_visible() {
-        let rendered = align_with_right("[F] file.rs", "3h ago", 24);
-        assert!(rendered.ends_with("3h ago"));
+    fn line_with_right_keeps_right_text_visible() {
+        let rendered = line_with_right(
+            "[F] file.rs".to_owned(),
+            Style::default(),
+            "3h ago".to_owned(),
+            Style::default(),
+            24,
+        );
+        let flattened = rendered
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect::<String>();
+        assert!(flattened.ends_with("3h ago"));
+    }
+
+    #[test]
+    fn compose_commit_line_preserves_age_column_on_narrow_width() {
+        let row = commit_row("abc1234", false, ReviewStatus::IssueFound);
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = compose_commit_line(&row, 24, 3_600, &theme);
+        let flattened = rendered
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect::<String>();
+        assert!(flattened.ends_with("1h ago"));
     }
 
     #[test]
