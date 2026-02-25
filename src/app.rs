@@ -392,11 +392,13 @@ impl App {
 
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Tab | KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
-                self.focus_next()
+            KeyCode::Tab if key.modifiers == KeyModifiers::NONE => self.focus_next(),
+            KeyCode::BackTab if key.modifiers == KeyModifiers::NONE => self.focus_prev(),
+            KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
+                self.focused = focus_with_l(self.focused)
             }
-            KeyCode::BackTab | KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
-                self.focus_prev()
+            KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
+                self.focused = focus_with_h(self.focused)
             }
             KeyCode::Char('1') => self.focused = FocusPane::Files,
             KeyCode::Char('2') => self.focused = FocusPane::Commits,
@@ -909,8 +911,10 @@ impl App {
         let global_line = Line::from(vec![
             key_chip("1/2/3", theme),
             Span::styled(" panes ", Style::default().fg(theme.dimmed)),
-            key_chip("Tab h/l", theme),
-            Span::styled(" cycle ", Style::default().fg(theme.dimmed)),
+            key_chip("Tab", theme),
+            Span::styled(" cycle all ", Style::default().fg(theme.dimmed)),
+            key_chip("h/l", theme),
+            Span::styled(" files<->diff ", Style::default().fg(theme.dimmed)),
             key_chip("t", theme),
             Span::styled(" theme ", Style::default().fg(theme.dimmed)),
             key_chip("?", theme),
@@ -975,6 +979,10 @@ impl App {
             Line::from(vec![
                 key_chip("1/2/3", theme),
                 Span::raw(" focus files/commits/diff"),
+            ]),
+            Line::from(vec![
+                key_chip("h/l", theme),
+                Span::raw(" switch files <-> diff"),
             ]),
             Line::from(vec![key_chip("space", theme), Span::raw(" select commits")]),
             Line::from(vec![
@@ -1942,6 +1950,22 @@ fn page_step(height: u16, multiplier: f32) -> isize {
     (visible * multiplier).round() as isize
 }
 
+fn focus_with_h(current: FocusPane) -> FocusPane {
+    match current {
+        FocusPane::Files => FocusPane::Files,
+        FocusPane::Commits => FocusPane::Files,
+        FocusPane::Diff => FocusPane::Files,
+    }
+}
+
+fn focus_with_l(current: FocusPane) -> FocusPane {
+    match current {
+        FocusPane::Files => FocusPane::Diff,
+        FocusPane::Commits => FocusPane::Diff,
+        FocusPane::Diff => FocusPane::Diff,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2074,5 +2098,13 @@ mod tests {
         assert_eq!(format_relative_time(100, 130), "30s ago");
         assert_eq!(format_relative_time(100, 220), "2m ago");
         assert_eq!(format_relative_time(100, 3700), "1h ago");
+    }
+
+    #[test]
+    fn h_and_l_only_target_files_and_diff() {
+        assert_eq!(focus_with_h(FocusPane::Diff), FocusPane::Files);
+        assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Files);
+        assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Diff);
+        assert_eq!(focus_with_l(FocusPane::Commits), FocusPane::Diff);
     }
 }

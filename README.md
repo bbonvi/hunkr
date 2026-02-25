@@ -42,7 +42,8 @@ Global:
 
 - `q`: quit
 - `1` / `2` / `3`: focus files/commits/diff pane
-- `Tab` / `h` / `l`: cycle focus between panes
+- `Tab` / `Shift-Tab`: cycle focus between all panes
+- `h` / `l`: switch focus between file tree and diff only
 - `f` / `c` / `d`: jump focus to files/commits/diff
 - `t`: toggle theme
 - `?`: toggle quick-help overlay
