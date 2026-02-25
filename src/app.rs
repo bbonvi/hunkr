@@ -1249,32 +1249,36 @@ impl App {
             .iter()
             .filter(|comment| comment.target.end.file_path == patch.path)
             .collect();
+        let mut last_commit_banner: Option<String> = None;
 
         for hunk in &patch.hunks {
-            let age = format_relative_time(hunk.commit_timestamp, now_ts);
-            let commit_line = format!(
-                "---- commit {} {} ({})",
-                hunk.commit_short, hunk.commit_summary, age
-            );
-            rendered.push(RenderedDiffLine {
-                line: Line::from(vec![
-                    Span::styled("---- ", Style::default().fg(theme.dimmed)),
-                    Span::styled("commit ", Style::default().fg(theme.muted)),
-                    Span::styled(
-                        hunk.commit_short.clone(),
-                        Style::default()
-                            .fg(theme.focus_border)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(hunk.commit_summary.clone(), Style::default().fg(theme.text)),
-                    Span::raw(" "),
-                    Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
-                ]),
-                raw_text: commit_line,
-                anchor: None,
-                comment_id: None,
-            });
+            if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
+                let age = format_relative_time(hunk.commit_timestamp, now_ts);
+                let commit_line = format!(
+                    "---- commit {} {} ({})",
+                    hunk.commit_short, hunk.commit_summary, age
+                );
+                rendered.push(RenderedDiffLine {
+                    line: Line::from(vec![
+                        Span::styled("---- ", Style::default().fg(theme.dimmed)),
+                        Span::styled("commit ", Style::default().fg(theme.muted)),
+                        Span::styled(
+                            hunk.commit_short.clone(),
+                            Style::default()
+                                .fg(theme.focus_border)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(hunk.commit_summary.clone(), Style::default().fg(theme.text)),
+                        Span::raw(" "),
+                        Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
+                    ]),
+                    raw_text: commit_line,
+                    anchor: None,
+                    comment_id: None,
+                });
+            }
+            last_commit_banner = Some(hunk.commit_id.clone());
 
             let mut hunk_comments: Vec<&ReviewComment> = file_comments
                 .iter()
@@ -2061,6 +2065,10 @@ fn raw_diff_text(line: &HunkLine) -> String {
     format!("{}{}", prefix, line.text)
 }
 
+fn should_render_commit_banner(previous_commit_id: Option<&str>, current_commit_id: &str) -> bool {
+    previous_commit_id != Some(current_commit_id)
+}
+
 fn push_comment_lines_for_anchor(
     rendered: &mut Vec<RenderedDiffLine>,
     comments: &[&ReviewComment],
@@ -2367,6 +2375,22 @@ mod tests {
         assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Files);
         assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Diff);
         assert_eq!(focus_with_l(FocusPane::Commits), FocusPane::Diff);
+    }
+
+    #[test]
+    fn commit_banner_renders_only_when_commit_changes() {
+        let commits = ["a", "a", "b", "b", "a"];
+        let mut previous: Option<&str> = None;
+        let rendered = commits
+            .iter()
+            .map(|current| {
+                let show = should_render_commit_banner(previous, current);
+                previous = Some(current);
+                show
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered, vec![true, false, true, false, true]);
     }
 
     #[test]
