@@ -25,13 +25,15 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Mouse support: pane focus, item selection, and wheel scrolling
 - Vim-like keys by default
 - Inline key hints are contextual to the focused pane
-- Hunk comments: add comments anchored to commit/file/hunk/line or visual range and auto-export to Markdown
+- Hunk comments are rendered inline in the diff and can be edited/deleted in place
+- Hunk comments can be anchored to commit/file/hunk/line or visual range and auto-export to Markdown
 
 ## Data storage
 
 `hunkr` keeps all local data in:
 
 - `.hunkr/state.json`: persisted commit statuses
+- `.hunkr/comments/index.json`: persisted comment index for inline rendering/edit/delete
 - `.hunkr/comments/<timestamp>-<branch>-review.md`: review comment sessions
 
 This storage is project-local and independent of Git remotes.
@@ -70,6 +72,8 @@ Diff pane:
 - `PageDown` / `PageUp`: page scroll
 - `v` / `V`: visual line-range selection
 - `m`: add comment for current anchor or selected visual range
+- `e`: edit comment under cursor
+- `D`: delete comment under cursor
 
 Comment mode:
 
@@ -94,7 +98,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - `src/app.rs`: UI state, key/mouse routing, selection/status logic, rendering
 - `src/git_data.rs`: git commit discovery, unpushed detection, commit-range aggregation
 - `src/store.rs`: review state persistence (`.hunkr/state.json`)
-- `src/comments.rs`: markdown comment session writer
+- `src/comments.rs`: persisted comment store (`index.json`) + markdown session writer
 - `src/model.rs`: shared domain models
 
 ## Notes

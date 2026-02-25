@@ -7,33 +7,116 @@ use std::{
 use anyhow::Context;
 use chrono::Utc;
 
-use crate::model::CommentTarget;
+use crate::model::{CommentTarget, ReviewComment};
 
 const COMMENTS_DIR: &str = "comments";
+const COMMENTS_INDEX_FILE: &str = "index.json";
 
-/// Appends review comments into one markdown file per app session.
+/// Stores persisted review comments and markdown session exports.
 #[derive(Debug, Clone)]
 pub struct CommentStore {
     root: PathBuf,
     branch: String,
     session_file: Option<PathBuf>,
-    counter: u32,
+    event_counter: u32,
+    index_path: PathBuf,
+    comments: Vec<ReviewComment>,
+    next_id: u64,
 }
 
 impl CommentStore {
-    pub fn new(project_data_dir: &Path, branch: &str) -> Self {
-        Self {
-            root: project_data_dir.join(COMMENTS_DIR),
+    pub fn new(project_data_dir: &Path, branch: &str) -> anyhow::Result<Self> {
+        let root = project_data_dir.join(COMMENTS_DIR);
+        let index_path = root.join(COMMENTS_INDEX_FILE);
+        fs::create_dir_all(&root)
+            .with_context(|| format!("failed to create {}", root.display()))?;
+
+        let comments = load_index(&index_path)?;
+        let next_id = comments
+            .iter()
+            .map(|comment| comment.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+
+        Ok(Self {
+            root,
             branch: sanitize(branch),
             session_file: None,
-            counter: 0,
-        }
+            event_counter: 0,
+            index_path,
+            comments,
+            next_id,
+        })
     }
 
-    pub fn append(&mut self, target: &CommentTarget, text: &str) -> anyhow::Result<PathBuf> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("failed to create {}", self.root.display()))?;
+    pub fn comments(&self) -> &[ReviewComment] {
+        &self.comments
+    }
 
+    pub fn comment_by_id(&self, id: u64) -> Option<&ReviewComment> {
+        self.comments.iter().find(|comment| comment.id == id)
+    }
+
+    pub fn add_comment(
+        &mut self,
+        target: &CommentTarget,
+        text: &str,
+    ) -> anyhow::Result<(u64, PathBuf)> {
+        let now = Utc::now().to_rfc3339();
+        let comment = ReviewComment {
+            id: self.next_id,
+            target: target.clone(),
+            text: text.trim().to_owned(),
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        self.next_id = self.next_id.saturating_add(1);
+
+        self.comments.push(comment.clone());
+        self.save_index()?;
+
+        let session = self.append_markdown_event("ADD", &comment, None)?;
+        Ok((comment.id, session))
+    }
+
+    pub fn update_comment(&mut self, id: u64, text: &str) -> anyhow::Result<bool> {
+        let Some(idx) = self.comments.iter().position(|comment| comment.id == id) else {
+            return Ok(false);
+        };
+
+        self.comments[idx].text = text.trim().to_owned();
+        self.comments[idx].updated_at = Utc::now().to_rfc3339();
+        let snapshot = self.comments[idx].clone();
+        self.save_index()?;
+        self.append_markdown_event("EDIT", &snapshot, None)?;
+        Ok(true)
+    }
+
+    pub fn delete_comment(&mut self, id: u64) -> anyhow::Result<bool> {
+        let Some(idx) = self.comments.iter().position(|comment| comment.id == id) else {
+            return Ok(false);
+        };
+        let removed = self.comments.remove(idx);
+        self.save_index()?;
+        self.append_markdown_event("DELETE", &removed, Some("Comment removed"))?;
+        Ok(true)
+    }
+
+    fn save_index(&self) -> anyhow::Result<()> {
+        let payload = serde_json::to_string_pretty(&self.comments)
+            .context("failed to encode comments index")?;
+        fs::write(&self.index_path, payload)
+            .with_context(|| format!("failed to write {}", self.index_path.display()))?;
+        Ok(())
+    }
+
+    fn append_markdown_event(
+        &mut self,
+        action: &str,
+        comment: &ReviewComment,
+        override_text: Option<&str>,
+    ) -> anyhow::Result<PathBuf> {
         let file_path = if let Some(path) = &self.session_file {
             path.clone()
         } else {
@@ -45,20 +128,24 @@ impl CommentStore {
             path
         };
 
-        self.counter = self.counter.saturating_add(1);
+        self.event_counter = self.event_counter.saturating_add(1);
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&file_path)
             .with_context(|| format!("failed to open {}", file_path.display()))?;
 
-        writeln!(file, "## Comment {}", self.counter).context("failed to write comment heading")?;
+        writeln!(file, "## Event {} [{}]", self.event_counter, action)
+            .context("failed to write event heading")?;
         writeln!(file, "- Time: {}", Utc::now().to_rfc3339()).context("failed to write time")?;
-        writeln!(file, "- File: `{}`", target.start.file_path).context("failed to write file")?;
+        writeln!(file, "- Comment ID: `#{}`", comment.id).context("failed to write id")?;
+        writeln!(file, "- File: `{}`", comment.target.start.file_path)
+            .context("failed to write file")?;
         writeln!(
             file,
             "- Commits: {}",
-            target
+            comment
+                .target
                 .commits
                 .iter()
                 .map(|id| format!("`{}`", id))
@@ -69,24 +156,29 @@ impl CommentStore {
         writeln!(
             file,
             "- Start: `{}` ({})",
-            target.start.hunk_header,
-            format_anchor_lines(target.start.old_lineno, target.start.new_lineno)
+            comment.target.start.hunk_header,
+            format_anchor_lines(
+                comment.target.start.old_lineno,
+                comment.target.start.new_lineno
+            )
         )
         .context("failed to write start")?;
         writeln!(
             file,
             "- End: `{}` ({})",
-            target.end.hunk_header,
-            format_anchor_lines(target.end.old_lineno, target.end.new_lineno)
+            comment.target.end.hunk_header,
+            format_anchor_lines(comment.target.end.old_lineno, comment.target.end.new_lineno)
         )
         .context("failed to write end")?;
         writeln!(file).context("failed to write spacing")?;
-        writeln!(file, "{}", text.trim()).context("failed to write comment text")?;
 
-        if !target.selected_lines.is_empty() {
+        let text = override_text.unwrap_or(&comment.text);
+        writeln!(file, "{}", text.trim()).context("failed to write text")?;
+
+        if !comment.target.selected_lines.is_empty() {
             writeln!(file).context("failed to write spacing")?;
             writeln!(file, "```diff").context("failed to write code fence")?;
-            for line in &target.selected_lines {
+            for line in &comment.target.selected_lines {
                 writeln!(file, "{}", line).context("failed to write selected line")?;
             }
             writeln!(file, "```").context("failed to close code fence")?;
@@ -109,6 +201,18 @@ impl CommentStore {
         writeln!(file).context("failed to write spacing")?;
         Ok(())
     }
+}
+
+fn load_index(path: &Path) -> anyhow::Result<Vec<ReviewComment>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let comments = serde_json::from_str::<Vec<ReviewComment>>(&raw)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(comments)
 }
 
 fn format_anchor_lines(old_lineno: Option<u32>, new_lineno: Option<u32>) -> String {
@@ -140,10 +244,7 @@ mod tests {
     use super::*;
     use crate::model::CommentAnchor;
 
-    #[test]
-    fn append_creates_one_session_file() {
-        let tmp = tempdir().expect("tempdir");
-        let mut store = CommentStore::new(tmp.path(), "feature/test");
+    fn make_target() -> CommentTarget {
         let anchor = CommentAnchor {
             commit_id: "abc1234".to_string(),
             commit_summary: "add parser".to_string(),
@@ -152,26 +253,35 @@ mod tests {
             old_lineno: Some(1),
             new_lineno: Some(8),
         };
-        let target = CommentTarget {
+        CommentTarget {
             start: anchor.clone(),
             end: anchor,
             commits: BTreeSet::from(["abc1234".to_owned()]),
             selected_lines: vec!["+let x = 1;".to_owned(), "-let x = 0;".to_owned()],
-        };
+        }
+    }
 
-        let first = store.append(&target, "Need better naming").expect("append");
-        let second = store
-            .append(&target, "Also split this function")
-            .expect("append");
+    #[test]
+    fn add_update_delete_roundtrip() {
+        let tmp = tempdir().expect("tempdir");
+        let mut store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
 
-        assert_eq!(first, second);
-        let content = fs::read_to_string(first).expect("read");
-        assert!(content.contains("# Hunkr Review Session"));
-        assert!(content.contains("## Comment 1"));
-        assert!(content.contains("## Comment 2"));
-        assert!(content.contains("Need better naming"));
-        assert!(content.contains("```diff"));
-        assert!(content.contains("+let x = 1;"));
+        let (id, path) = store
+            .add_comment(&make_target(), "Need better naming")
+            .expect("add");
+        assert!(path.exists());
+        assert_eq!(store.comments().len(), 1);
+
+        let updated = store.update_comment(id, "Renamed now").expect("update");
+        assert!(updated);
+        assert_eq!(store.comment_by_id(id).expect("id").text, "Renamed now");
+
+        let deleted = store.delete_comment(id).expect("delete");
+        assert!(deleted);
+        assert!(store.comments().is_empty());
+
+        let reloaded = CommentStore::new(tmp.path(), "feature/test").expect("reload");
+        assert!(reloaded.comments().is_empty());
     }
 
     #[test]

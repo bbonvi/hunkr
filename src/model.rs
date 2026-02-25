@@ -109,7 +109,7 @@ impl AggregatedDiff {
 }
 
 /// Anchor metadata saved when adding review comments.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommentAnchor {
     pub commit_id: String,
     pub commit_summary: String,
@@ -120,10 +120,20 @@ pub struct CommentAnchor {
 }
 
 /// Comment target can be a single line or a visual range.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommentTarget {
     pub start: CommentAnchor,
     pub end: CommentAnchor,
     pub commits: BTreeSet<String>,
     pub selected_lines: Vec<String>,
+}
+
+/// Persisted review comment entity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReviewComment {
+    pub id: u64,
+    pub target: CommentTarget,
+    pub text: String,
+    pub created_at: String,
+    pub updated_at: String,
 }

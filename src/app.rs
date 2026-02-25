@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
@@ -24,7 +24,7 @@ use crate::{
     git_data::GitService,
     model::{
         AggregatedDiff, CommentAnchor, CommentTarget, CommitInfo, DiffLineKind, FilePatch,
-        HunkLine, ReviewState, ReviewStatus,
+        HunkLine, ReviewComment, ReviewState, ReviewStatus,
     },
     store::StateStore,
 };
@@ -42,7 +42,8 @@ enum FocusPane {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InputMode {
     Normal,
-    Comment,
+    CommentCreate,
+    CommentEdit(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -184,6 +185,7 @@ struct RenderedDiffLine {
     line: Line<'static>,
     raw_text: String,
     anchor: Option<CommentAnchor>,
+    comment_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -227,7 +229,7 @@ impl App {
         let git = GitService::open_current()?;
         let store = StateStore::for_project(git.root());
         let review_state = store.load()?;
-        let comments = CommentStore::new(store.root_dir(), git.branch_name());
+        let comments = CommentStore::new(store.root_dir(), git.branch_name())?;
 
         let mut app = Self {
             git,
@@ -385,7 +387,7 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
-        if self.input_mode == InputMode::Comment {
+        if !matches!(self.input_mode, InputMode::Normal) {
             self.handle_comment_input(key);
             return;
         }
@@ -454,23 +456,48 @@ impl App {
                     return;
                 }
 
-                if let Some(target) = self.comment_target_from_selection() {
-                    let result = self.comments.append(&target, &self.comment_buffer);
-                    match result {
-                        Ok(path) => {
-                            self.set_status_for_ids(&target.commits, ReviewStatus::IssueFound);
-                            self.status = format!(
-                                "Comment saved -> {} ({} commit(s) marked ISSUE_FOUND)",
-                                path.display(),
-                                target.commits.len()
-                            );
-                        }
-                        Err(err) => {
-                            self.status = format!("Failed to save comment: {err:#}");
+                match self.input_mode {
+                    InputMode::CommentCreate => {
+                        if let Some(target) = self.comment_target_from_selection() {
+                            let result = self.comments.add_comment(&target, &self.comment_buffer);
+                            match result {
+                                Ok((id, path)) => {
+                                    self.set_status_for_ids(
+                                        &target.commits,
+                                        ReviewStatus::IssueFound,
+                                    );
+                                    self.invalidate_diff_cache();
+                                    self.status = format!(
+                                        "Comment #{} added -> {} ({} commit(s) marked ISSUE_FOUND)",
+                                        id,
+                                        path.display(),
+                                        target.commits.len()
+                                    );
+                                }
+                                Err(err) => {
+                                    self.status = format!("Failed to save comment: {err:#}");
+                                }
+                            }
+                        } else {
+                            self.status =
+                                "No hunk/line anchor at cursor or selected range".to_owned();
                         }
                     }
-                } else {
-                    self.status = "No hunk/line anchor at cursor or selected range".to_owned();
+                    InputMode::CommentEdit(id) => {
+                        match self.comments.update_comment(id, &self.comment_buffer) {
+                            Ok(true) => {
+                                self.invalidate_diff_cache();
+                                self.status = format!("Comment #{} updated", id);
+                            }
+                            Ok(false) => {
+                                self.status = format!("Comment #{} not found", id);
+                            }
+                            Err(err) => {
+                                self.status = format!("Failed to update comment #{}: {err:#}", id);
+                            }
+                        }
+                    }
+                    InputMode::Normal => {}
                 }
 
                 self.input_mode = InputMode::Normal;
@@ -486,6 +513,39 @@ impl App {
                 self.comment_buffer.push(c);
             }
             _ => {}
+        }
+    }
+
+    fn start_comment_edit_mode(&mut self) {
+        let Some(id) = self.current_comment_id() else {
+            self.status = "No comment under cursor to edit".to_owned();
+            return;
+        };
+        let Some(comment) = self.comments.comment_by_id(id) else {
+            self.status = format!("Comment #{} missing", id);
+            return;
+        };
+        self.input_mode = InputMode::CommentEdit(id);
+        self.comment_buffer = comment.text.clone();
+        self.status = format!("Editing comment #{}: Enter save, Esc cancel", id);
+    }
+
+    fn delete_current_comment(&mut self) {
+        let Some(id) = self.current_comment_id() else {
+            self.status = "No comment under cursor to delete".to_owned();
+            return;
+        };
+        match self.comments.delete_comment(id) {
+            Ok(true) => {
+                self.invalidate_diff_cache();
+                self.status = format!("Comment #{} deleted", id);
+            }
+            Ok(false) => {
+                self.status = format!("Comment #{} not found", id);
+            }
+            Err(err) => {
+                self.status = format!("Failed to delete comment #{}: {err:#}", id);
+            }
         }
     }
 
@@ -605,11 +665,17 @@ impl App {
                 }
             }
             KeyCode::Char('m') => {
-                self.input_mode = InputMode::Comment;
+                self.input_mode = InputMode::CommentCreate;
                 self.comment_buffer.clear();
                 self.status =
                     "Comment mode: type comment, Enter save, Esc cancel (supports visual range)"
                         .to_owned();
+            }
+            KeyCode::Char('e') => {
+                self.start_comment_edit_mode();
+            }
+            KeyCode::Char('D') => {
+                self.delete_current_comment();
             }
             _ => {}
         }
@@ -864,7 +930,8 @@ impl App {
     fn render_footer(&self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
         let mode = match self.input_mode {
             InputMode::Normal => "NORMAL",
-            InputMode::Comment => "COMMENT",
+            InputMode::CommentCreate => "COMMENT+",
+            InputMode::CommentEdit(_) => "COMMENT*",
         };
         let focus = match self.focused {
             FocusPane::Files => "files",
@@ -872,7 +939,7 @@ impl App {
             FocusPane::Diff => "diff",
         };
 
-        let pane_line = if self.input_mode == InputMode::Comment {
+        let pane_line = if !matches!(self.input_mode, InputMode::Normal) {
             Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" save ", Style::default().fg(theme.muted)),
@@ -902,6 +969,8 @@ impl App {
                     Span::styled(" range ", Style::default().fg(theme.muted)),
                     key_chip("m", theme),
                     Span::styled(" comment ", Style::default().fg(theme.muted)),
+                    key_chip("e/D", theme),
+                    Span::styled(" edit/delete ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
                     Span::styled(" jump", Style::default().fg(theme.muted)),
                 ]),
@@ -923,7 +992,7 @@ impl App {
             Span::styled(" quit", Style::default().fg(theme.dimmed)),
         ]);
 
-        let status = if self.input_mode == InputMode::Comment {
+        let status = if !matches!(self.input_mode, InputMode::Normal) {
             format!(
                 "{} | mode={} focus={} theme={} > {}",
                 self.status,
@@ -996,6 +1065,14 @@ impl App {
             Line::from(vec![
                 key_chip("m", theme),
                 Span::raw(" add comment to cursor/range"),
+            ]),
+            Line::from(vec![
+                key_chip("e", theme),
+                Span::raw(" edit comment under cursor"),
+            ]),
+            Line::from(vec![
+                key_chip("D", theme),
+                Span::raw(" delete comment under cursor"),
             ]),
             Line::from(vec![key_chip("t", theme), Span::raw(" toggle theme")]),
             Line::from(vec![
@@ -1150,10 +1227,28 @@ impl App {
         self.ensure_cursor_visible();
     }
 
+    fn invalidate_diff_cache(&mut self) {
+        self.rendered_diff_cache.clear();
+        self.rendered_diff_key = None;
+        self.ensure_rendered_diff();
+    }
+
+    fn current_comment_id(&self) -> Option<u64> {
+        self.rendered_diff
+            .get(self.diff_position.cursor)
+            .and_then(|line| line.comment_id)
+    }
+
     fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
         let theme = UiTheme::from_mode(self.theme_mode);
         let now_ts = Utc::now().timestamp();
+        let file_comments: Vec<&ReviewComment> = self
+            .comments
+            .comments()
+            .iter()
+            .filter(|comment| comment.target.end.file_path == patch.path)
+            .collect();
 
         for hunk in &patch.hunks {
             let age = format_relative_time(hunk.commit_timestamp, now_ts);
@@ -1178,8 +1273,27 @@ impl App {
                 ]),
                 raw_text: commit_line,
                 anchor: None,
+                comment_id: None,
             });
 
+            let mut hunk_comments: Vec<&ReviewComment> = file_comments
+                .iter()
+                .copied()
+                .filter(|comment| {
+                    comment_targets_hunk_end(comment, &patch.path, &hunk.commit_id, &hunk.header)
+                })
+                .collect();
+            hunk_comments.sort_by_key(|comment| comment.id);
+            let mut injected_comment_ids = BTreeSet::new();
+
+            let hunk_anchor = CommentAnchor {
+                commit_id: hunk.commit_id.clone(),
+                commit_summary: hunk.commit_summary.clone(),
+                file_path: patch.path.clone(),
+                hunk_header: hunk.header.clone(),
+                old_lineno: Some(hunk.old_start),
+                new_lineno: Some(hunk.new_start),
+            };
             let hunk_label = format!("@@ {}", hunk.header);
             rendered.push(RenderedDiffLine {
                 line: Line::from(vec![
@@ -1195,7 +1309,16 @@ impl App {
                     old_lineno: Some(hunk.old_start),
                     new_lineno: Some(hunk.new_start),
                 }),
+                comment_id: None,
             });
+            push_comment_lines_for_anchor(
+                &mut rendered,
+                &hunk_comments,
+                &mut injected_comment_ids,
+                &hunk_anchor,
+                &theme,
+                now_ts,
+            );
 
             for line in &hunk.lines {
                 let anchor = CommentAnchor {
@@ -1209,14 +1332,30 @@ impl App {
                 rendered.push(RenderedDiffLine {
                     line: self.render_code_line(&patch.path, line, &theme),
                     raw_text: raw_diff_text(line),
-                    anchor: Some(anchor),
+                    anchor: Some(anchor.clone()),
+                    comment_id: None,
                 });
+                push_comment_lines_for_anchor(
+                    &mut rendered,
+                    &hunk_comments,
+                    &mut injected_comment_ids,
+                    &anchor,
+                    &theme,
+                    now_ts,
+                );
+            }
+
+            for comment in hunk_comments {
+                if injected_comment_ids.insert(comment.id) {
+                    push_comment_lines(&mut rendered, comment, &theme, now_ts);
+                }
             }
 
             rendered.push(RenderedDiffLine {
                 line: Line::from(""),
                 raw_text: String::new(),
                 anchor: None,
+                comment_id: None,
             });
         }
 
@@ -1922,6 +2061,113 @@ fn raw_diff_text(line: &HunkLine) -> String {
     format!("{}{}", prefix, line.text)
 }
 
+fn push_comment_lines_for_anchor(
+    rendered: &mut Vec<RenderedDiffLine>,
+    comments: &[&ReviewComment],
+    injected_ids: &mut BTreeSet<u64>,
+    anchor: &CommentAnchor,
+    theme: &UiTheme,
+    now_ts: i64,
+) {
+    for comment in comments {
+        if injected_ids.contains(&comment.id) {
+            continue;
+        }
+        if comment_anchor_matches(anchor, &comment.target.end) {
+            injected_ids.insert(comment.id);
+            push_comment_lines(rendered, comment, theme, now_ts);
+        }
+    }
+}
+
+fn push_comment_lines(
+    rendered: &mut Vec<RenderedDiffLine>,
+    comment: &ReviewComment,
+    theme: &UiTheme,
+    now_ts: i64,
+) {
+    let age = comment_age(comment, now_ts);
+    let location = comment_location_label(comment);
+    rendered.push(RenderedDiffLine {
+        line: Line::from(vec![
+            Span::styled(
+                format!("  [#{}] ", comment.id),
+                Style::default()
+                    .fg(theme.focus_border)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(location, Style::default().fg(theme.muted)),
+            Span::raw(" "),
+            Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
+            Span::raw(" "),
+            Span::styled("[e edit | D delete]", Style::default().fg(theme.dimmed)),
+        ]),
+        raw_text: format!("#{} {}", comment.id, comment.text),
+        anchor: None,
+        comment_id: Some(comment.id),
+    });
+
+    for text in comment.text.lines() {
+        rendered.push(RenderedDiffLine {
+            line: Line::from(vec![
+                Span::styled("       ", Style::default().fg(theme.dimmed)),
+                Span::styled(text.to_owned(), Style::default().fg(theme.text)),
+            ]),
+            raw_text: text.to_owned(),
+            anchor: None,
+            comment_id: Some(comment.id),
+        });
+    }
+}
+
+fn comment_anchor_matches(actual: &CommentAnchor, expected: &CommentAnchor) -> bool {
+    actual.commit_id == expected.commit_id
+        && actual.file_path == expected.file_path
+        && actual.hunk_header == expected.hunk_header
+        && actual.old_lineno == expected.old_lineno
+        && actual.new_lineno == expected.new_lineno
+}
+
+fn comment_targets_hunk_end(
+    comment: &ReviewComment,
+    path: &str,
+    commit_id: &str,
+    hunk_header: &str,
+) -> bool {
+    comment.target.end.file_path == path
+        && comment.target.end.commit_id == commit_id
+        && comment.target.end.hunk_header == hunk_header
+}
+
+fn format_anchor_lines(old_lineno: Option<u32>, new_lineno: Option<u32>) -> String {
+    match (old_lineno, new_lineno) {
+        (Some(old), Some(new)) => format!("old {old}/new {new}"),
+        (Some(old), None) => format!("old {old}"),
+        (None, Some(new)) => format!("new {new}"),
+        (None, None) => "n/a".to_owned(),
+    }
+}
+
+fn comment_location_label(comment: &ReviewComment) -> String {
+    let start = format_anchor_lines(
+        comment.target.start.old_lineno,
+        comment.target.start.new_lineno,
+    );
+    let end = format_anchor_lines(comment.target.end.old_lineno, comment.target.end.new_lineno);
+    if start == end {
+        format!("line {start}")
+    } else {
+        format!("range {start} -> {end}")
+    }
+}
+
+fn comment_age(comment: &ReviewComment, now_ts: i64) -> String {
+    let ts = DateTime::parse_from_rfc3339(&comment.updated_at)
+        .map(|dt| dt.timestamp())
+        .unwrap_or(now_ts);
+    format_relative_time(ts, now_ts)
+}
+
 fn selected_ids_oldest_first(rows: &[CommitRow]) -> Vec<String> {
     rows.iter()
         .rev()
@@ -1982,6 +2228,21 @@ mod tests {
             },
             selected,
             status,
+        }
+    }
+
+    fn sample_comment(start: CommentAnchor, end: CommentAnchor, text: &str) -> ReviewComment {
+        ReviewComment {
+            id: 7,
+            target: CommentTarget {
+                start,
+                end,
+                commits: BTreeSet::from(["abc".to_owned()]),
+                selected_lines: vec!["+x".to_owned()],
+            },
+            text: text.to_owned(),
+            created_at: "2026-01-01T00:00:00Z".to_owned(),
+            updated_at: "2026-01-01T00:00:00Z".to_owned(),
         }
     }
 
@@ -2106,5 +2367,149 @@ mod tests {
         assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Files);
         assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Diff);
         assert_eq!(focus_with_l(FocusPane::Commits), FocusPane::Diff);
+    }
+
+    #[test]
+    fn comment_anchor_match_requires_exact_line_mapping() {
+        let base = CommentAnchor {
+            commit_id: "abc".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+        };
+        let same = base.clone();
+        let mut different = base.clone();
+        different.new_lineno = Some(2);
+
+        assert!(comment_anchor_matches(&base, &same));
+        assert!(!comment_anchor_matches(&base, &different));
+    }
+
+    #[test]
+    fn comment_location_formats_range_when_bounds_differ() {
+        let start = CommentAnchor {
+            commit_id: "abc".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+        };
+        let end = CommentAnchor {
+            old_lineno: Some(3),
+            new_lineno: Some(4),
+            ..start.clone()
+        };
+        let comment = sample_comment(start, end, "check this");
+
+        assert_eq!(
+            comment_location_label(&comment),
+            "range old 1/new 1 -> old 3/new 4"
+        );
+    }
+
+    #[test]
+    fn comment_hunk_membership_uses_end_anchor() {
+        let start = CommentAnchor {
+            commit_id: "start".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+        };
+        let end = CommentAnchor {
+            commit_id: "end".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -10,1 +10,1 @@".to_owned(),
+            old_lineno: Some(10),
+            new_lineno: Some(10),
+        };
+        let mut comment = sample_comment(start, end.clone(), "multi hunk");
+        comment.id = 8;
+        comment.target.commits = BTreeSet::from(["start".to_owned(), "end".to_owned()]);
+
+        assert!(comment_targets_hunk_end(
+            &comment,
+            "src/lib.rs",
+            "end",
+            "@@ -10,1 +10,1 @@"
+        ));
+        assert!(!comment_targets_hunk_end(
+            &comment,
+            "src/lib.rs",
+            "start",
+            "@@ -1,1 +1,1 @@"
+        ));
+        assert!(!comment_targets_hunk_end(
+            &comment,
+            "src/other.rs",
+            "end",
+            "@@ -10,1 +10,1 @@"
+        ));
+    }
+
+    #[test]
+    fn push_comment_lines_sets_comment_id_on_each_rendered_row() {
+        let start = CommentAnchor {
+            commit_id: "abc".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+        };
+        let end = CommentAnchor {
+            old_lineno: Some(2),
+            new_lineno: Some(2),
+            ..start.clone()
+        };
+        let comment = sample_comment(start, end, "line one\nline two");
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let mut rendered = Vec::new();
+
+        push_comment_lines(&mut rendered, &comment, &theme, 0);
+
+        assert_eq!(rendered.len(), 3);
+        assert!(
+            rendered
+                .iter()
+                .all(|line| line.comment_id == Some(comment.id))
+        );
+    }
+
+    #[test]
+    fn push_comment_lines_for_anchor_injects_once_on_matching_end_anchor() {
+        let start = CommentAnchor {
+            commit_id: "abc".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+        };
+        let end = CommentAnchor {
+            old_lineno: Some(2),
+            new_lineno: Some(2),
+            ..start.clone()
+        };
+        let comment = sample_comment(start.clone(), end.clone(), "line one");
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let mut rendered = Vec::new();
+        let comments = vec![&comment];
+        let mut injected = BTreeSet::new();
+
+        push_comment_lines_for_anchor(&mut rendered, &comments, &mut injected, &start, &theme, 0);
+        assert!(rendered.is_empty());
+
+        push_comment_lines_for_anchor(&mut rendered, &comments, &mut injected, &end, &theme, 0);
+        let inserted_rows = rendered.len();
+        assert!(inserted_rows > 0);
+
+        push_comment_lines_for_anchor(&mut rendered, &comments, &mut injected, &end, &theme, 0);
+        assert_eq!(rendered.len(), inserted_rows);
     }
 }
