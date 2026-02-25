@@ -1246,8 +1246,7 @@ fn selected_ids_oldest_first(rows: &[CommitRow]) -> Vec<String> {
 }
 
 fn apply_range_selection(rows: &mut [CommitRow], start: usize, end: usize) {
-    let start = min(start, end);
-    let end = max(start, end);
+    let (start, end) = (min(start, end), max(start, end));
     for (idx, row) in rows.iter_mut().enumerate() {
         row.selected = !row.approved && idx >= start && idx <= end;
     }
@@ -1346,6 +1345,17 @@ mod tests {
         assert!(rows[0].selected);
         assert!(!rows[1].selected);
         assert!(rows[2].selected);
+    }
+
+    #[test]
+    fn range_selection_handles_reverse_bounds() {
+        let mut rows = vec![
+            commit_row("a", false, false),
+            commit_row("b", false, false),
+            commit_row("c", false, false),
+        ];
+        apply_range_selection(&mut rows, 2, 0);
+        assert!(rows.iter().all(|row| row.selected));
     }
 
     #[test]
