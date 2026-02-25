@@ -1644,7 +1644,7 @@ impl App {
             self.git.branch_name(),
         );
 
-        apply_status_ids(&mut self.commits, ids, status);
+        apply_status_transition(&mut self.commits, ids, status);
         let save_result = self.store.save(&self.review_state);
         let status_message = if let Err(err) = save_result {
             format!("failed to persist status change: {err:#}")
@@ -2282,6 +2282,25 @@ fn apply_status_ids(rows: &mut [CommitRow], ids: &BTreeSet<String>, status: Revi
     }
 }
 
+fn auto_deselect_status(status: ReviewStatus) -> bool {
+    matches!(status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
+}
+
+fn deselect_ids(rows: &mut [CommitRow], ids: &BTreeSet<String>) {
+    for row in rows {
+        if ids.contains(&row.info.id) {
+            row.selected = false;
+        }
+    }
+}
+
+fn apply_status_transition(rows: &mut [CommitRow], ids: &BTreeSet<String>, status: ReviewStatus) {
+    apply_status_ids(rows, ids, status);
+    if auto_deselect_status(status) {
+        deselect_ids(rows, ids);
+    }
+}
+
 fn page_step(height: u16, multiplier: f32) -> isize {
     let visible = height.saturating_sub(2).max(1) as f32;
     (visible * multiplier).round() as isize
@@ -2430,6 +2449,38 @@ mod tests {
 
         assert_eq!(rows[0].status, ReviewStatus::Unreviewed);
         assert_eq!(rows[1].status, ReviewStatus::IssueFound);
+    }
+
+    #[test]
+    fn reviewed_status_auto_deselects_targeted_commits() {
+        let mut rows = vec![
+            commit_row("a", true, ReviewStatus::Unreviewed),
+            commit_row("b", true, ReviewStatus::IssueFound),
+            commit_row("c", false, ReviewStatus::Unreviewed),
+        ];
+        let ids = BTreeSet::from(["b".to_owned(), "c".to_owned()]);
+
+        apply_status_transition(&mut rows, &ids, ReviewStatus::Reviewed);
+
+        assert!(rows[0].selected);
+        assert!(!rows[1].selected);
+        assert!(!rows[2].selected);
+        assert_eq!(rows[1].status, ReviewStatus::Reviewed);
+        assert_eq!(rows[2].status, ReviewStatus::Reviewed);
+    }
+
+    #[test]
+    fn issue_found_status_keeps_selection_intact() {
+        let mut rows = vec![
+            commit_row("a", true, ReviewStatus::Unreviewed),
+            commit_row("b", false, ReviewStatus::Reviewed),
+        ];
+        let ids = BTreeSet::from(["a".to_owned()]);
+
+        apply_status_transition(&mut rows, &ids, ReviewStatus::IssueFound);
+
+        assert!(rows[0].selected);
+        assert_eq!(rows[0].status, ReviewStatus::IssueFound);
     }
 
     #[test]
