@@ -17,7 +17,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - right: syntax-highlighted, continuous diff viewer across all changed files
 - each file section in the diff is labeled inline (`file i/n: path`) so it is always obvious there are more files above/below
 - scrolling through the diff auto-syncs file selection in the file tree to the file currently under the diff cursor
-- commit banners stay visible at the top of the diff pane while scrolling through their hunks
+- file and commit banners stay visible at the top of the diff pane while scrolling through hunks (`file` sticky row above `commit`)
 - right pane includes a simple vertical scrollbar for quick position awareness
 - Theme modes: dark and light (`dark` by default)
 - Initial default selection: unpushed + unreviewed commits; newly arriving commits are highlighted but not auto-selected

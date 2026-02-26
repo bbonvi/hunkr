@@ -45,7 +45,7 @@ impl<'a> DiffPaneRenderer<'a> {
         rendered_diff: &[RenderedDiffLine],
         diff_position: DiffPosition,
         visual_range: Option<(usize, usize)>,
-        sticky_commit_idx: Option<usize>,
+        sticky_banner_indexes: &[usize],
     ) {
         let border_style = if self.focused == FocusPane::Diff {
             Style::default().fg(self.theme.focus_border)
@@ -89,15 +89,15 @@ impl<'a> DiffPaneRenderer<'a> {
             return;
         }
 
-        let sticky_rows = usize::from(sticky_commit_idx.is_some() && inner.height > 1);
-        if sticky_rows == 1 {
-            let sticky_idx = sticky_commit_idx.expect("sticky row requires banner index");
+        let max_sticky_rows = inner.height.saturating_sub(1) as usize;
+        let sticky_rows = sticky_banner_indexes.len().min(max_sticky_rows);
+        for (row, sticky_idx) in sticky_banner_indexes.iter().take(sticky_rows).enumerate() {
             let sticky_line = rendered_diff
-                .get(sticky_idx)
+                .get(*sticky_idx)
                 .map(|line| {
                     display_line_with_selection(
                         line,
-                        sticky_idx,
+                        *sticky_idx,
                         visual_range,
                         diff_position.cursor,
                         self.focused == FocusPane::Diff,
@@ -109,7 +109,7 @@ impl<'a> DiffPaneRenderer<'a> {
                 Paragraph::new(vec![sticky_line]),
                 ratatui::layout::Rect {
                     x: inner.x,
-                    y: inner.y,
+                    y: inner.y + row as u16,
                     width: inner.width,
                     height: 1,
                 },

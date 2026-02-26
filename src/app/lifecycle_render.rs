@@ -719,11 +719,15 @@ impl App {
                     }
                 } else if in_diff {
                     self.focused = FocusPane::Diff;
+                    let viewport_rows =
+                        self.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
+                    let sticky_banner_indexes = self
+                        .sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
                     if let Some(row) = diff_index_at(
                         y,
                         self.pane_rects.diff,
                         self.diff_position.scroll,
-                        self.sticky_commit_banner_index_for_scroll(self.diff_position.scroll),
+                        &sticky_banner_indexes,
                     ) {
                         self.set_diff_cursor(row);
                     }
@@ -773,8 +777,9 @@ impl App {
             .diff_selected_range()
             .map(|(start, end)| end.saturating_sub(start) + 1)
             .unwrap_or(0);
-        let sticky_commit_idx =
-            self.sticky_commit_banner_index_for_scroll(self.diff_position.scroll);
+        let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
+        let sticky_banner_indexes =
+            self.sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
         DiffPaneRenderer::new(theme, self.focused).render(
             frame,
             rect,
@@ -784,7 +789,7 @@ impl App {
             &self.rendered_diff,
             self.diff_position,
             self.diff_selected_range(),
-            sticky_commit_idx,
+            &sticky_banner_indexes,
         );
     }
 

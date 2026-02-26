@@ -85,17 +85,27 @@ fn list_index_skips_border_rows() {
 #[test]
 fn diff_index_maps_sticky_row_to_banner_line() {
     let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
-    assert_eq!(diff_index_at(1, rect, 20, Some(7)), Some(7));
-    assert_eq!(diff_index_at(2, rect, 20, Some(7)), Some(20));
-    assert_eq!(diff_index_at(3, rect, 20, Some(7)), Some(21));
+    let sticky = vec![7];
+    assert_eq!(diff_index_at(1, rect, 20, &sticky), Some(7));
+    assert_eq!(diff_index_at(2, rect, 20, &sticky), Some(20));
+    assert_eq!(diff_index_at(3, rect, 20, &sticky), Some(21));
+}
+
+#[test]
+fn diff_index_maps_multiple_sticky_rows_in_order() {
+    let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
+    let sticky = vec![4, 9];
+    assert_eq!(diff_index_at(1, rect, 20, &sticky), Some(4));
+    assert_eq!(diff_index_at(2, rect, 20, &sticky), Some(9));
+    assert_eq!(diff_index_at(3, rect, 20, &sticky), Some(20));
 }
 
 #[test]
 fn diff_index_matches_list_behavior_without_sticky_banner() {
     let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
-    assert_eq!(diff_index_at(1, rect, 20, None), Some(20));
-    assert_eq!(diff_index_at(2, rect, 20, None), Some(21));
-    assert_eq!(diff_index_at(7, rect, 20, None), None);
+    assert_eq!(diff_index_at(1, rect, 20, &[]), Some(20));
+    assert_eq!(diff_index_at(2, rect, 20, &[]), Some(21));
+    assert_eq!(diff_index_at(7, rect, 20, &[]), None);
 }
 
 #[test]

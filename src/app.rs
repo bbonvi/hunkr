@@ -422,7 +422,7 @@ fn diff_index_at(
     mouse_y: u16,
     rect: ratatui::layout::Rect,
     scroll: usize,
-    sticky_banner_index: Option<usize>,
+    sticky_banner_indexes: &[usize],
 ) -> Option<usize> {
     if rect.height < 3 {
         return None;
@@ -432,15 +432,33 @@ fn diff_index_at(
     }
 
     let row = mouse_y.saturating_sub(rect.y + 1) as usize;
-    if let Some(sticky_idx) = sticky_banner_index {
-        if row == 0 {
-            Some(sticky_idx)
-        } else {
-            Some(scroll + row - 1)
-        }
+    if row < sticky_banner_indexes.len() {
+        sticky_banner_indexes.get(row).copied()
     } else {
-        Some(scroll + row)
+        Some(scroll + row.saturating_sub(sticky_banner_indexes.len()))
     }
+}
+
+fn compose_sticky_banner_indexes(
+    sticky_file_idx: Option<usize>,
+    sticky_commit_idx: Option<usize>,
+    viewport_rows: usize,
+) -> Vec<usize> {
+    let max_sticky = viewport_rows.saturating_sub(1);
+    if max_sticky == 0 {
+        return Vec::new();
+    }
+
+    let mut sticky = Vec::with_capacity(2);
+    if let Some(file_idx) = sticky_file_idx {
+        sticky.push(file_idx);
+    }
+    if sticky.len() < max_sticky
+        && let Some(commit_idx) = sticky_commit_idx
+    {
+        sticky.push(commit_idx);
+    }
+    sticky
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {

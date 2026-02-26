@@ -284,7 +284,9 @@ impl App {
             return None;
         }
         let top = scroll.min(self.rendered_diff.len().saturating_sub(1));
-        for idx in (0..=top).rev() {
+        let file_range_idx = self.file_range_index_for_line(top)?;
+        let file_range = self.file_diff_ranges.get(file_range_idx)?;
+        for idx in (file_range.start..=top).rev() {
             let is_commit_banner = self.rendered_diff[idx]
                 .anchor
                 .as_ref()
@@ -296,16 +298,34 @@ impl App {
         None
     }
 
+    pub(super) fn sticky_file_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
+        if scroll == 0 || self.rendered_diff.is_empty() {
+            return None;
+        }
+        let top = scroll.min(self.rendered_diff.len().saturating_sub(1));
+        let file_range_idx = self.file_range_index_for_line(top)?;
+        let file_range = self.file_diff_ranges.get(file_range_idx)?;
+        (file_range.start < top).then_some(file_range.start)
+    }
+
+    pub(super) fn sticky_banner_indexes_for_scroll(
+        &self,
+        scroll: usize,
+        viewport_rows: usize,
+    ) -> Vec<usize> {
+        compose_sticky_banner_indexes(
+            self.sticky_file_banner_index_for_scroll(scroll),
+            self.sticky_commit_banner_index_for_scroll(scroll),
+            viewport_rows,
+        )
+    }
+
     pub(super) fn visible_diff_rows_for_scroll(&self, scroll: usize) -> usize {
         let viewport_rows = self.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
-        if viewport_rows <= 1 {
-            return viewport_rows;
-        }
-        if self.sticky_commit_banner_index_for_scroll(scroll).is_some() {
-            viewport_rows - 1
-        } else {
-            viewport_rows
-        }
+        let sticky_rows = self
+            .sticky_banner_indexes_for_scroll(scroll, viewport_rows)
+            .len();
+        viewport_rows.saturating_sub(sticky_rows).max(1)
     }
 
     pub(super) fn visible_diff_rows(&self) -> usize {
@@ -320,16 +340,12 @@ impl App {
         let base_rows = self.visible_diff_rows_for_scroll(0).min(len);
         let mut max_scroll = len.saturating_sub(base_rows);
 
-        let sticky_rows = self
+        let end_rows = self
             .visible_diff_rows_for_scroll(len.saturating_sub(1))
             .min(len);
-        let sticky_max_scroll = len.saturating_sub(sticky_rows);
-        if sticky_max_scroll > max_scroll
-            && self
-                .sticky_commit_banner_index_for_scroll(sticky_max_scroll)
-                .is_some()
-        {
-            max_scroll = sticky_max_scroll;
+        let end_max_scroll = len.saturating_sub(end_rows);
+        if end_max_scroll > max_scroll {
+            max_scroll = end_max_scroll;
         }
 
         max_scroll
