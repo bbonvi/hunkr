@@ -200,9 +200,9 @@ where
         return report;
     }
 
-    for entry in &visible {
+    for (task_idx, entry) in visible.iter().enumerate() {
         let comment = &entry.comment;
-        report.push_str(&format!("### TASK #{}\n\n", comment.id));
+        report.push_str(&format!("### TASK #{}\n\n", task_idx + 1));
         report.push_str("- Status: `ACTION_REQUIRED`\n");
         report.push_str(&format!(
             "- Target Type: `{}`\n",
@@ -413,10 +413,10 @@ mod tests {
     fn sync_report_hides_reviewed_and_resolved_comments() {
         let tmp = tempdir().expect("tempdir");
         let mut store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
-        let first = store
+        store
             .add_comment(&make_target_for_commit("a1"), "first")
             .expect("add first");
-        let second = store
+        store
             .add_comment(&make_target_for_commit("b2"), "second")
             .expect("add second");
 
@@ -429,9 +429,87 @@ mod tests {
             .expect("sync");
 
         let report = fs::read_to_string(report_path).expect("read report");
-        assert!(report.contains(&format!("TASK #{}", first)));
-        assert!(!report.contains(&format!("TASK #{}", second)));
+        assert!(report.contains("TASK #1"));
+        assert!(!report.contains("TASK #2"));
         assert!(report.contains("- Actionable tasks: 1"));
         assert!(!report.contains("## Source Task Coverage"));
+    }
+
+    #[test]
+    fn sync_report_numbers_tasks_from_one_even_with_high_comment_ids() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path().join(COMMENTS_DIR);
+        fs::create_dir_all(&root).expect("mkdir comments");
+        let index = root.join(COMMENTS_INDEX_FILE);
+        let seeded = r#"
+[
+  {
+    "id": 41,
+    "target": {
+      "kind": "HUNK",
+      "start": {
+        "commit_id": "a1",
+        "commit_summary": "summary a",
+        "file_path": "src/lib.rs",
+        "hunk_header": "@@ -1,1 +1,1 @@",
+        "old_lineno": 1,
+        "new_lineno": 1
+      },
+      "end": {
+        "commit_id": "a1",
+        "commit_summary": "summary a",
+        "file_path": "src/lib.rs",
+        "hunk_header": "@@ -1,1 +1,1 @@",
+        "old_lineno": 1,
+        "new_lineno": 1
+      },
+      "commits": ["a1"],
+      "selected_lines": ["+x"]
+    },
+    "text": "first",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z"
+  },
+  {
+    "id": 88,
+    "target": {
+      "kind": "HUNK",
+      "start": {
+        "commit_id": "b2",
+        "commit_summary": "summary b",
+        "file_path": "src/main.rs",
+        "hunk_header": "@@ -2,1 +2,1 @@",
+        "old_lineno": 2,
+        "new_lineno": 2
+      },
+      "end": {
+        "commit_id": "b2",
+        "commit_summary": "summary b",
+        "file_path": "src/main.rs",
+        "hunk_header": "@@ -2,1 +2,1 @@",
+        "old_lineno": 2,
+        "new_lineno": 2
+      },
+      "commits": ["b2"],
+      "selected_lines": ["+y"]
+    },
+    "text": "second",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z"
+  }
+]
+"#;
+        fs::write(index, seeded).expect("write seeded index");
+
+        let store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
+        let report_path = store
+            .sync_review_tasks_report(|_| ReviewStatus::IssueFound)
+            .expect("sync");
+        let report = fs::read_to_string(report_path).expect("read report");
+
+        assert!(report.contains("TASK #1"));
+        assert!(report.contains("TASK #2"));
+        assert!(!report.contains("TASK #41"));
+        assert!(!report.contains("TASK #88"));
     }
 }
