@@ -100,7 +100,6 @@ fn nerd_file_icon_for_path(path: &str) -> &'static str {
 fn special_file_icon(lower_name: &str) -> Option<&'static str> {
     match lower_name {
         ".gitignore" | ".gitattributes" | ".gitmodules" => Some(""),
-        "cargo.toml" | "cargo.lock" => Some(""),
         "dockerfile" => Some(""),
         "makefile" => Some(""),
         "readme" | "readme.md" | "readme.txt" => Some(""),
@@ -136,6 +135,40 @@ fn file_extension_icon(ext: &str) -> Option<&'static str> {
         "md" | "markdown" => Some(""),
         "sh" | "bash" | "zsh" | "fish" => Some(""),
         "diff" | "patch" => Some(""),
+        "dockerignore" => Some(""),
+        "env" => Some(""),
+        "git" => Some(""),
+        "lockb" => Some("󰌾"),
+        "pem" | "crt" | "key" | "pub" => Some("󰌆"),
+        "asc" | "sig" => Some("󰷃"),
+        "pdf" => Some(""),
+        "doc" | "docx" => Some("󰈬"),
+        "xls" | "xlsx" | "csv" | "tsv" => Some("󱎏"),
+        "ppt" | "pptx" => Some("󰈧"),
+        "log" => Some(""),
+        "bak" => Some("󰁯"),
+        "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "zst" => Some(""),
+        "svg" => Some("󰜡"),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tiff" => Some("󰈟"),
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" => Some("󰎆"),
+        "mp4" | "mov" | "mkv" | "avi" | "webm" => Some("󰕧"),
+        "ttf" | "otf" | "woff" | "woff2" => Some(""),
+        "wasm" => Some(""),
+        "proto" => Some("󱘦"),
+        "graphql" | "gql" => Some("󰡷"),
+        "tf" | "tfvars" => Some(""),
+        "nix" => Some(""),
+        "lua" => Some(""),
+        "r" => Some("󰟔"),
+        "dart" => Some(""),
+        "elm" => Some(""),
+        "ex" | "exs" => Some(""),
+        "erl" | "hrl" => Some(""),
+        "clj" | "cljs" | "cljc" | "edn" => Some(""),
+        "scala" => Some(""),
+        "zig" => Some(""),
+        "pl" | "pm" => Some(""),
+        "ps1" => Some("󰨊"),
         "lock" => Some("󰌾"),
         "txt" => Some("󰈙"),
         _ => None,
@@ -163,5 +196,10 @@ mod tests {
             format_tree_file_label(0, "README.md", "README.md", true),
             " README.md"
         );
+    }
+
+    #[test]
+    fn cargo_lock_uses_lock_icon_without_special_case() {
+        assert_eq!(format_path_with_icon("Cargo.lock", true), "󰌾 Cargo.lock");
     }
 }
