@@ -76,8 +76,8 @@ impl App {
         } else {
             app.reload_commits(true)?;
             app.ensure_rendered_diff();
-            app.status =
-                "Ready. Select commit range with <space>/v, set statuses with r/i/s/u.".to_owned();
+            let selected = app.commits.iter().filter(|row| row.selected).count();
+            app.status = format!("{selected} commit(s) selected");
         }
         Ok(app)
     }
@@ -115,11 +115,12 @@ impl App {
         self.last_refresh = Instant::now();
         self.last_relative_time_redraw = Instant::now();
 
-        let ready = "Ready. Select commit range with <space>/v, set statuses with r/i/s/u.";
+        let selected = self.commits.iter().filter(|row| row.selected).count();
+        let ready = format!("{selected} commit(s) selected");
         self.status = if let Some(note) = onboarding_note {
             format!("{note} {ready}")
         } else {
-            ready.to_owned()
+            ready
         };
     }
 
@@ -1644,17 +1645,9 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let mode = match self.input_mode {
-            InputMode::Normal => "NORMAL",
-            InputMode::CommentCreate => "COMMENT+",
-            InputMode::CommentEdit(_) => "COMMENT*",
-            InputMode::DiffSearch | InputMode::ListSearch(_) => "SEARCH/",
-        };
-        let focus = match self.focused {
-            FocusPane::Files => "files",
-            FocusPane::Commits => "commits",
-            FocusPane::Diff => "diff",
-        };
+        let commit_visual_active = self.commit_visual_anchor.is_some();
+        let diff_visual_active = self.diff_visual.is_some();
+        let mode = footer_mode_label(self.input_mode, commit_visual_active, diff_visual_active);
 
         let pane_line = match self.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => Line::from(vec![
@@ -1740,53 +1733,94 @@ impl App {
             Span::styled(" quit", Style::default().fg(theme.dimmed)),
         ]);
 
-        let status = match self.input_mode {
+        let mut status = vec![footer_chip(
+            mode,
+            footer_mode_style(mode, theme),
+            Modifier::BOLD,
+        )];
+        let show_primary_status = !self.status.is_empty()
+            && !matches!(
+                self.input_mode,
+                InputMode::DiffSearch | InputMode::ListSearch(_)
+            );
+        if show_primary_status {
+            status.push(Span::raw(" "));
+            status.push(Span::styled(
+                self.status.clone(),
+                footer_status_style(&self.status, theme),
+            ));
+        }
+
+        if let Some(scope) = footer_visual_scope_label(commit_visual_active, diff_visual_active) {
+            status.push(footer_separator(theme));
+            status.push(footer_chip(
+                &format!("{scope} RANGE"),
+                Style::default().fg(theme.focus_border).bg(blend_colors(
+                    theme.panel_title_bg,
+                    theme.visual_bg,
+                    156,
+                )),
+                Modifier::BOLD,
+            ));
+        }
+
+        match self.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => {
                 let line_count = self.comment_buffer.matches('\n').count() + 1;
                 let (line, col) =
                     comment_cursor_line_col(&self.comment_buffer, self.comment_cursor);
-                format!(
-                    "{} | mode={} focus={} theme={} comment:{} chars line:{} col:{} ({line_count} lines)",
-                    self.status,
-                    mode,
-                    focus,
-                    self.theme_mode.label(),
-                    self.comment_buffer.chars().count(),
-                    line,
-                    col
-                )
+                status.push(footer_separator(theme));
+                status.push(footer_detail_chip(
+                    format!("{} chars", self.comment_buffer.chars().count()),
+                    theme,
+                ));
+                status.push(Span::raw(" "));
+                status.push(footer_detail_chip(
+                    format!("Ln {line}, Col {col}, {line_count} lines"),
+                    theme,
+                ));
             }
-            InputMode::DiffSearch => format!(
-                "{} | mode={} focus={} theme={} /{}",
-                self.status,
-                mode,
-                focus,
-                self.theme_mode.label(),
-                self.diff_search_buffer
-            ),
+            InputMode::DiffSearch => {
+                let query = if self.diff_search_buffer.is_empty() {
+                    "/".to_owned()
+                } else {
+                    format!("/{}", self.diff_search_buffer)
+                };
+                status.push(footer_separator(theme));
+                status.push(footer_chip(
+                    &query,
+                    Style::default().fg(theme.accent).bg(blend_colors(
+                        theme.panel_title_bg,
+                        theme.border,
+                        176,
+                    )),
+                    Modifier::BOLD,
+                ));
+            }
             InputMode::ListSearch(pane) => {
                 let query = match pane {
                     FocusPane::Commits => &self.commit_search_query,
                     FocusPane::Files => &self.file_search_query,
                     FocusPane::Diff => "",
                 };
-                format!(
-                    "{} | mode={} focus={} theme={} /{}",
-                    self.status,
-                    mode,
-                    focus,
-                    self.theme_mode.label(),
-                    query
-                )
+                let query = if query.is_empty() {
+                    "/".to_owned()
+                } else {
+                    format!("/{}", query)
+                };
+                status.push(footer_separator(theme));
+                status.push(footer_chip(
+                    &query,
+                    Style::default().fg(theme.accent).bg(blend_colors(
+                        theme.panel_title_bg,
+                        theme.border,
+                        176,
+                    )),
+                    Modifier::BOLD,
+                ));
             }
-            InputMode::Normal => format!(
-                "{} | mode={} focus={} theme={}",
-                self.status,
-                mode,
-                focus,
-                self.theme_mode.label()
-            ),
-        };
+            InputMode::Normal => {}
+        }
 
         let chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -1796,7 +1830,8 @@ impl App {
             ])
             .split(rect);
 
-        let status_widget = Paragraph::new(status).style(Style::default().fg(theme.text));
+        let status_widget =
+            Paragraph::new(Line::from(status)).style(Style::default().fg(theme.text));
         let hint_widget = Paragraph::new(vec![pane_line, global_line])
             .style(Style::default().fg(theme.dimmed))
             .block(
@@ -2298,4 +2333,74 @@ impl App {
         );
         frame.render_widget(widget, area);
     }
+}
+
+pub(super) fn footer_mode_label(
+    input_mode: InputMode,
+    commit_visual_active: bool,
+    diff_visual_active: bool,
+) -> &'static str {
+    match input_mode {
+        InputMode::CommentCreate | InputMode::CommentEdit(_) => "COMMENT",
+        InputMode::DiffSearch | InputMode::ListSearch(_) => "SEARCH",
+        InputMode::Normal if commit_visual_active || diff_visual_active => "VISUAL",
+        InputMode::Normal => "NORMAL",
+    }
+}
+
+fn footer_visual_scope_label(
+    commit_visual_active: bool,
+    diff_visual_active: bool,
+) -> Option<&'static str> {
+    if commit_visual_active {
+        Some("COMMITS")
+    } else if diff_visual_active {
+        Some("DIFF")
+    } else {
+        None
+    }
+}
+
+fn footer_mode_style(mode: &str, theme: &UiTheme) -> Style {
+    let base = Style::default().fg(theme.panel_title_fg);
+    match mode {
+        "VISUAL" => base.bg(blend_colors(theme.visual_bg, theme.panel_title_bg, 170)),
+        "SEARCH" => base.bg(blend_colors(theme.accent, theme.panel_title_bg, 92)),
+        "COMMENT" => base.bg(blend_colors(theme.accent, theme.panel_title_bg, 138)),
+        _ => base.bg(theme.panel_title_bg),
+    }
+}
+
+fn footer_status_style(status: &str, theme: &UiTheme) -> Style {
+    if status.contains("failed") || status.contains("Failed") {
+        Style::default()
+            .fg(theme.unreviewed)
+            .add_modifier(Modifier::BOLD)
+    } else if status.contains("new unreviewed") {
+        Style::default()
+            .fg(theme.unreviewed)
+            .add_modifier(Modifier::BOLD)
+    } else if status.contains("No ") || status.contains("empty") {
+        Style::default().fg(theme.issue)
+    } else {
+        Style::default().fg(theme.text)
+    }
+}
+
+fn footer_chip(label: &str, style: Style, modifier: Modifier) -> Span<'static> {
+    Span::styled(format!(" {label} "), style.add_modifier(modifier))
+}
+
+fn footer_detail_chip(label: String, theme: &UiTheme) -> Span<'static> {
+    footer_chip(
+        &label,
+        Style::default()
+            .fg(theme.muted)
+            .bg(blend_colors(theme.panel_title_bg, theme.border, 176)),
+        Modifier::empty(),
+    )
+}
+
+fn footer_separator(theme: &UiTheme) -> Span<'static> {
+    Span::styled(" | ", Style::default().fg(theme.dimmed))
 }

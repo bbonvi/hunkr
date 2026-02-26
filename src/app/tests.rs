@@ -1,3 +1,4 @@
+use super::lifecycle_render::footer_mode_label;
 use super::ui::diff_pane::{scrollbar_thumb, tint_line_background};
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{line_with_right, list_content_width, list_row_style};
@@ -471,6 +472,28 @@ fn wheel_clears_only_keyboard_diff_visual_mode() {
     assert!(should_clear_diff_visual_on_wheel(keyboard));
     assert!(!should_clear_diff_visual_on_wheel(mouse));
     assert!(!should_clear_diff_visual_on_wheel(None));
+}
+
+#[test]
+fn footer_mode_label_uses_visual_when_commit_range_active() {
+    assert_eq!(footer_mode_label(InputMode::Normal, true, false), "VISUAL");
+}
+
+#[test]
+fn footer_mode_label_uses_visual_when_diff_range_active() {
+    assert_eq!(footer_mode_label(InputMode::Normal, false, true), "VISUAL");
+}
+
+#[test]
+fn footer_mode_label_prioritizes_modal_states() {
+    assert_eq!(
+        footer_mode_label(InputMode::DiffSearch, true, true),
+        "SEARCH"
+    );
+    assert_eq!(
+        footer_mode_label(InputMode::CommentCreate, true, true),
+        "COMMENT"
+    );
 }
 
 #[test]

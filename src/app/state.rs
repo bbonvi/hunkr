@@ -86,7 +86,12 @@ impl App {
             })
             .count();
         if new_commits > 0 {
-            self.status = format!("{} new unreviewed commit(s) detected", new_commits);
+            let noun = if new_commits == 1 {
+                "commit"
+            } else {
+                "commits"
+            };
+            self.status = format!("{new_commits} new unreviewed {noun} detected");
         }
 
         self.rebuild_selection_dependent_views()?;
@@ -659,7 +664,7 @@ impl App {
     pub(super) fn on_selection_changed_debounced(&mut self) {
         self.selection_rebuild_due = Some(Instant::now() + SELECTION_REBUILD_DEBOUNCE);
         let selected = self.commits.iter().filter(|row| row.selected).count();
-        self.status = format!("{} commit(s) selected (diff update pending)", selected);
+        self.status = format!("{} commit(s) selected", selected);
     }
 
     pub(super) fn flush_pending_selection_rebuild(&mut self) {
