@@ -186,11 +186,28 @@ impl App {
         let preferred_commit_id = self.selected_commit_id();
         let fallback_visible_idx = self.commit_list_state.selected();
         self.commit_status_filter = self.commit_status_filter.next();
+        let deselected =
+            deselect_rows_outside_status_filter(&mut self.commits, self.commit_status_filter);
+        if deselected > 0 {
+            self.commit_visual_anchor = None;
+            if let Err(err) = self.rebuild_selection_dependent_views() {
+                self.status = format!("failed to rebuild diff: {err:#}");
+                return;
+            }
+        }
         self.sync_commit_cursor_for_filters(
             preferred_commit_id.as_deref(),
             fallback_visible_idx,
         );
-        self.status = format!("Commit status filter: {}", self.commit_status_filter.label());
+        self.status = if deselected == 0 {
+            format!("Commit status filter: {}", self.commit_status_filter.label())
+        } else {
+            format!(
+                "Commit status filter: {} (deselected {} hidden commit(s))",
+                self.commit_status_filter.label(),
+                deselected
+            )
+        };
     }
 
     pub(super) fn set_status_for_ids(&mut self, ids: &BTreeSet<String>, status: ReviewStatus) {

@@ -1303,6 +1303,20 @@ fn apply_status_transition(rows: &mut [CommitRow], ids: &BTreeSet<String>, statu
     }
 }
 
+fn deselect_rows_outside_status_filter(
+    rows: &mut [CommitRow],
+    status_filter: CommitStatusFilter,
+) -> usize {
+    let mut deselected = 0usize;
+    for row in rows {
+        if row.selected && !status_filter.matches_row(row) {
+            row.selected = false;
+            deselected += 1;
+        }
+    }
+    deselected
+}
+
 fn page_step(height: u16, multiplier: f32) -> isize {
     let visible = height.saturating_sub(2).max(1) as f32;
     (visible * multiplier).round() as isize

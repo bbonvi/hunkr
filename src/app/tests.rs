@@ -952,6 +952,30 @@ fn commit_search_matches_text_and_status_case_insensitively() {
 }
 
 #[test]
+fn switching_status_filter_deselects_hidden_commits() {
+    let mut unreviewed = commit_row("a", true, ReviewStatus::Unreviewed);
+    let reviewed = commit_row("b", true, ReviewStatus::Reviewed);
+    let mut draft = commit_row("wip", true, ReviewStatus::Unreviewed);
+    draft.is_uncommitted = true;
+    unreviewed.is_uncommitted = false;
+    let mut rows = vec![unreviewed, reviewed, draft];
+
+    let deselected =
+        deselect_rows_outside_status_filter(&mut rows, CommitStatusFilter::UnreviewedOrIssueFound);
+    assert_eq!(deselected, 1);
+    assert!(rows[0].selected);
+    assert!(!rows[1].selected);
+    assert!(rows[2].selected);
+
+    let deselected =
+        deselect_rows_outside_status_filter(&mut rows, CommitStatusFilter::ReviewedOrResolved);
+    assert_eq!(deselected, 2);
+    assert!(!rows[0].selected);
+    assert!(!rows[1].selected);
+    assert!(!rows[2].selected);
+}
+
+#[test]
 fn relative_time_formats_expected_units() {
     assert_eq!(format_relative_time(100, 130), "30s ago");
     assert_eq!(format_relative_time(100, 220), "2m ago");
