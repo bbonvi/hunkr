@@ -51,7 +51,9 @@ fn init_terminal() -> anyhow::Result<Terminal<CrosstermBackend<Stdout>>> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
         .context("failed to enter alternate screen")?;
     let backend = CrosstermBackend::new(stdout);
-    Terminal::new(backend).context("failed to create terminal")
+    let mut terminal = Terminal::new(backend).context("failed to create terminal")?;
+    terminal.hide_cursor().context("failed to hide cursor")?;
+    Ok(terminal)
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {

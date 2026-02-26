@@ -118,16 +118,39 @@ fn comment_cursor_line_and_col_track_multiline_positions() {
 #[test]
 fn comment_modal_lines_includes_cursor_marker() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let rendered = comment_modal_lines("abc", 2, 4, &theme);
-    let flattened = rendered[0]
+    let rendered = comment_modal_lines("abc", 1, None, 4, &theme);
+    let flattened = rendered.lines[0]
         .spans
         .iter()
         .map(|span| span.content.to_string())
         .collect::<String>();
 
-    assert!(flattened.contains("▏"));
+    assert!(!flattened.contains('|'));
+    assert!(
+        rendered.lines[0]
+            .spans
+            .iter()
+            .any(|span| span.content == "b" && span.style.bg == Some(theme.modal_cursor_bg))
+    );
     assert!(flattened.contains("ab"));
     assert!(flattened.contains("c"));
+    assert!(rendered.text_offset > 0);
+}
+
+#[test]
+fn delete_selection_range_cuts_selected_text() {
+    let mut text = "alpha beta".to_owned();
+    let mut cursor = text.len();
+    let mut selection = Some((2, 8));
+
+    assert!(delete_selection_range(
+        &mut text,
+        &mut cursor,
+        &mut selection
+    ));
+    assert_eq!(text, "alta");
+    assert_eq!(cursor, 2);
+    assert!(selection.is_none());
 }
 
 #[test]

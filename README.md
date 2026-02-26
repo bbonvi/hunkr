@@ -106,10 +106,12 @@ Diff pane:
 
 Comment mode:
 
-- centered modal editor for create/edit with cursor-aware typing
+- compact centered modal editor for create/edit with in-modal status and context preview
 - `Enter` / `Ctrl-s`: save
 - `Alt-Enter`: newline
 - `Esc`: cancel
+- mouse click: move cursor
+- mouse drag: select text
 - arrows / `Home` / `End`: move cursor
 - `Ctrl-a` / `Ctrl-e`: jump to start/end
 - `Ctrl-w` or `Ctrl-Backspace`: delete previous word

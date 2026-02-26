@@ -278,6 +278,12 @@ pub struct App {
     status: String,
     comment_buffer: String,
     comment_cursor: usize,
+    comment_selection: Option<(usize, usize)>,
+    comment_mouse_anchor: Option<usize>,
+    comment_editor_rect: Option<ratatui::layout::Rect>,
+    comment_editor_line_ranges: Vec<(usize, usize)>,
+    comment_editor_view_start: usize,
+    comment_editor_text_offset: u16,
     diff_search_buffer: String,
     diff_search_query: Option<String>,
     diff_pending_op: Option<DiffPendingOp>,
@@ -759,20 +765,37 @@ fn delete_to_line_end(text: &mut String, cursor: &mut usize) {
     *cursor = idx;
 }
 
-fn comment_cursor_line_col(text: &str, cursor: usize) -> (usize, usize) {
-    let idx = clamp_char_boundary(text, cursor);
-    let line = text[..idx].chars().filter(|ch| *ch == '\n').count() + 1;
-    let line_start = text[..idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
-    let col = text[line_start..idx].chars().count() + 1;
-    (line, col)
+fn normalize_selection_range(
+    text: &str,
+    selection: Option<(usize, usize)>,
+) -> Option<(usize, usize)> {
+    let (raw_start, raw_end) = selection?;
+    let start = clamp_char_boundary(text, raw_start);
+    let end = clamp_char_boundary(text, raw_end);
+    let (lo, hi) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    (lo < hi).then_some((lo, hi))
 }
 
-fn comment_modal_lines(
-    text: &str,
-    cursor: usize,
-    viewport_rows: usize,
-    theme: &UiTheme,
-) -> Vec<Line<'static>> {
+fn delete_selection_range(
+    text: &mut String,
+    cursor: &mut usize,
+    selection: &mut Option<(usize, usize)>,
+) -> bool {
+    let Some((start, end)) = normalize_selection_range(text, *selection) else {
+        *selection = None;
+        return false;
+    };
+    text.replace_range(start..end, "");
+    *cursor = start;
+    *selection = None;
+    true
+}
+
+fn comment_line_ranges(text: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::<(usize, usize)>::new();
     let mut start = 0usize;
     for (idx, ch) in text.char_indices() {
@@ -782,17 +805,49 @@ fn comment_modal_lines(
         }
     }
     ranges.push((start, text.len()));
+    ranges
+}
 
+fn comment_cursor_line_col(text: &str, cursor: usize) -> (usize, usize) {
+    let idx = clamp_char_boundary(text, cursor);
+    let line = text[..idx].chars().filter(|ch| *ch == '\n').count() + 1;
+    let line_start = text[..idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+    let col = text[line_start..idx].chars().count() + 1;
+    (line, col)
+}
+
+struct CommentModalView {
+    lines: Vec<Line<'static>>,
+    line_ranges: Vec<(usize, usize)>,
+    view_start: usize,
+    text_offset: u16,
+}
+
+fn comment_gutter_digits(total_lines: usize) -> usize {
+    total_lines.max(1).to_string().len().max(2)
+}
+
+fn comment_modal_lines(
+    text: &str,
+    cursor: usize,
+    selection: Option<(usize, usize)>,
+    viewport_rows: usize,
+    theme: &UiTheme,
+) -> CommentModalView {
+    let ranges = comment_line_ranges(text);
     let clamped_cursor = clamp_char_boundary(text, cursor);
     let cursor_line_idx = text[..clamped_cursor]
         .chars()
         .filter(|ch| *ch == '\n')
         .count();
+    let selected = normalize_selection_range(text, selection);
     let rows = viewport_rows.max(1);
     let max_start = ranges.len().saturating_sub(rows);
     let mut view_start = cursor_line_idx.saturating_sub(rows / 2);
     view_start = view_start.min(max_start);
     let view_end = (view_start + rows).min(ranges.len());
+    let gutter_digits = comment_gutter_digits(ranges.len());
+    let text_offset = (gutter_digits + 3) as u16;
 
     let mut lines = Vec::new();
     for (line_idx, (line_start, line_end)) in ranges
@@ -801,52 +856,65 @@ fn comment_modal_lines(
         .skip(view_start)
         .take(view_end.saturating_sub(view_start))
     {
-        let source = &text[*line_start..*line_end];
         let gutter = Span::styled(
-            format!("{:>2} ", line_idx + 1),
+            format!("{:>width$} ", line_idx + 1, width = gutter_digits),
             Style::default().fg(theme.dimmed),
         );
-        if line_idx == cursor_line_idx {
-            let line_cursor = clamped_cursor.saturating_sub(*line_start).min(source.len());
-            let before = source[..line_cursor].to_owned();
-            let after = source[line_cursor..].to_owned();
-            lines.push(Line::from(vec![
-                gutter,
-                Span::styled("│ ", Style::default().fg(theme.border)),
-                Span::raw(before),
-                Span::styled(
-                    "▏",
+        let mut spans = vec![
+            gutter,
+            Span::styled("│ ", Style::default().fg(theme.border)),
+        ];
+
+        let cursor_on_line = line_idx == cursor_line_idx;
+        let mut idx = *line_start;
+        while idx < *line_end {
+            let next = next_char_boundary(text, idx);
+            let fragment = &text[idx..next];
+            let is_selected = selected.is_some_and(|(start, end)| idx >= start && idx < end);
+            let is_cursor = cursor_on_line && idx == clamped_cursor;
+            if is_cursor {
+                spans.push(Span::styled(
+                    fragment.to_owned(),
                     Style::default()
                         .fg(theme.modal_cursor_fg)
-                        .bg(theme.modal_cursor_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(after),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                gutter,
-                Span::styled("│ ", Style::default().fg(theme.border)),
-                Span::raw(source.to_owned()),
-            ]));
+                        .bg(theme.modal_cursor_bg),
+                ));
+            } else if is_selected {
+                spans.push(Span::styled(
+                    fragment.to_owned(),
+                    Style::default().bg(theme.visual_bg),
+                ));
+            } else {
+                spans.push(Span::raw(fragment.to_owned()));
+            }
+            idx = next;
         }
+        if cursor_on_line && clamped_cursor == *line_end {
+            spans.push(Span::styled(
+                " ",
+                Style::default()
+                    .fg(theme.modal_cursor_fg)
+                    .bg(theme.modal_cursor_bg),
+            ));
+        }
+        lines.push(Line::from(spans));
     }
 
     if lines.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled(" 1 ", Style::default().fg(theme.dimmed)),
-            Span::styled("│ ", Style::default().fg(theme.border)),
-            Span::styled(
-                "▏",
-                Style::default()
-                    .fg(theme.modal_cursor_fg)
-                    .bg(theme.modal_cursor_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            " ",
+            Style::default()
+                .fg(theme.modal_cursor_fg)
+                .bg(theme.modal_cursor_bg),
+        )]));
     }
 
-    lines
+    CommentModalView {
+        lines,
+        line_ranges: ranges,
+        view_start,
+        text_offset,
+    }
 }
 
 fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {

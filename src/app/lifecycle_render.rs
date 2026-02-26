@@ -41,6 +41,12 @@ impl App {
             status: String::new(),
             comment_buffer: String::new(),
             comment_cursor: 0,
+            comment_selection: None,
+            comment_mouse_anchor: None,
+            comment_editor_rect: None,
+            comment_editor_line_ranges: Vec::new(),
+            comment_editor_view_start: 0,
+            comment_editor_text_offset: 0,
             diff_search_buffer: String::new(),
             diff_search_query: None,
             diff_pending_op: None,
@@ -81,6 +87,10 @@ impl App {
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
         self.ensure_rendered_diff();
         let theme = UiTheme::from_mode(self.theme_mode);
+        self.comment_editor_rect = None;
+        self.comment_editor_line_ranges.clear();
+        self.comment_editor_view_start = 0;
+        self.comment_editor_text_offset = 0;
 
         let root_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -310,7 +320,13 @@ impl App {
                     .modifiers
                     .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
             {
+                delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                );
                 insert_char_at_cursor(&mut self.comment_buffer, &mut self.comment_cursor, '\n');
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Enter => self.submit_comment_input(),
             KeyCode::Backspace
@@ -318,20 +334,48 @@ impl App {
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
-                delete_prev_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_prev_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Backspace => {
-                delete_prev_char(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_prev_char(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Delete
                 if key
                     .modifiers
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
-                delete_next_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_next_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Delete => {
-                delete_next_char(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_next_char(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Left
                 if key
@@ -339,12 +383,16 @@ impl App {
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
                 self.comment_cursor = prev_word_boundary(&self.comment_buffer, self.comment_cursor);
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Left => {
                 self.comment_cursor = prev_char_boundary(
                     &self.comment_buffer,
                     clamp_char_boundary(&self.comment_buffer, self.comment_cursor),
                 );
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Right
                 if key
@@ -352,65 +400,123 @@ impl App {
                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
                 self.comment_cursor = next_word_boundary(&self.comment_buffer, self.comment_cursor);
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Right => {
                 self.comment_cursor = next_char_boundary(
                     &self.comment_buffer,
                     clamp_char_boundary(&self.comment_buffer, self.comment_cursor),
                 );
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Up => {
                 self.comment_cursor = move_cursor_up(&self.comment_buffer, self.comment_cursor);
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Down => {
                 self.comment_cursor = move_cursor_down(&self.comment_buffer, self.comment_cursor);
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
-            KeyCode::Home => self.comment_cursor = 0,
-            KeyCode::End => self.comment_cursor = self.comment_buffer.len(),
+            KeyCode::Home => {
+                self.comment_cursor = 0;
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
+            }
+            KeyCode::End => {
+                self.comment_cursor = self.comment_buffer.len();
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
+            }
             KeyCode::Char('a') | KeyCode::Char('A')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 self.comment_cursor = 0;
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char('e') | KeyCode::Char('E')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 self.comment_cursor = self.comment_buffer.len();
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char('w') | KeyCode::Char('W')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                delete_prev_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_prev_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char('u') | KeyCode::Char('U')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                delete_to_line_start(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_to_line_start(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char('k') | KeyCode::Char('K')
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
-                delete_to_line_end(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_to_line_end(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char('b') | KeyCode::Char('B')
                 if key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 self.comment_cursor = prev_word_boundary(&self.comment_buffer, self.comment_cursor);
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char('f') | KeyCode::Char('F')
                 if key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 self.comment_cursor = next_word_boundary(&self.comment_buffer, self.comment_cursor);
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char('d') | KeyCode::Char('D')
                 if key.modifiers.contains(KeyModifiers::ALT) =>
             {
-                delete_next_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                if !delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                ) {
+                    delete_next_word(&mut self.comment_buffer, &mut self.comment_cursor);
+                }
+                self.comment_mouse_anchor = None;
             }
             KeyCode::Char(c)
                 if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
             {
+                delete_selection_range(
+                    &mut self.comment_buffer,
+                    &mut self.comment_cursor,
+                    &mut self.comment_selection,
+                );
                 insert_char_at_cursor(&mut self.comment_buffer, &mut self.comment_cursor, c);
+                self.comment_mouse_anchor = None;
             }
             _ => {}
         }
@@ -420,6 +526,12 @@ impl App {
         self.input_mode = InputMode::Normal;
         self.comment_buffer.clear();
         self.comment_cursor = 0;
+        self.comment_selection = None;
+        self.comment_mouse_anchor = None;
+        self.comment_editor_rect = None;
+        self.comment_editor_line_ranges.clear();
+        self.comment_editor_view_start = 0;
+        self.comment_editor_text_offset = 0;
         self.status = "Comment canceled".to_owned();
     }
 
@@ -503,6 +615,12 @@ impl App {
             self.input_mode = InputMode::Normal;
             self.comment_buffer.clear();
             self.comment_cursor = 0;
+            self.comment_selection = None;
+            self.comment_mouse_anchor = None;
+            self.comment_editor_rect = None;
+            self.comment_editor_line_ranges.clear();
+            self.comment_editor_view_start = 0;
+            self.comment_editor_text_offset = 0;
         }
     }
 
@@ -579,6 +697,8 @@ impl App {
         self.input_mode = InputMode::CommentEdit(id);
         self.comment_buffer = comment.text.clone();
         self.comment_cursor = self.comment_buffer.len();
+        self.comment_selection = None;
+        self.comment_mouse_anchor = None;
         self.status = format!(
             "Editing comment #{}: Enter save, Ctrl-s save, Esc cancel",
             id
@@ -791,9 +911,10 @@ impl App {
                 self.input_mode = InputMode::CommentCreate;
                 self.comment_buffer.clear();
                 self.comment_cursor = 0;
+                self.comment_selection = None;
+                self.comment_mouse_anchor = None;
                 self.diff_pending_op = None;
-                self.status =
-                    "Comment mode: Enter save, Alt+Enter newline, Ctrl-w delete word".to_owned();
+                self.status = "Comment mode: Enter save, Alt+Enter newline, Esc cancel".to_owned();
             }
             KeyCode::Char('e') => {
                 if self.uncommitted_selected() {
@@ -818,6 +939,7 @@ impl App {
             self.input_mode,
             InputMode::CommentCreate | InputMode::CommentEdit(_)
         ) {
+            self.handle_comment_mouse(mouse);
             return;
         }
         let x = mouse.column;
@@ -876,6 +998,57 @@ impl App {
                         self.set_diff_cursor(row);
                     }
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_comment_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        let Some(editor_rect) = self.comment_editor_rect else {
+            return;
+        };
+        if self.comment_editor_line_ranges.is_empty() {
+            return;
+        }
+        let inside_editor = contains(editor_rect, mouse.column, mouse.row);
+        let resolve_cursor = |app: &Self, x: u16, y: u16| -> usize {
+            let row = y.saturating_sub(editor_rect.y) as usize;
+            let line_idx =
+                (app.comment_editor_view_start + row).min(app.comment_editor_line_ranges.len() - 1);
+            let (line_start, line_end) = app.comment_editor_line_ranges[line_idx];
+            let col = x
+                .saturating_sub(editor_rect.x)
+                .saturating_sub(app.comment_editor_text_offset)
+                .min(editor_rect.width.saturating_sub(1)) as usize;
+            line_cursor_with_column(&app.comment_buffer, line_start, line_end, col)
+        };
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) if inside_editor => {
+                let idx = resolve_cursor(self, mouse.column, mouse.row);
+                self.comment_cursor = idx;
+                self.comment_selection = None;
+                self.comment_mouse_anchor = Some(idx);
+            }
+            MouseEventKind::Drag(MouseButton::Left) if inside_editor => {
+                let idx = resolve_cursor(self, mouse.column, mouse.row);
+                self.comment_cursor = idx;
+                if let Some(anchor) = self.comment_mouse_anchor {
+                    self.comment_selection = (anchor != idx).then_some((anchor, idx));
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if inside_editor => {
+                let idx = resolve_cursor(self, mouse.column, mouse.row);
+                self.comment_cursor = idx;
+                if let Some(anchor) = self.comment_mouse_anchor.take() {
+                    self.comment_selection = (anchor != idx).then_some((anchor, idx));
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.comment_mouse_anchor = None;
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.comment_mouse_anchor = None;
             }
             _ => {}
         }
@@ -964,10 +1137,8 @@ impl App {
                 Span::styled(" save ", Style::default().fg(theme.muted)),
                 key_chip("Alt+Enter", theme),
                 Span::styled(" newline ", Style::default().fg(theme.muted)),
-                key_chip("Arrows", theme),
-                Span::styled(" move ", Style::default().fg(theme.muted)),
-                key_chip("Ctrl-w", theme),
-                Span::styled(" delete word ", Style::default().fg(theme.muted)),
+                key_chip("mouse", theme),
+                Span::styled(" cursor/select ", Style::default().fg(theme.muted)),
                 key_chip("Esc", theme),
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
             ]),
@@ -1082,8 +1253,8 @@ impl App {
         frame.render_widget(hint_widget, chunks[1]);
     }
 
-    pub(super) fn render_comment_modal(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
-        let area = centered_rect(78, 70, frame.area());
+    pub(super) fn render_comment_modal(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {
+        let area = centered_rect(56, 48, frame.area());
         frame.render_widget(Clear, area);
 
         let title = match self.input_mode {
@@ -1111,8 +1282,9 @@ impl App {
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
                 ratatui::layout::Constraint::Length(2),
-                ratatui::layout::Constraint::Min(6),
-                ratatui::layout::Constraint::Length(3),
+                ratatui::layout::Constraint::Length(6),
+                ratatui::layout::Constraint::Min(5),
+                ratatui::layout::Constraint::Length(1),
             ])
             .split(inner);
 
@@ -1121,10 +1293,14 @@ impl App {
             InputMode::CommentEdit(_) => "edit",
             InputMode::Normal | InputMode::DiffSearch => "idle",
         };
-        let prompt = if self.comment_buffer.trim().is_empty() {
-            "Describe issue, impact, and expected fix."
+        let status_style = if self.status.contains("Failed")
+            || self.status.contains("failed")
+            || self.status.contains("empty")
+            || self.status.contains("No ")
+        {
+            Style::default().fg(theme.issue)
         } else {
-            "Add context rich notes; this syncs into review tasks markdown."
+            Style::default().fg(theme.muted)
         };
         let header = Paragraph::new(vec![
             Line::from(vec![
@@ -1137,60 +1313,252 @@ impl App {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
-                Span::styled(prompt, Style::default().fg(theme.muted)),
+                Span::styled(
+                    format!("{} chars", self.comment_buffer.chars().count()),
+                    Style::default().fg(theme.dimmed),
+                ),
             ]),
             Line::from(vec![
-                Span::styled("save:", Style::default().fg(theme.dimmed)),
-                Span::styled(" Enter / Ctrl-s ", Style::default().fg(theme.accent)),
-                Span::raw("  "),
-                Span::styled("newline:", Style::default().fg(theme.dimmed)),
-                Span::styled(" Alt+Enter ", Style::default().fg(theme.accent)),
+                Span::styled("status: ", Style::default().fg(theme.dimmed)),
+                Span::styled(self.status.clone(), status_style),
             ]),
         ])
         .style(Style::default().bg(theme.modal_bg));
         frame.render_widget(header, sections[0]);
 
+        let context_block = Block::default()
+            .title(" Context ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(theme.modal_bg))
+            .border_style(Style::default().fg(theme.border));
+        let context_inner = context_block.inner(sections[1]);
+        let context_lines =
+            self.comment_context_preview_lines(context_inner.height as usize, theme);
+        frame.render_widget(context_block, sections[1]);
+        frame.render_widget(
+            Paragraph::new(context_lines).style(Style::default().fg(theme.text)),
+            context_inner,
+        );
+
         let editor_block = Block::default()
-            .title(" Draft ")
+            .title(" Comment ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .style(Style::default().bg(theme.modal_editor_bg))
             .border_style(Style::default().fg(theme.border));
-        let editor_inner = editor_block.inner(sections[1]);
-        let editor_lines = comment_modal_lines(
+        let editor_inner = editor_block.inner(sections[2]);
+        let modal_view = comment_modal_lines(
             &self.comment_buffer,
             self.comment_cursor,
+            self.comment_selection,
             editor_inner.height.saturating_sub(1) as usize,
             theme,
         );
-        frame.render_widget(editor_block, sections[1]);
+        let CommentModalView {
+            lines,
+            line_ranges,
+            view_start,
+            text_offset,
+        } = modal_view;
+        self.comment_editor_rect = Some(editor_inner);
+        self.comment_editor_line_ranges = line_ranges;
+        self.comment_editor_view_start = view_start;
+        self.comment_editor_text_offset = text_offset;
+        frame.render_widget(editor_block, sections[2]);
         frame.render_widget(
-            Paragraph::new(editor_lines).style(Style::default().fg(theme.text)),
+            Paragraph::new(lines).style(Style::default().fg(theme.text)),
             editor_inner,
         );
 
-        let footer = Paragraph::new(vec![
-            Line::from(vec![
-                key_chip("Ctrl-w", theme),
-                Span::styled(" back-word ", Style::default().fg(theme.muted)),
-                key_chip("Ctrl-Backspace", theme),
-                Span::styled(" back-word ", Style::default().fg(theme.muted)),
-                key_chip("Ctrl-Delete", theme),
-                Span::styled(" next-word ", Style::default().fg(theme.muted)),
-            ]),
-            Line::from(vec![
-                key_chip("Ctrl-a/e", theme),
-                Span::styled(" start/end ", Style::default().fg(theme.muted)),
-                key_chip("↑/↓", theme),
-                Span::styled(" line move ", Style::default().fg(theme.muted)),
-                key_chip("Alt-b/f", theme),
-                Span::styled(" word move ", Style::default().fg(theme.muted)),
-                key_chip("Ctrl-u/k", theme),
-                Span::styled(" trim line ", Style::default().fg(theme.muted)),
-            ]),
-        ])
+        let footer = Paragraph::new(Line::from(vec![
+            key_chip("Enter", theme),
+            Span::styled(" save  ", Style::default().fg(theme.muted)),
+            key_chip("Esc", theme),
+            Span::styled(" cancel  ", Style::default().fg(theme.muted)),
+            key_chip("Alt+Enter", theme),
+            Span::styled(" newline  ", Style::default().fg(theme.muted)),
+            key_chip("Mouse", theme),
+            Span::styled(" cursor/select", Style::default().fg(theme.muted)),
+        ]))
         .style(Style::default().bg(theme.modal_bg));
-        frame.render_widget(footer, sections[2]);
+        frame.render_widget(footer, sections[3]);
+    }
+
+    fn comment_context_preview_lines(
+        &self,
+        max_rows: usize,
+        theme: &UiTheme,
+    ) -> Vec<Line<'static>> {
+        let rows = max_rows.max(1);
+        let mut lines = Vec::<Line<'static>>::new();
+        let mut has_primary_context = false;
+
+        match self.input_mode {
+            InputMode::CommentEdit(id) => {
+                if let Some(comment) = self.comments.comment_by_id(id) {
+                    lines.push(Line::from(vec![
+                        Span::styled("target ", Style::default().fg(theme.dimmed)),
+                        Span::styled(
+                            format!(
+                                "{} {} ({} selected lines)",
+                                comment.target.kind.as_str(),
+                                comment_location_label(comment),
+                                comment.target.selected_lines.len()
+                            ),
+                            Style::default().fg(theme.muted),
+                        ),
+                    ]));
+                    has_primary_context = !comment.target.selected_lines.is_empty();
+                    self.push_compact_selection_preview(
+                        &mut lines,
+                        &comment.target.selected_lines,
+                        rows.saturating_sub(1),
+                        theme,
+                    );
+                }
+            }
+            InputMode::CommentCreate => match self.comment_target_from_selection() {
+                Ok(Some(target)) => {
+                    let start =
+                        format_anchor_lines(target.start.old_lineno, target.start.new_lineno);
+                    let end = format_anchor_lines(target.end.old_lineno, target.end.new_lineno);
+                    let span = if start == end {
+                        start
+                    } else {
+                        format!("{start} -> {end}")
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled("target ", Style::default().fg(theme.dimmed)),
+                        Span::styled(
+                            format!(
+                                "{} {} ({span}; {} selected lines)",
+                                target.kind.as_str(),
+                                target.start.file_path,
+                                target.selected_lines.len()
+                            ),
+                            Style::default().fg(theme.muted),
+                        ),
+                    ]));
+                    has_primary_context = !target.selected_lines.is_empty();
+                    self.push_compact_selection_preview(
+                        &mut lines,
+                        &target.selected_lines,
+                        rows.saturating_sub(1),
+                        theme,
+                    );
+                }
+                Ok(None) => {
+                    lines.push(Line::from(vec![
+                        Span::styled("target ", Style::default().fg(theme.dimmed)),
+                        Span::styled(
+                            "no anchor at cursor; showing local diff snippet",
+                            Style::default().fg(theme.muted),
+                        ),
+                    ]));
+                }
+                Err(err) => {
+                    lines.push(Line::from(vec![
+                        Span::styled("target ", Style::default().fg(theme.dimmed)),
+                        Span::styled(
+                            format!("failed to resolve target: {err:#}"),
+                            Style::default().fg(theme.issue),
+                        ),
+                    ]));
+                }
+            },
+            InputMode::Normal | InputMode::DiffSearch => {}
+        }
+
+        if !has_primary_context && !self.rendered_diff.is_empty() {
+            let cursor = self.diff_position.cursor;
+            let start = cursor.saturating_sub(1);
+            let end = (cursor + 1).min(self.rendered_diff.len().saturating_sub(1));
+            for idx in start..=end {
+                if lines.len() >= rows {
+                    break;
+                }
+                let focused = idx == cursor;
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        if focused { "> " } else { "  " },
+                        if focused {
+                            Style::default().fg(theme.accent)
+                        } else {
+                            Style::default().fg(theme.dimmed)
+                        },
+                    ),
+                    Span::raw(truncate(&self.rendered_diff[idx].raw_text, 120)),
+                ]));
+            }
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No diff context available at cursor.",
+                Style::default().fg(theme.muted),
+            )));
+        }
+        lines.truncate(rows);
+        lines
+    }
+
+    fn push_compact_selection_preview(
+        &self,
+        out: &mut Vec<Line<'static>>,
+        snippets: &[String],
+        max_rows: usize,
+        theme: &UiTheme,
+    ) {
+        if max_rows == 0 || snippets.is_empty() {
+            return;
+        }
+        if snippets.len() <= max_rows {
+            for snippet in snippets.iter().take(max_rows) {
+                out.push(Line::from(vec![
+                    Span::styled("  ", Style::default().fg(theme.dimmed)),
+                    Span::raw(truncate(snippet, 120)),
+                ]));
+            }
+            return;
+        }
+
+        if max_rows == 1 {
+            out.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(theme.dimmed)),
+                Span::styled(
+                    format!("… {} lines selected …", snippets.len()),
+                    Style::default().fg(theme.muted),
+                ),
+            ]));
+            return;
+        }
+
+        let preview_rows = max_rows.saturating_sub(1);
+        let head = preview_rows / 2;
+        let tail = preview_rows.saturating_sub(head);
+        for snippet in snippets.iter().take(head) {
+            out.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(theme.dimmed)),
+                Span::raw(truncate(snippet, 120)),
+            ]));
+        }
+
+        let omitted = snippets.len().saturating_sub(head + tail);
+        out.push(Line::from(vec![
+            Span::styled("  ", Style::default().fg(theme.dimmed)),
+            Span::styled(
+                format!("… {omitted} lines omitted …"),
+                Style::default().fg(theme.muted),
+            ),
+        ]));
+
+        for snippet in snippets.iter().skip(snippets.len().saturating_sub(tail)) {
+            out.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(theme.dimmed)),
+                Span::raw(truncate(snippet, 120)),
+            ]));
+        }
     }
 
     pub(super) fn render_help_overlay(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
@@ -1250,14 +1618,6 @@ impl App {
             Line::from(vec![
                 key_chip("D", theme),
                 Span::raw(" delete comment under cursor"),
-            ]),
-            Line::from(vec![
-                key_chip("Ctrl-w/Ctrl-Backspace", theme),
-                Span::raw(" comment modal delete previous word"),
-            ]),
-            Line::from(vec![
-                key_chip("Ctrl-Delete/Alt-d", theme),
-                Span::raw(" comment modal delete next word"),
             ]),
             Line::from(vec![key_chip("t", theme), Span::raw(" toggle theme")]),
             Line::from(vec![
