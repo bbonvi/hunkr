@@ -200,9 +200,9 @@ where
         return report;
     }
 
-    for (task_idx, entry) in visible.iter().enumerate() {
+    for entry in &visible {
         let comment = &entry.comment;
-        report.push_str(&format!("### TASK #{}\n\n", task_idx + 1));
+        report.push_str(&format!("### TASK #{}\n\n", comment.id));
         report.push_str("- Status: `ACTION_REQUIRED`\n");
         report.push_str(&format!(
             "- Target Type: `{}`\n",
@@ -420,10 +420,10 @@ mod tests {
     fn sync_report_hides_reviewed_and_resolved_comments() {
         let tmp = tempdir().expect("tempdir");
         let mut store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
-        store
+        let first = store
             .add_comment(&make_target_for_commit("a1"), "first")
             .expect("add first");
-        store
+        let second = store
             .add_comment(&make_target_for_commit("b2"), "second")
             .expect("add second");
 
@@ -436,14 +436,14 @@ mod tests {
             .expect("sync");
 
         let report = fs::read_to_string(report_path).expect("read report");
-        assert!(report.contains("TASK #1"));
-        assert!(!report.contains("TASK #2"));
+        assert!(report.contains(&format!("TASK #{}", first)));
+        assert!(!report.contains(&format!("TASK #{}", second)));
         assert!(report.contains("- Actionable tasks: 1"));
         assert!(!report.contains("## Source Task Coverage"));
     }
 
     #[test]
-    fn sync_report_numbers_tasks_from_one_even_with_high_comment_ids() {
+    fn sync_report_uses_comment_ids_even_with_high_comment_ids() {
         let tmp = tempdir().expect("tempdir");
         let root = tmp.path().join(COMMENTS_DIR);
         fs::create_dir_all(&root).expect("mkdir comments");
@@ -514,9 +514,9 @@ mod tests {
             .expect("sync");
         let report = fs::read_to_string(report_path).expect("read report");
 
-        assert!(report.contains("TASK #1"));
-        assert!(report.contains("TASK #2"));
-        assert!(!report.contains("TASK #41"));
-        assert!(!report.contains("TASK #88"));
+        assert!(report.contains("TASK #41"));
+        assert!(report.contains("TASK #88"));
+        assert!(!report.contains("TASK #1"));
+        assert!(!report.contains("TASK #2"));
     }
 }
