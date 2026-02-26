@@ -82,6 +82,14 @@ fn nerd_file_icon_for_path(path: &str) -> &'static str {
         .unwrap_or(path);
     let lower_name = file_name.to_ascii_lowercase();
 
+    if is_env_file_name(&lower_name) {
+        return "";
+    }
+
+    if let Some(icon) = example_variant_icon(&lower_name) {
+        return icon;
+    }
+
     if let Some(icon) = special_file_icon(&lower_name) {
         return icon;
     }
@@ -97,9 +105,33 @@ fn nerd_file_icon_for_path(path: &str) -> &'static str {
     "󰈔"
 }
 
+fn is_env_file_name(lower_name: &str) -> bool {
+    lower_name == ".env" || lower_name.starts_with(".env.")
+}
+
+fn example_variant_icon(lower_name: &str) -> Option<&'static str> {
+    let base_name = lower_name.strip_suffix(".example")?;
+    if base_name.is_empty() {
+        return None;
+    }
+
+    if is_env_file_name(base_name) {
+        return Some("");
+    }
+    if let Some(icon) = special_file_icon(base_name) {
+        return Some(icon);
+    }
+
+    Path::new(base_name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .and_then(file_extension_icon)
+}
+
 fn special_file_icon(lower_name: &str) -> Option<&'static str> {
     match lower_name {
         ".gitignore" | ".gitattributes" | ".gitmodules" => Some(""),
+        ".dockerignore" => Some(""),
         "dockerfile" => Some(""),
         "makefile" => Some(""),
         "readme" | "readme.md" | "readme.txt" => Some(""),
@@ -135,8 +167,6 @@ fn file_extension_icon(ext: &str) -> Option<&'static str> {
         "md" | "markdown" => Some(""),
         "sh" | "bash" | "zsh" | "fish" => Some(""),
         "diff" | "patch" => Some(""),
-        "dockerignore" => Some(""),
-        "env" => Some(""),
         "git" => Some(""),
         "lockb" => Some("󰌾"),
         "pem" | "crt" | "key" | "pub" => Some("󰌆"),
@@ -201,5 +231,27 @@ mod tests {
     #[test]
     fn cargo_lock_uses_lock_icon_without_special_case() {
         assert_eq!(format_path_with_icon("Cargo.lock", true), "󰌾 Cargo.lock");
+    }
+
+    #[test]
+    fn env_variants_map_to_env_icon() {
+        assert_eq!(format_path_with_icon(".env", true), " .env");
+        assert_eq!(format_path_with_icon(".env.dev", true), " .env.dev");
+        assert_eq!(
+            format_path_with_icon(".env.example", true),
+            " .env.example"
+        );
+    }
+
+    #[test]
+    fn example_variants_inherit_base_file_type_icon() {
+        assert_eq!(
+            format_path_with_icon("config.yaml.example", true),
+            " config.yaml.example"
+        );
+        assert_eq!(
+            format_path_with_icon("Dockerfile.example", true),
+            " Dockerfile.example"
+        );
     }
 }
