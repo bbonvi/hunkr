@@ -213,6 +213,7 @@ impl GitService {
         let mut opts = DiffOptions::new();
         opts.context_lines(3)
             .include_untracked(true)
+            .show_untracked_content(true)
             .recurse_untracked_dirs(true);
         let diff = self
             .repo
@@ -469,6 +470,26 @@ mod tests {
                 .hunks
                 .iter()
                 .any(|h| h.commit_summary == "first" || h.commit_summary == "second")
+        );
+    }
+
+    #[test]
+    fn aggregate_uncommitted_includes_untracked_text_file_content() {
+        let repo_dir = tempdir().expect("tempdir");
+        init_repo(repo_dir.path());
+        commit_file(repo_dir.path(), "tracked.txt", "base\n", "base");
+        fs::write(repo_dir.path().join("new_file.rs"), "fn added() {}\n").expect("write");
+
+        let service = GitService::open_at(repo_dir.path()).expect("service");
+        let aggregate = service.aggregate_uncommitted().expect("aggregate");
+        let patch = aggregate.files.get("new_file.rs").expect("untracked patch");
+
+        assert!(
+            patch
+                .hunks
+                .iter()
+                .flat_map(|hunk| hunk.lines.iter())
+                .any(|line| line.kind == DiffLineKind::Add && line.text.contains("fn added() {}"))
         );
     }
 
