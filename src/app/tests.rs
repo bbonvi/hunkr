@@ -19,6 +19,17 @@ fn commit_row(id: &str, selected: bool, status: ReviewStatus) -> CommitRow {
     }
 }
 
+fn commit_info(id: &str, unpushed: bool) -> CommitInfo {
+    CommitInfo {
+        id: id.to_owned(),
+        short_id: id.chars().take(7).collect(),
+        summary: format!("summary-{id}"),
+        author: "dev".to_owned(),
+        timestamp: 0,
+        unpushed,
+    }
+}
+
 fn sample_comment(start: CommentAnchor, end: CommentAnchor, text: &str) -> ReviewComment {
     ReviewComment {
         id: 7,
@@ -49,6 +60,20 @@ fn sample_commit_comment(anchor: CommentAnchor, text: &str) -> ReviewComment {
         created_at: "2026-01-01T00:00:00Z".to_owned(),
         updated_at: "2026-01-01T00:00:00Z".to_owned(),
     }
+}
+
+#[test]
+fn first_open_reviewed_commit_ids_excludes_unpushed_commits() {
+    let commits = vec![
+        commit_info("pushed-a", false),
+        commit_info("unpushed-a", true),
+        commit_info("pushed-b", false),
+    ];
+
+    assert_eq!(
+        first_open_reviewed_commit_ids(&commits),
+        vec!["pushed-a".to_owned(), "pushed-b".to_owned()]
+    );
 }
 
 #[test]

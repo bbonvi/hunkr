@@ -707,6 +707,18 @@ fn commit_row_matches_filter_query(row: &CommitRow, query: &str) -> bool {
     row.is_uncommitted || query.is_empty() || commit_row_matches_query(row, query)
 }
 
+/// Returns first-parent history commit IDs that should be baseline-reviewed on first open.
+///
+/// All visible commits that are already pushed are marked `REVIEWED`; unpushed commits remain
+/// `UNREVIEWED` so users can focus on local outgoing work.
+fn first_open_reviewed_commit_ids(commits: &[CommitInfo]) -> Vec<String> {
+    commits
+        .iter()
+        .filter(|commit| !commit.unpushed)
+        .map(|commit| commit.id.clone())
+        .collect()
+}
+
 fn matching_file_indices_with_parent_dirs(rows: &[TreeRow], query: &str) -> Vec<usize> {
     if query.is_empty() {
         return rows.iter().enumerate().map(|(idx, _)| idx).collect();

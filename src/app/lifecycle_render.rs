@@ -6,7 +6,21 @@ impl App {
         let config = AppConfig::load()?;
         let git = GitService::open_current()?;
         let store = StateStore::for_project(git.root());
-        let review_state = store.load()?;
+        let first_open = !store.root_dir().exists();
+        let mut review_state = store.load()?;
+        if first_open {
+            let history = git.load_first_parent_history(HISTORY_LIMIT)?;
+            let reviewed_ids = first_open_reviewed_commit_ids(&history);
+            if !reviewed_ids.is_empty() {
+                store.set_many_status(
+                    &mut review_state,
+                    reviewed_ids,
+                    ReviewStatus::Reviewed,
+                    git.branch_name(),
+                );
+                store.save(&review_state)?;
+            }
+        }
         let comments = CommentStore::new(store.root_dir(), git.branch_name())?;
 
         let mut app = Self {
