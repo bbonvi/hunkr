@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -141,8 +140,6 @@ where
 
     let mut visible = Vec::<VisibleComment>::new();
     let mut hidden_count = 0usize;
-    let mut per_commit_total = BTreeMap::<String, usize>::new();
-    let mut per_commit_open = BTreeMap::<String, usize>::new();
 
     for comment in comments {
         let mut statuses = comment
@@ -153,10 +150,6 @@ where
             .collect::<Vec<_>>();
         statuses.sort_by(|left, right| left.0.cmp(&right.0));
 
-        for (commit, _) in &statuses {
-            *per_commit_total.entry(commit.clone()).or_insert(0) += 1;
-        }
-
         let hidden = !statuses.is_empty()
             && statuses
                 .iter()
@@ -164,10 +157,6 @@ where
         if hidden {
             hidden_count += 1;
             continue;
-        }
-
-        for (commit, _) in &statuses {
-            *per_commit_open.entry(commit.clone()).or_insert(0) += 1;
         }
         visible.push(VisibleComment {
             comment: comment.clone(),
@@ -193,42 +182,21 @@ where
     report.push_str("After handling tasks, report:\n");
     report.push_str("- Which task IDs were addressed.\n");
     report.push_str("- Which task IDs remain open and why.\n");
-    report.push_str(
-        "- For each source listed in this file, whether all visible tasks are addressed.\n\n",
-    );
+    report.push_str("- Any blockers that prevented completion.\n\n");
 
     report.push_str("## Snapshot\n\n");
     report.push_str(&format!("- Updated: {}\n", Utc::now().to_rfc3339()));
     report.push_str(&format!("- Branch: `{branch}`\n"));
     report.push_str(&format!("- Actionable tasks: {}\n", visible.len()));
-    report.push_str(&format!(
-        "- Excluded tasks (non-actionable states): {hidden_count}\n"
-    ));
     report.push('\n');
-
-    report.push_str("## Source Task Coverage\n\n");
-    if per_commit_total.is_empty() {
-        report.push_str("- No source-linked tasks yet.\n\n");
-    } else {
-        for (commit, total) in &per_commit_total {
-            let open = per_commit_open.get(commit).copied().unwrap_or(0);
-            let all_addressed = if open == 0 { "yes" } else { "no" };
-            report.push_str(&format!(
-                "- `{}`: actionable tasks `{}/{}`, all addressed `{}`\n",
-                short_id(commit),
-                open,
-                total,
-                all_addressed
-            ));
-        }
-        report.push('\n');
-    }
 
     report.push_str("## Open Tasks\n\n");
     if visible.is_empty() {
-        report.push_str(
-            "No open tasks. All persisted annotations are excluded by workflow state, or there are no annotations.\n",
-        );
+        if hidden_count > 0 {
+            report.push_str("No open tasks. Existing annotations are currently non-actionable.\n");
+        } else {
+            report.push_str("No open tasks.\n");
+        }
         return report;
     }
 
@@ -463,6 +431,7 @@ mod tests {
         let report = fs::read_to_string(report_path).expect("read report");
         assert!(report.contains(&format!("TASK #{}", first)));
         assert!(!report.contains(&format!("TASK #{}", second)));
-        assert!(report.contains("Excluded tasks (non-actionable states): 1"));
+        assert!(report.contains("- Actionable tasks: 1"));
+        assert!(!report.contains("## Source Task Coverage"));
     }
 }
