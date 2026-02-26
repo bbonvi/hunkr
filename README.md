@@ -105,7 +105,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 ## Architecture
 
 - `src/main.rs`: terminal lifecycle + event loop
-- `src/app.rs`: UI state, key/mouse routing, selection/status logic, rendering
+- `src/app.rs`: UI state, key/mouse routing, selection/status logic, high-level rendering orchestration
+- `src/app/ui/list_panes.rs`: files/commits pane renderers and list-row line presenters
+- `src/app/ui/style.rs`: shared list-row styling and layout helpers
 - `src/git_data.rs`: git commit discovery, unpushed detection, commit-range aggregation
 - `src/store.rs`: review state persistence (`.hunkr/state.json`)
 - `src/comments.rs`: persisted comment store (`index.json`) + auto-generated review task file writer

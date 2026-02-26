@@ -1,0 +1,262 @@
+use chrono::Utc;
+use ratatui::{
+    Frame,
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+};
+
+use super::super::{
+    CommitRow, FocusPane, LIST_HIGHLIGHT_SYMBOL, TreeRow, UiTheme, format_relative_time,
+    status_short_label, truncate,
+};
+use super::style::{line_with_right, list_content_width, list_row_style, status_style};
+
+/// Renders commit/file list panes so App keeps high-level orchestration only.
+pub(in crate::app) struct ListPaneRenderer<'a> {
+    theme: &'a UiTheme,
+    focused: FocusPane,
+    now_ts: i64,
+}
+
+impl<'a> ListPaneRenderer<'a> {
+    pub(in crate::app) fn new(theme: &'a UiTheme, focused: FocusPane) -> Self {
+        Self {
+            theme,
+            focused,
+            now_ts: Utc::now().timestamp(),
+        }
+    }
+
+    pub(in crate::app) fn render_files(
+        &self,
+        frame: &mut Frame<'_>,
+        rect: ratatui::layout::Rect,
+        file_rows: &[TreeRow],
+        changed_files: usize,
+        file_list_state: &mut ListState,
+    ) {
+        let title = Line::from(vec![
+            Span::styled(
+                " 2 FILES ",
+                Style::default()
+                    .fg(self.theme.panel_title_fg)
+                    .bg(self.theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("{} changed", changed_files),
+                Style::default().fg(self.theme.muted),
+            ),
+        ]);
+        let border_style = if self.focused == FocusPane::Files {
+            Style::default().fg(self.theme.focus_border)
+        } else {
+            Style::default().fg(self.theme.border)
+        };
+
+        let width = list_content_width(rect.width);
+        let cursor_idx = file_list_state.selected();
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme);
+
+        let items: Vec<ListItem<'static>> = file_rows
+            .iter()
+            .enumerate()
+            .map(|(idx, row)| {
+                let line = presenter.file_row_line(row);
+                let is_cursor = cursor_idx == Some(idx);
+                ListItem::new(line).style(list_row_style(
+                    false,
+                    is_cursor,
+                    self.focused == FocusPane::Files,
+                    None,
+                    self.theme,
+                ))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(border_style),
+            )
+            .highlight_style(Style::default())
+            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
+
+        frame.render_stateful_widget(list, rect, file_list_state);
+    }
+
+    pub(in crate::app) fn render_commits(
+        &self,
+        frame: &mut Frame<'_>,
+        rect: ratatui::layout::Rect,
+        commits: &[CommitRow],
+        status_counts: (usize, usize, usize, usize),
+        commit_list_state: &mut ListState,
+    ) {
+        let selected = commits.iter().filter(|row| row.selected).count();
+        let (unreviewed, reviewed, issue_found, resolved) = status_counts;
+        let title = Line::from(vec![
+            Span::styled(
+                " 1 COMMITS ",
+                Style::default()
+                    .fg(self.theme.panel_title_fg)
+                    .bg(self.theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!(
+                    "sel:{}  U:{} R:{} I:{} Z:{}",
+                    selected, unreviewed, reviewed, issue_found, resolved
+                ),
+                Style::default().fg(self.theme.muted),
+            ),
+        ]);
+        let border_style = if self.focused == FocusPane::Commits {
+            Style::default().fg(self.theme.focus_border)
+        } else {
+            Style::default().fg(self.theme.border)
+        };
+
+        let width = list_content_width(rect.width);
+        let cursor_idx = commit_list_state.selected();
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme);
+        let items: Vec<ListItem<'static>> = commits
+            .iter()
+            .enumerate()
+            .map(|(idx, row)| {
+                let line = presenter.commit_row_line(row);
+                let is_cursor = cursor_idx == Some(idx);
+                ListItem::new(line).style(list_row_style(
+                    row.selected,
+                    is_cursor,
+                    self.focused == FocusPane::Commits,
+                    Some(self.theme.cursor_bg),
+                    self.theme,
+                ))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(border_style),
+            )
+            .highlight_style(Style::default())
+            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
+
+        frame.render_stateful_widget(list, rect, commit_list_state);
+    }
+}
+
+/// Presenter for composing list pane rows with shared truncation and age columns.
+pub(in crate::app) struct ListLinePresenter<'a> {
+    width: usize,
+    now_ts: i64,
+    theme: &'a UiTheme,
+}
+
+impl<'a> ListLinePresenter<'a> {
+    pub(in crate::app) fn new(width: usize, now_ts: i64, theme: &'a UiTheme) -> Self {
+        Self {
+            width,
+            now_ts,
+            theme,
+        }
+    }
+
+    pub(in crate::app) fn file_row_line(&self, row: &TreeRow) -> Line<'static> {
+        if row.selectable {
+            let right = row
+                .modified_ts
+                .map(|ts| format_relative_time(ts, self.now_ts))
+                .unwrap_or_default();
+            line_with_right(
+                row.label.clone(),
+                Style::default().fg(self.theme.text),
+                right,
+                Style::default().fg(self.theme.dimmed),
+                self.width,
+            )
+        } else {
+            Line::from(Span::styled(
+                row.label.clone(),
+                Style::default()
+                    .fg(self.theme.dir)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        }
+    }
+
+    pub(in crate::app) fn commit_row_line(&self, row: &CommitRow) -> Line<'static> {
+        if row.is_uncommitted {
+            let marker = if row.selected { "[x]" } else { "[ ]" };
+            let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
+            let badge = "[UNCOMMITTED]";
+            let right = "draft";
+            let reserved = 1 + badge.chars().count() + 1 + right.chars().count();
+            let max_left = self.width.saturating_sub(reserved).max(1);
+            let left_render = truncate(&left, max_left);
+            let static_used =
+                left_render.chars().count() + badge.chars().count() + right.chars().count() + 1;
+            let spaces = if static_used >= self.width {
+                " ".to_owned()
+            } else {
+                " ".repeat(self.width - static_used)
+            };
+
+            return Line::from(vec![
+                Span::styled(left_render, Style::default().fg(self.theme.text)),
+                Span::raw(" "),
+                Span::styled(
+                    badge,
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(spaces),
+                Span::styled(right, Style::default().fg(self.theme.dimmed)),
+            ]);
+        }
+
+        let marker = if row.selected { "[x]" } else { "[ ]" };
+        let left = format!("{} {} {}", marker, row.info.short_id, row.info.summary);
+        let status_label = format!("[{}]", status_short_label(row.status));
+        let unpushed = if row.info.unpushed { " [^]" } else { "" };
+        let right = format_relative_time(row.info.timestamp, self.now_ts);
+        let reserved =
+            1 + status_label.chars().count() + unpushed.chars().count() + 1 + right.chars().count();
+        let max_left = self.width.saturating_sub(reserved).max(1);
+        let left_render = truncate(&left, max_left);
+        let static_used = left_render.chars().count()
+            + status_label.chars().count()
+            + unpushed.chars().count()
+            + right.chars().count()
+            + 1;
+        let spaces = if static_used >= self.width {
+            " ".to_owned()
+        } else {
+            " ".repeat(self.width - static_used)
+        };
+
+        Line::from(vec![
+            Span::styled(left_render, Style::default().fg(self.theme.text)),
+            Span::raw(" "),
+            Span::styled(status_label, status_style(row.status, self.theme)),
+            Span::styled(
+                unpushed.to_owned(),
+                Style::default().fg(self.theme.unpushed),
+            ),
+            Span::raw(spaces),
+            Span::styled(right, Style::default().fg(self.theme.dimmed)),
+        ])
+    }
+}
