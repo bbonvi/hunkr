@@ -20,7 +20,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Review statuses: `UNREVIEWED`, `REVIEWED`, `ISSUE_FOUND`, `RESOLVED`
 - Leaving a comment automatically marks referenced commit(s) as `ISSUE_FOUND`
 - Commit status can be changed from any status to any status
-- Commits moved to `REVIEWED` or `RESOLVED` are auto-deselected and their linked comments are auto-cleared
+- Commits moved to `REVIEWED` or `RESOLVED` are auto-deselected; their comments are hidden from the review-task markdown file
 - Unreviewed/issue/resolved/reviewed are explicitly badged in commit list
 - File-switch memory: each file remembers last diff cursor/scroll position
 - File tree shows relative last-modified time (from latest selected commit touching the file)
@@ -28,7 +28,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Vim-like keys by default
 - Inline key hints are contextual to the focused pane
 - Hunk comments are rendered inline in the diff and can be edited/deleted in place
-- Hunk comments can be anchored to commit/file/hunk/line or visual range and auto-export to Markdown
+- Hunk comments can be anchored to commit/file/hunk/line or visual range and auto-export to a single Markdown task file
 - Commit-header comments are supported in diff viewer (comment directly on commit banner lines)
 
 ## Data storage
@@ -37,8 +37,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 
 - `.hunkr/state.json`: persisted commit statuses
 - `.hunkr/comments/index.json`: persisted comment index for inline rendering/edit/delete
-- `.hunkr/comments/<timestamp>-<branch>-review.md`: review comment sessions
-- Markdown events explicitly label target type (`COMMIT` vs `HUNK`)
+- `.hunkr/comments/<branch>-review-tasks.md`: single auto-updating review task file for agents
 
 This storage is project-local and independent of Git remotes.
 
@@ -74,7 +73,11 @@ Diff pane:
 
 - `Ctrl-d` / `Ctrl-u`: half-page scroll
 - `PageDown` / `PageUp`: page scroll
-- `v` / `V`: visual line-range selection
+- `v` / `V`: visual line-range selection (toggle off with `v` / `V` or `Esc`)
+- `zz` / `zt` / `zb`: center/top/bottom cursor in viewport
+- `[` / `]`: jump to previous/next hunk
+- `/`: start diff search (`Enter` run, `Esc` cancel)
+- `n` / `N`: repeat previous search forward/backward
 - `m`: add comment for current commit/hunk anchor or selected visual range
 - `e`: edit comment under cursor
 - `D`: delete comment under cursor
@@ -102,7 +105,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 - `src/app.rs`: UI state, key/mouse routing, selection/status logic, rendering
 - `src/git_data.rs`: git commit discovery, unpushed detection, commit-range aggregation
 - `src/store.rs`: review state persistence (`.hunkr/state.json`)
-- `src/comments.rs`: persisted comment store (`index.json`) + markdown session writer
+- `src/comments.rs`: persisted comment store (`index.json`) + auto-generated review task file writer
 - `src/model.rs`: shared domain models
 
 ## Notes

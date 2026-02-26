@@ -47,6 +47,7 @@ enum InputMode {
     Normal,
     CommentCreate,
     CommentEdit(u64),
+    DiffSearch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -196,6 +197,11 @@ struct DiffVisualSelection {
     anchor: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiffPendingOp {
+    Z,
+}
+
 /// High-level app state and interaction flow for the hunkr UI.
 pub struct App {
     git: GitService,
@@ -223,6 +229,9 @@ pub struct App {
     pane_rects: PaneRects,
     status: String,
     comment_buffer: String,
+    diff_search_buffer: String,
+    diff_search_query: Option<String>,
+    diff_pending_op: Option<DiffPendingOp>,
     show_help: bool,
     last_refresh: Instant,
     should_quit: bool,
@@ -261,6 +270,9 @@ impl App {
             pane_rects: PaneRects::default(),
             status: String::new(),
             comment_buffer: String::new(),
+            diff_search_buffer: String::new(),
+            diff_search_query: None,
+            diff_pending_op: None,
             show_help: false,
             last_refresh: Instant::now(),
             should_quit: false,
@@ -393,7 +405,7 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         if !matches!(self.input_mode, InputMode::Normal) {
-            self.handle_comment_input(key);
+            self.handle_non_normal_input(key);
             return;
         }
 
@@ -446,6 +458,14 @@ impl App {
         self.status = format!("Theme switched to {}", self.theme_mode.label());
     }
 
+    fn handle_non_normal_input(&mut self, key: KeyEvent) {
+        match self.input_mode {
+            InputMode::CommentCreate | InputMode::CommentEdit(_) => self.handle_comment_input(key),
+            InputMode::DiffSearch => self.handle_diff_search_input(key),
+            InputMode::Normal => {}
+        }
+    }
+
     fn handle_comment_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
@@ -466,16 +486,23 @@ impl App {
                         if let Some(target) = self.comment_target_from_selection() {
                             let result = self.comments.add_comment(&target, &self.comment_buffer);
                             match result {
-                                Ok((id, path)) => {
+                                Ok(id) => {
                                     self.set_status_for_ids(
                                         &target.commits,
                                         ReviewStatus::IssueFound,
                                     );
                                     self.invalidate_diff_cache();
+                                    if let Err(err) = self.sync_comment_report() {
+                                        self.status = format!(
+                                            "Comment #{} added, but review tasks sync failed: {err:#}",
+                                            id
+                                        );
+                                        return;
+                                    }
                                     self.status = format!(
                                         "Comment #{} added -> {} ({} commit(s) marked ISSUE_FOUND)",
                                         id,
-                                        path.display(),
+                                        self.comments.report_path().display(),
                                         target.commits.len()
                                     );
                                 }
@@ -492,6 +519,13 @@ impl App {
                         match self.comments.update_comment(id, &self.comment_buffer) {
                             Ok(true) => {
                                 self.invalidate_diff_cache();
+                                if let Err(err) = self.sync_comment_report() {
+                                    self.status = format!(
+                                        "Comment #{} updated, but review tasks sync failed: {err:#}",
+                                        id
+                                    );
+                                    return;
+                                }
                                 self.status = format!("Comment #{} updated", id);
                             }
                             Ok(false) => {
@@ -502,6 +536,7 @@ impl App {
                             }
                         }
                     }
+                    InputMode::DiffSearch => {}
                     InputMode::Normal => {}
                 }
 
@@ -519,6 +554,67 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn handle_diff_search_input(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+                self.diff_search_buffer.clear();
+                self.status = "Diff search canceled".to_owned();
+            }
+            KeyCode::Enter => {
+                let query = self.diff_search_buffer.trim().to_owned();
+                self.input_mode = InputMode::Normal;
+                self.diff_search_buffer.clear();
+                if query.is_empty() {
+                    self.status = "Diff search canceled".to_owned();
+                    return;
+                }
+                self.execute_diff_search(&query, true);
+            }
+            KeyCode::Backspace => {
+                self.diff_search_buffer.pop();
+                self.status = format!("/{}", self.diff_search_buffer);
+            }
+            KeyCode::Char(c) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    return;
+                }
+                self.diff_search_buffer.push(c);
+                self.status = format!("/{}", self.diff_search_buffer);
+            }
+            _ => {}
+        }
+    }
+
+    fn execute_diff_search(&mut self, query: &str, forward: bool) {
+        let normalized = query.trim();
+        if normalized.is_empty() {
+            self.status = "Empty diff search query".to_owned();
+            return;
+        }
+
+        self.diff_search_query = Some(normalized.to_owned());
+        if let Some(idx) = find_diff_match_from_cursor(
+            &self.rendered_diff,
+            normalized,
+            forward,
+            self.diff_position.cursor,
+        ) {
+            self.set_diff_cursor(idx);
+            self.status = format!("/{normalized} -> line {}", idx.saturating_add(1));
+        } else {
+            self.status = format!("/{normalized} -> no match");
+        }
+    }
+
+    fn repeat_diff_search(&mut self, forward: bool) {
+        let Some(query) = self.diff_search_query.clone() else {
+            self.status = "No previous diff search".to_owned();
+            return;
+        };
+        self.execute_diff_search(&query, forward);
     }
 
     fn start_comment_edit_mode(&mut self) {
@@ -543,6 +639,13 @@ impl App {
         match self.comments.delete_comment(id) {
             Ok(true) => {
                 self.invalidate_diff_cache();
+                if let Err(err) = self.sync_comment_report() {
+                    self.status = format!(
+                        "Comment #{} deleted, but review tasks sync failed: {err:#}",
+                        id
+                    );
+                    return;
+                }
                 self.status = format!("Comment #{} deleted", id);
             }
             Ok(false) => {
@@ -555,6 +658,9 @@ impl App {
     }
 
     fn dispatch_focus_key(&mut self, key: KeyEvent) {
+        if self.focused != FocusPane::Diff {
+            self.diff_pending_op = None;
+        }
         match self.focused {
             FocusPane::Files => self.handle_files_key(key),
             FocusPane::Commits => self.handle_commits_key(key),
@@ -634,9 +740,39 @@ impl App {
     }
 
     fn handle_diff_key(&mut self, key: KeyEvent) {
+        if let Some(op) = self.diff_pending_op {
+            if key.modifiers == KeyModifiers::NONE {
+                match (op, key.code) {
+                    (DiffPendingOp::Z, KeyCode::Char('z')) => {
+                        self.diff_pending_op = None;
+                        self.align_diff_cursor_middle();
+                        return;
+                    }
+                    (DiffPendingOp::Z, KeyCode::Char('t')) => {
+                        self.diff_pending_op = None;
+                        self.align_diff_cursor_top();
+                        return;
+                    }
+                    (DiffPendingOp::Z, KeyCode::Char('b')) => {
+                        self.diff_pending_op = None;
+                        self.align_diff_cursor_bottom();
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            self.diff_pending_op = None;
+        }
+
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_diff_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_diff_cursor(-1),
+            KeyCode::Esc => {
+                if self.diff_visual.is_some() {
+                    self.diff_visual = None;
+                    self.status = "Diff visual range off".to_owned();
+                }
+            }
             KeyCode::Char('g') => {
                 self.diff_position.cursor = 0;
                 self.ensure_cursor_visible();
@@ -655,6 +791,23 @@ impl App {
             }
             KeyCode::PageUp => self.page_diff(-1.0),
             KeyCode::PageDown => self.page_diff(1.0),
+            KeyCode::Char('z') if key.modifiers == KeyModifiers::NONE => {
+                self.diff_pending_op = Some(DiffPendingOp::Z);
+            }
+            KeyCode::Char('[') if key.modifiers == KeyModifiers::NONE => self.move_prev_hunk(),
+            KeyCode::Char(']') if key.modifiers == KeyModifiers::NONE => self.move_next_hunk(),
+            KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
+                self.input_mode = InputMode::DiffSearch;
+                self.diff_search_buffer.clear();
+                self.diff_pending_op = None;
+                self.status = "/".to_owned();
+            }
+            KeyCode::Char('n') if key.modifiers == KeyModifiers::NONE => {
+                self.repeat_diff_search(true);
+            }
+            KeyCode::Char('N') if key.modifiers == KeyModifiers::NONE => {
+                self.repeat_diff_search(false);
+            }
             KeyCode::Char('v') | KeyCode::Char('V') => {
                 if self.rendered_diff.is_empty() {
                     return;
@@ -672,6 +825,7 @@ impl App {
             KeyCode::Char('m') => {
                 self.input_mode = InputMode::CommentCreate;
                 self.comment_buffer.clear();
+                self.diff_pending_op = None;
                 self.status =
                     "Comment mode: type comment, Enter save, Esc cancel (commit/hunk/range)"
                         .to_owned();
@@ -903,11 +1057,11 @@ impl App {
                 && idx >= start
                 && idx <= end
             {
-                line = line.patch_style(Style::default().bg(theme.visual_bg));
+                line = tint_line_background(&line, theme.visual_bg, false);
             }
 
             if idx == self.diff_position.cursor && self.focused == FocusPane::Diff {
-                line = line.patch_style(Style::default().bg(theme.cursor_bg));
+                line = tint_line_background(&line, theme.cursor_bg, true);
             }
             lines.push(line);
         }
@@ -956,7 +1110,7 @@ impl App {
         let y = rect.y.saturating_add(1);
         let track_style = Style::default().fg(theme.dimmed);
         let thumb_style = Style::default()
-            .fg(theme.accent)
+            .fg(theme.muted)
             .add_modifier(Modifier::BOLD);
 
         let buffer = frame.buffer_mut();
@@ -975,6 +1129,7 @@ impl App {
             InputMode::Normal => "NORMAL",
             InputMode::CommentCreate => "COMMENT+",
             InputMode::CommentEdit(_) => "COMMENT*",
+            InputMode::DiffSearch => "SEARCH/",
         };
         let focus = match self.focused {
             FocusPane::Files => "files",
@@ -982,15 +1137,20 @@ impl App {
             FocusPane::Diff => "diff",
         };
 
-        let pane_line = if !matches!(self.input_mode, InputMode::Normal) {
-            Line::from(vec![
+        let pane_line = match self.input_mode {
+            InputMode::CommentCreate | InputMode::CommentEdit(_) => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" save ", Style::default().fg(theme.muted)),
                 key_chip("Esc", theme),
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
-            ])
-        } else {
-            match self.focused {
+            ]),
+            InputMode::DiffSearch => Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" search ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" cancel search", Style::default().fg(theme.muted)),
+            ]),
+            InputMode::Normal => match self.focused {
                 FocusPane::Files => Line::from(vec![
                     key_chip("j/k", theme),
                     Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -1012,12 +1172,18 @@ impl App {
                     Span::styled(" range ", Style::default().fg(theme.muted)),
                     key_chip("m", theme),
                     Span::styled(" comment ", Style::default().fg(theme.muted)),
+                    key_chip("/", theme),
+                    Span::styled(" search ", Style::default().fg(theme.muted)),
+                    key_chip("[/]", theme),
+                    Span::styled(" hunks ", Style::default().fg(theme.muted)),
+                    key_chip("zz/zt/zb", theme),
+                    Span::styled(" scroll ", Style::default().fg(theme.muted)),
                     key_chip("e/D", theme),
                     Span::styled(" edit/delete ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
                     Span::styled(" jump", Style::default().fg(theme.muted)),
                 ]),
-            }
+            },
         };
 
         let global_line = Line::from(vec![
@@ -1035,23 +1201,30 @@ impl App {
             Span::styled(" quit", Style::default().fg(theme.dimmed)),
         ]);
 
-        let status = if !matches!(self.input_mode, InputMode::Normal) {
-            format!(
+        let status = match self.input_mode {
+            InputMode::CommentCreate | InputMode::CommentEdit(_) => format!(
                 "{} | mode={} focus={} theme={} > {}",
                 self.status,
                 mode,
                 focus,
                 self.theme_mode.label(),
                 self.comment_buffer
-            )
-        } else {
-            format!(
+            ),
+            InputMode::DiffSearch => format!(
+                "{} | mode={} focus={} theme={} /{}",
+                self.status,
+                mode,
+                focus,
+                self.theme_mode.label(),
+                self.diff_search_buffer
+            ),
+            InputMode::Normal => format!(
                 "{} | mode={} focus={} theme={}",
                 self.status,
                 mode,
                 focus,
                 self.theme_mode.label()
-            )
+            ),
         };
 
         let chunks = ratatui::layout::Layout::default()
@@ -1108,6 +1281,22 @@ impl App {
             Line::from(vec![
                 key_chip("m", theme),
                 Span::raw(" add comment to commit/hunk/range"),
+            ]),
+            Line::from(vec![
+                key_chip("/", theme),
+                Span::raw(" diff search (Esc cancel, Enter run)"),
+            ]),
+            Line::from(vec![
+                key_chip("n/N", theme),
+                Span::raw(" repeat diff search next/prev"),
+            ]),
+            Line::from(vec![
+                key_chip("[/]", theme),
+                Span::raw(" previous/next diff hunk"),
+            ]),
+            Line::from(vec![
+                key_chip("zz/zt/zb", theme),
+                Span::raw(" center/top/bottom cursor"),
             ]),
             Line::from(vec![
                 key_chip("e", theme),
@@ -1202,6 +1391,7 @@ impl App {
         }
 
         self.rebuild_selection_dependent_views()?;
+        self.sync_comment_report()?;
         Ok(())
     }
 
@@ -1216,7 +1406,7 @@ impl App {
 
         self.rendered_diff_cache.clear();
         self.rendered_diff_key = None;
-        self.diff_visual = None;
+        self.diff_pending_op = None;
 
         self.rebuild_file_tree();
         self.ensure_selected_file_exists();
@@ -1285,6 +1475,7 @@ impl App {
         if self.diff_position.cursor >= self.rendered_diff.len() {
             self.diff_position.cursor = self.rendered_diff.len() - 1;
         }
+        self.sync_diff_visual_bounds();
 
         self.ensure_cursor_visible();
     }
@@ -1604,7 +1795,6 @@ impl App {
             .expect("selectable rows always contain path");
         self.selected_file = Some(path.clone());
         self.restore_diff_position(&path);
-        self.diff_visual = None;
         self.ensure_rendered_diff();
     }
 
@@ -1706,19 +1896,6 @@ impl App {
         );
 
         apply_status_transition(&mut self.commits, ids, status);
-        let mut comment_cleanup_error = None;
-        let removed_comments = if auto_deselect_status(status) {
-            let reason = format!("Auto-removed: commit marked {}", status.as_str());
-            match self.comments.delete_comments_for_commits(ids, &reason) {
-                Ok(count) => count,
-                Err(err) => {
-                    comment_cleanup_error = Some(err);
-                    0
-                }
-            }
-        } else {
-            0
-        };
 
         let save_result = self.store.save(&self.review_state);
         let mut status_message = if let Err(err) = save_result {
@@ -1726,12 +1903,6 @@ impl App {
         } else {
             format!("{} commit(s) -> {}", ids.len(), status.as_str())
         };
-        if removed_comments > 0 {
-            status_message.push_str(&format!(", {} comment(s) cleared", removed_comments));
-        }
-        if let Some(err) = comment_cleanup_error {
-            status_message.push_str(&format!(", comment cleanup failed: {err:#}"));
-        }
 
         if status != ReviewStatus::Unreviewed {
             self.commit_visual_anchor = None;
@@ -1739,6 +1910,9 @@ impl App {
         if let Err(err) = self.rebuild_selection_dependent_views() {
             self.status = format!("failed to rebuild diff: {err:#}");
             return;
+        }
+        if let Err(err) = self.sync_comment_report() {
+            status_message.push_str(&format!(", review tasks sync failed: {err:#}"));
         }
         self.status = status_message;
     }
@@ -1767,8 +1941,84 @@ impl App {
         self.move_diff_cursor(step);
     }
 
+    fn align_diff_cursor_top(&mut self) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        self.set_diff_scroll(self.diff_position.cursor);
+        self.status = "zt".to_owned();
+    }
+
+    fn align_diff_cursor_middle(&mut self) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        let visible = self.visible_diff_rows();
+        let scroll = self.diff_position.cursor.saturating_sub(visible / 2);
+        self.set_diff_scroll(scroll);
+        self.status = "zz".to_owned();
+    }
+
+    fn align_diff_cursor_bottom(&mut self) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        let visible = self.visible_diff_rows();
+        let scroll = self
+            .diff_position
+            .cursor
+            .saturating_sub(visible.saturating_sub(1));
+        self.set_diff_scroll(scroll);
+        self.status = "zb".to_owned();
+    }
+
+    fn move_prev_hunk(&mut self) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        for idx in (0..self.diff_position.cursor).rev() {
+            if is_hunk_header_line(&self.rendered_diff[idx]) {
+                self.set_diff_cursor(idx);
+                self.status = format!("hunk {}", idx.saturating_add(1));
+                return;
+            }
+        }
+        self.status = "No previous hunk".to_owned();
+    }
+
+    fn move_next_hunk(&mut self) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        for idx in self.diff_position.cursor.saturating_add(1)..self.rendered_diff.len() {
+            if is_hunk_header_line(&self.rendered_diff[idx]) {
+                self.set_diff_cursor(idx);
+                self.status = format!("hunk {}", idx.saturating_add(1));
+                return;
+            }
+        }
+        self.status = "No next hunk".to_owned();
+    }
+
+    fn visible_diff_rows(&self) -> usize {
+        self.pane_rects.diff.height.saturating_sub(2).max(1) as usize
+    }
+
+    fn max_diff_scroll(&self) -> usize {
+        self.rendered_diff
+            .len()
+            .saturating_sub(self.visible_diff_rows().min(self.rendered_diff.len()))
+    }
+
+    fn set_diff_scroll(&mut self, scroll: usize) {
+        self.diff_position.scroll = scroll.min(self.max_diff_scroll());
+        if let Some(file) = &self.selected_file {
+            self.diff_positions.insert(file.clone(), self.diff_position);
+        }
+    }
+
     fn ensure_cursor_visible(&mut self) {
-        let visible = self.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
+        let visible = self.visible_diff_rows();
 
         if self.diff_position.cursor < self.diff_position.scroll {
             self.diff_position.scroll = self.diff_position.cursor;
@@ -1783,6 +2033,22 @@ impl App {
 
     fn restore_diff_position(&mut self, path: &str) {
         self.diff_position = self.diff_positions.get(path).copied().unwrap_or_default();
+    }
+
+    fn sync_diff_visual_bounds(&mut self) {
+        let Some(visual) = self.diff_visual else {
+            return;
+        };
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        let max_idx = self.rendered_diff.len() - 1;
+        let clamped_anchor = visual.anchor.min(max_idx);
+        if clamped_anchor != visual.anchor {
+            self.diff_visual = Some(DiffVisualSelection {
+                anchor: clamped_anchor,
+            });
+        }
     }
 
     fn focus_next(&mut self) {
@@ -1805,14 +2071,14 @@ impl App {
         if self.rendered_diff.is_empty() {
             return None;
         }
+        let max_idx = self.rendered_diff.len() - 1;
+        let cursor = self.diff_position.cursor.min(max_idx);
 
         if let Some(visual) = self.diff_visual {
-            Some((
-                min(visual.anchor, self.diff_position.cursor),
-                max(visual.anchor, self.diff_position.cursor),
-            ))
+            let anchor = visual.anchor.min(max_idx);
+            Some((min(anchor, cursor), max(anchor, cursor)))
         } else {
-            Some((self.diff_position.cursor, self.diff_position.cursor))
+            Some((cursor, cursor))
         }
     }
 
@@ -1891,6 +2157,13 @@ impl App {
             }
         }
         (unreviewed, reviewed, issue_found, resolved)
+    }
+
+    fn sync_comment_report(&self) -> anyhow::Result<()> {
+        self.comments.sync_review_tasks_report(|commit_id| {
+            self.store.commit_status(&self.review_state, commit_id)
+        })?;
+        Ok(())
     }
 }
 
@@ -2019,6 +2292,85 @@ fn syntect_to_ratatui(style: syntect::highlighting::Style) -> Style {
         style.foreground.g,
         style.foreground.b,
     ))
+}
+
+fn tint_line_background(line: &Line<'static>, tint: Color, blend_existing: bool) -> Line<'static> {
+    let mut patched = line.clone();
+    for span in &mut patched.spans {
+        let bg = if blend_existing {
+            span.style
+                .bg
+                .map(|existing| blend_colors(existing, tint, 170))
+                .unwrap_or(tint)
+        } else {
+            tint
+        };
+        span.style = span.style.patch(Style::default().bg(bg));
+    }
+    patched
+}
+
+fn blend_colors(base: Color, overlay: Color, overlay_weight: u8) -> Color {
+    match (base, overlay) {
+        (Color::Rgb(br, bg, bb), Color::Rgb(or, og, ob)) => {
+            let keep_weight = u16::from(255_u8.saturating_sub(overlay_weight));
+            let overlay_weight = u16::from(overlay_weight);
+            let mix = |base: u8, over: u8| -> u8 {
+                (((u16::from(base) * keep_weight) + (u16::from(over) * overlay_weight)) / 255) as u8
+            };
+            Color::Rgb(mix(br, or), mix(bg, og), mix(bb, ob))
+        }
+        (_, over) => over,
+    }
+}
+
+fn is_hunk_header_line(line: &RenderedDiffLine) -> bool {
+    line.raw_text.starts_with("@@ ")
+        && line
+            .anchor
+            .as_ref()
+            .is_some_and(|anchor| !is_commit_anchor(anchor))
+}
+
+fn find_diff_match_from_cursor(
+    lines: &[RenderedDiffLine],
+    query: &str,
+    forward: bool,
+    cursor: usize,
+) -> Option<usize> {
+    if lines.is_empty() {
+        return None;
+    }
+    let query = query.to_ascii_lowercase();
+    if query.is_empty() {
+        return None;
+    }
+
+    let current = cursor.min(lines.len().saturating_sub(1));
+    if forward {
+        for idx in current.saturating_add(1)..lines.len() {
+            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+                return Some(idx);
+            }
+        }
+        for idx in 0..=current {
+            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+                return Some(idx);
+            }
+        }
+    } else {
+        for idx in (0..current).rev() {
+            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+                return Some(idx);
+            }
+        }
+        for idx in (current..lines.len()).rev() {
+            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+                return Some(idx);
+            }
+        }
+    }
+    None
 }
 
 fn contains(rect: ratatui::layout::Rect, x: u16, y: u16) -> bool {
@@ -3001,5 +3353,106 @@ mod tests {
 
         push_comment_lines_for_anchor(&mut rendered, &comments, &mut injected, &end, &theme, 0);
         assert_eq!(rendered.len(), inserted_rows);
+    }
+
+    #[test]
+    fn diff_search_wraps_forward() {
+        let lines = vec![
+            RenderedDiffLine {
+                line: Line::from("alpha"),
+                raw_text: "alpha".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("beta"),
+                raw_text: "beta".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("gamma"),
+                raw_text: "gamma".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+
+        let found = find_diff_match_from_cursor(&lines, "alp", true, 2);
+        assert_eq!(found, Some(0));
+    }
+
+    #[test]
+    fn diff_search_wraps_backward() {
+        let lines = vec![
+            RenderedDiffLine {
+                line: Line::from("alpha"),
+                raw_text: "alpha".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("beta"),
+                raw_text: "beta".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("gamma"),
+                raw_text: "gamma".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+
+        let found = find_diff_match_from_cursor(&lines, "gam", false, 0);
+        assert_eq!(found, Some(2));
+    }
+
+    #[test]
+    fn hunk_header_detection_ignores_commit_banner() {
+        let commit_anchor = CommentAnchor {
+            commit_id: "abc1234".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+            old_lineno: None,
+            new_lineno: None,
+        };
+        let hunk_anchor = CommentAnchor {
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+            ..commit_anchor.clone()
+        };
+
+        let commit_line = RenderedDiffLine {
+            line: Line::from("---- commit abc1234 summary"),
+            raw_text: "---- commit abc1234 summary".to_owned(),
+            anchor: Some(commit_anchor),
+            comment_id: None,
+        };
+        let hunk_line = RenderedDiffLine {
+            line: Line::from("@@ -1,1 +1,1 @@"),
+            raw_text: "@@ -1,1 +1,1 @@".to_owned(),
+            anchor: Some(hunk_anchor),
+            comment_id: None,
+        };
+
+        assert!(!is_hunk_header_line(&commit_line));
+        assert!(is_hunk_header_line(&hunk_line));
+    }
+
+    #[test]
+    fn cursor_tint_blends_existing_diff_background() {
+        let line = Line::from(vec![Span::styled(
+            "+ let x = 1",
+            Style::default().bg(Color::Rgb(19, 51, 30)),
+        )]);
+        let tinted = tint_line_background(&line, Color::Rgb(52, 52, 62), true);
+        let bg = tinted.spans[0].style.bg.expect("bg");
+
+        assert_ne!(bg, Color::Rgb(19, 51, 30));
+        assert_ne!(bg, Color::Rgb(52, 52, 62));
     }
 }

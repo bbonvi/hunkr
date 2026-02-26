@@ -1,26 +1,25 @@
 use std::{
-    collections::BTreeSet,
-    fs::{self, OpenOptions},
-    io::Write,
+    collections::BTreeMap,
+    fs,
     path::{Path, PathBuf},
 };
 
 use anyhow::Context;
 use chrono::Utc;
 
-use crate::model::{CommentTarget, CommentTargetKind, ReviewComment};
+use crate::model::{CommentTarget, CommentTargetKind, ReviewComment, ReviewStatus};
 
 const COMMENTS_DIR: &str = "comments";
 const COMMENTS_INDEX_FILE: &str = "index.json";
+const REVIEW_TASKS_SUFFIX: &str = "-review-tasks.md";
 
-/// Stores persisted review comments and markdown session exports.
+/// Stores persisted review comments and writes a single auto-updating task report.
 #[derive(Debug, Clone)]
 pub struct CommentStore {
     root: PathBuf,
     branch: String,
-    session_file: Option<PathBuf>,
-    event_counter: u32,
     index_path: PathBuf,
+    report_path: PathBuf,
     comments: Vec<ReviewComment>,
     next_id: u64,
 }
@@ -39,13 +38,14 @@ impl CommentStore {
             .max()
             .unwrap_or(0)
             .saturating_add(1);
+        let branch = sanitize(branch);
+        let report_path = root.join(format!("{branch}{REVIEW_TASKS_SUFFIX}"));
 
         Ok(Self {
             root,
-            branch: sanitize(branch),
-            session_file: None,
-            event_counter: 0,
+            branch,
             index_path,
+            report_path,
             comments,
             next_id,
         })
@@ -59,11 +59,11 @@ impl CommentStore {
         self.comments.iter().find(|comment| comment.id == id)
     }
 
-    pub fn add_comment(
-        &mut self,
-        target: &CommentTarget,
-        text: &str,
-    ) -> anyhow::Result<(u64, PathBuf)> {
+    pub fn report_path(&self) -> &Path {
+        &self.report_path
+    }
+
+    pub fn add_comment(&mut self, target: &CommentTarget, text: &str) -> anyhow::Result<u64> {
         let now = Utc::now().to_rfc3339();
         let comment = ReviewComment {
             id: self.next_id,
@@ -73,12 +73,11 @@ impl CommentStore {
             updated_at: now,
         };
         self.next_id = self.next_id.saturating_add(1);
+        let id = comment.id;
 
-        self.comments.push(comment.clone());
+        self.comments.push(comment);
         self.save_index()?;
-
-        let session = self.append_markdown_event("ADD", &comment, None)?;
-        Ok((comment.id, session))
+        Ok(id)
     }
 
     pub fn update_comment(&mut self, id: u64, text: &str) -> anyhow::Result<bool> {
@@ -88,9 +87,7 @@ impl CommentStore {
 
         self.comments[idx].text = text.trim().to_owned();
         self.comments[idx].updated_at = Utc::now().to_rfc3339();
-        let snapshot = self.comments[idx].clone();
         self.save_index()?;
-        self.append_markdown_event("EDIT", &snapshot, None)?;
         Ok(true)
     }
 
@@ -98,45 +95,25 @@ impl CommentStore {
         let Some(idx) = self.comments.iter().position(|comment| comment.id == id) else {
             return Ok(false);
         };
-        let removed = self.comments.remove(idx);
+        self.comments.remove(idx);
         self.save_index()?;
-        self.append_markdown_event("DELETE", &removed, Some("Comment removed"))?;
         Ok(true)
     }
 
-    pub fn delete_comments_for_commits(
-        &mut self,
-        commit_ids: &BTreeSet<String>,
-        reason: &str,
-    ) -> anyhow::Result<usize> {
-        if commit_ids.is_empty() {
-            return Ok(0);
-        }
+    /// Regenerates the markdown task file from persisted comments and commit statuses.
+    ///
+    /// Comments whose linked commits are all `REVIEWED`/`RESOLVED` are hidden from the task list.
+    pub fn sync_review_tasks_report<F>(&self, status_for_commit: F) -> anyhow::Result<PathBuf>
+    where
+        F: Fn(&str) -> ReviewStatus,
+    {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("failed to create {}", self.root.display()))?;
 
-        let mut removed = Vec::new();
-        self.comments.retain(|comment| {
-            let should_remove = comment
-                .target
-                .commits
-                .iter()
-                .any(|commit_id| commit_ids.contains(commit_id));
-            if should_remove {
-                removed.push(comment.clone());
-                false
-            } else {
-                true
-            }
-        });
-
-        if removed.is_empty() {
-            return Ok(0);
-        }
-
-        self.save_index()?;
-        for comment in &removed {
-            self.append_markdown_event("DELETE", comment, Some(reason))?;
-        }
-        Ok(removed.len())
+        let report = render_review_tasks_report(&self.branch, &self.comments, status_for_commit);
+        fs::write(&self.report_path, report)
+            .with_context(|| format!("failed to write {}", self.report_path.display()))?;
+        Ok(self.report_path.clone())
     }
 
     fn save_index(&self) -> anyhow::Result<()> {
@@ -146,107 +123,183 @@ impl CommentStore {
             .with_context(|| format!("failed to write {}", self.index_path.display()))?;
         Ok(())
     }
+}
 
-    fn append_markdown_event(
-        &mut self,
-        action: &str,
-        comment: &ReviewComment,
-        override_text: Option<&str>,
-    ) -> anyhow::Result<PathBuf> {
-        let file_path = if let Some(path) = &self.session_file {
-            path.clone()
-        } else {
-            let ts = Utc::now().format("%Y%m%d-%H%M%S").to_string();
-            let name = format!("{}-{}-review.md", ts, self.branch);
-            let path = self.root.join(name);
-            self.write_session_header(&path)?;
-            self.session_file = Some(path.clone());
-            path
-        };
+fn render_review_tasks_report<F>(
+    branch: &str,
+    comments: &[ReviewComment],
+    status_for_commit: F,
+) -> String
+where
+    F: Fn(&str) -> ReviewStatus,
+{
+    #[derive(Clone)]
+    struct VisibleComment {
+        comment: ReviewComment,
+        statuses: Vec<(String, ReviewStatus)>,
+    }
 
-        self.event_counter = self.event_counter.saturating_add(1);
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&file_path)
-            .with_context(|| format!("failed to open {}", file_path.display()))?;
+    let mut visible = Vec::<VisibleComment>::new();
+    let mut hidden_count = 0usize;
+    let mut per_commit_total = BTreeMap::<String, usize>::new();
+    let mut per_commit_open = BTreeMap::<String, usize>::new();
 
-        writeln!(file, "## Event {} [{}]", self.event_counter, action)
-            .context("failed to write event heading")?;
-        writeln!(file, "- Time: {}", Utc::now().to_rfc3339()).context("failed to write time")?;
-        writeln!(file, "- Comment ID: `#{}`", comment.id).context("failed to write id")?;
-        writeln!(file, "- Target: {}", comment.target.kind.as_str())
-            .context("failed to write target")?;
-        writeln!(file, "- File: `{}`", comment.target.start.file_path)
-            .context("failed to write file")?;
-        writeln!(
-            file,
-            "- Commits: {}",
-            comment
-                .target
-                .commits
-                .iter()
-                .map(|id| format!("`{}`", id))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-        .context("failed to write commits")?;
-        if comment.target.kind == CommentTargetKind::Commit {
-            writeln!(
-                file,
-                "- Commit Summary: {}",
-                comment.target.start.commit_summary
-            )
-            .context("failed to write commit summary")?;
+    for comment in comments {
+        let mut statuses = comment
+            .target
+            .commits
+            .iter()
+            .map(|commit| (commit.clone(), status_for_commit(commit)))
+            .collect::<Vec<_>>();
+        statuses.sort_by(|left, right| left.0.cmp(&right.0));
+
+        for (commit, _) in &statuses {
+            *per_commit_total.entry(commit.clone()).or_insert(0) += 1;
         }
-        writeln!(
-            file,
-            "- Start: `{}` ({})",
+
+        let hidden = !statuses.is_empty()
+            && statuses
+                .iter()
+                .all(|(_, status)| hidden_from_task_file(*status));
+        if hidden {
+            hidden_count += 1;
+            continue;
+        }
+
+        for (commit, _) in &statuses {
+            *per_commit_open.entry(commit.clone()).or_insert(0) += 1;
+        }
+        visible.push(VisibleComment {
+            comment: comment.clone(),
+            statuses,
+        });
+    }
+    visible.sort_by_key(|entry| entry.comment.id);
+
+    let mut report = String::new();
+    report.push_str("# Hunkr Review Tasks\n\n");
+    report.push_str("> This file is auto-generated by hunkr and is read-only for agents.\n");
+    report.push_str("> Do not edit this file manually.\n");
+    report.push_str("> Agent instruction: address every OPEN task and include an addressed report in your output.\n\n");
+
+    report.push_str("## What This File Is\n\n");
+    report.push_str(
+        "- Purpose: actionable review work derived from persisted hunk/commit comments.\n",
+    );
+    report.push_str("- Scope: comments tied to commits that are not `REVIEWED` or `RESOLVED`.\n");
+    report.push_str(
+        "- Visibility rule: comments linked only to `REVIEWED`/`RESOLVED` commits are hidden.\n",
+    );
+    report.push_str("- Contract: treat each task below as a required action item.\n\n");
+
+    report.push_str("## Agent Addressed Report\n\n");
+    report.push_str("After handling tasks, report:\n");
+    report.push_str("- Which task IDs were addressed.\n");
+    report.push_str("- Which tasks remain open.\n");
+    report.push_str(
+        "- For each commit listed in this file, whether all its tasks are addressed.\n\n",
+    );
+
+    report.push_str("## Snapshot\n\n");
+    report.push_str(&format!("- Updated: {}\n", Utc::now().to_rfc3339()));
+    report.push_str(&format!("- Branch: `{branch}`\n"));
+    report.push_str(&format!("- Open tasks: {}\n", visible.len()));
+    report.push_str(&format!(
+        "- Hidden tasks (`REVIEWED`/`RESOLVED` commits): {hidden_count}\n"
+    ));
+    report.push('\n');
+
+    report.push_str("## Commit Task Coverage\n\n");
+    if per_commit_total.is_empty() {
+        report.push_str("- No commit-linked comments yet.\n\n");
+    } else {
+        for (commit, total) in &per_commit_total {
+            let open = per_commit_open.get(commit).copied().unwrap_or(0);
+            let all_addressed = if open == 0 { "yes" } else { "no" };
+            let status = status_for_commit(commit);
+            report.push_str(&format!(
+                "- `{}` (`{}`): open tasks `{}/{}`, all addressed `{}`\n",
+                short_id(commit),
+                status.as_str(),
+                open,
+                total,
+                all_addressed
+            ));
+        }
+        report.push('\n');
+    }
+
+    report.push_str("## Open Tasks\n\n");
+    if visible.is_empty() {
+        report.push_str("No open tasks. All persisted comments are hidden by commit status, or there are no comments.\n");
+        return report;
+    }
+
+    for entry in &visible {
+        let comment = &entry.comment;
+        report.push_str(&format!("### TASK #{}\n\n", comment.id));
+        report.push_str("- State: `OPEN`\n");
+        report.push_str(&format!("- Target: `{}`\n", comment.target.kind.as_str()));
+        report.push_str(&format!("- File: `{}`\n", comment.target.start.file_path));
+        report.push_str(&format!(
+            "- Commits: {}\n",
+            format_commit_statuses(&entry.statuses)
+        ));
+        report.push_str(&format!(
+            "- Start: `{}` ({})\n",
             comment.target.start.hunk_header,
             format_anchor_lines(
                 comment.target.start.old_lineno,
                 comment.target.start.new_lineno
             )
-        )
-        .context("failed to write start")?;
-        writeln!(
-            file,
-            "- End: `{}` ({})",
+        ));
+        report.push_str(&format!(
+            "- End: `{}` ({})\n",
             comment.target.end.hunk_header,
             format_anchor_lines(comment.target.end.old_lineno, comment.target.end.new_lineno)
-        )
-        .context("failed to write end")?;
-        writeln!(file).context("failed to write spacing")?;
-
-        let text = override_text.unwrap_or(&comment.text);
-        writeln!(file, "{}", text.trim()).context("failed to write text")?;
+        ));
+        if comment.target.kind == CommentTargetKind::Commit {
+            report.push_str(&format!(
+                "- Commit Summary: {}\n",
+                comment.target.start.commit_summary
+            ));
+        }
+        report.push_str(&format!("- Updated: {}\n", comment.updated_at));
+        report.push_str("\nComment:\n\n");
+        report.push_str(comment.text.trim());
+        report.push('\n');
 
         if !comment.target.selected_lines.is_empty() {
-            writeln!(file).context("failed to write spacing")?;
-            writeln!(file, "```diff").context("failed to write code fence")?;
+            report.push_str("\n```diff\n");
             for line in &comment.target.selected_lines {
-                writeln!(file, "{}", line).context("failed to write selected line")?;
+                report.push_str(line);
+                report.push('\n');
             }
-            writeln!(file, "```").context("failed to close code fence")?;
+            report.push_str("```\n");
         }
-
-        writeln!(file).context("failed to write trailing newline")?;
-        Ok(file_path)
+        report.push('\n');
     }
 
-    fn write_session_header(&self, path: &Path) -> anyhow::Result<()> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .with_context(|| format!("failed to create {}", path.display()))?;
-        writeln!(file, "# Hunkr Review Session").context("failed to write title")?;
-        writeln!(file, "- Started: {}", Utc::now().to_rfc3339())
-            .context("failed to write started line")?;
-        writeln!(file, "- Branch: `{}`", self.branch).context("failed to write branch")?;
-        writeln!(file).context("failed to write spacing")?;
-        Ok(())
+    report
+}
+
+fn hidden_from_task_file(status: ReviewStatus) -> bool {
+    matches!(status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
+}
+
+fn format_commit_statuses(statuses: &[(String, ReviewStatus)]) -> String {
+    if statuses.is_empty() {
+        return "n/a".to_owned();
     }
+    statuses
+        .iter()
+        .map(|(commit, status)| format!("`{} ({})`", short_id(commit), status.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn short_id(commit: &str) -> String {
+    commit.chars().take(12).collect()
 }
 
 fn load_index(path: &Path) -> anyhow::Result<Vec<ReviewComment>> {
@@ -317,10 +370,13 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let mut store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
 
-        let (id, path) = store
+        let id = store
             .add_comment(&make_target(), "Need better naming")
             .expect("add");
-        assert!(path.exists());
+        store
+            .sync_review_tasks_report(|_| ReviewStatus::IssueFound)
+            .expect("sync");
+        assert!(store.report_path().exists());
         assert_eq!(store.comments().len(), 1);
 
         let updated = store.update_comment(id, "Renamed now").expect("update");
@@ -385,26 +441,27 @@ mod tests {
     }
 
     #[test]
-    fn delete_comments_for_commits_removes_matching_comments() {
+    fn sync_report_hides_reviewed_and_resolved_comments() {
         let tmp = tempdir().expect("tempdir");
         let mut store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
-        store
+        let first = store
             .add_comment(&make_target_for_commit("a1"), "first")
             .expect("add first");
-        store
+        let second = store
             .add_comment(&make_target_for_commit("b2"), "second")
             .expect("add second");
-        assert_eq!(store.comments().len(), 2);
 
-        let removed = store
-            .delete_comments_for_commits(
-                &BTreeSet::from(["b2".to_owned()]),
-                "Auto-removed: commit marked REVIEWED",
-            )
-            .expect("delete by commit");
+        let report_path = store
+            .sync_review_tasks_report(|commit| match commit {
+                "a1" => ReviewStatus::IssueFound,
+                "b2" => ReviewStatus::Reviewed,
+                _ => ReviewStatus::Unreviewed,
+            })
+            .expect("sync");
 
-        assert_eq!(removed, 1);
-        assert_eq!(store.comments().len(), 1);
-        assert_eq!(store.comments()[0].target.start.commit_id, "a1");
+        let report = fs::read_to_string(report_path).expect("read report");
+        assert!(report.contains(&format!("TASK #{}", first)));
+        assert!(!report.contains(&format!("TASK #{}", second)));
+        assert!(report.contains("Hidden tasks (`REVIEWED`/`RESOLVED` commits): 1"));
     }
 }
