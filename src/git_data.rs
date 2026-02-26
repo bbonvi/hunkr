@@ -5,9 +5,13 @@ use std::{
 };
 
 use anyhow::{Context, anyhow};
+use chrono::Utc;
 use git2::{BranchType, DiffOptions, Oid, Repository, Sort};
 
-use crate::model::{AggregatedDiff, CommitInfo, DiffLineKind, FilePatch, Hunk, HunkLine};
+use crate::model::{
+    AggregatedDiff, CommitInfo, DiffLineKind, FilePatch, Hunk, HunkLine, UNCOMMITTED_COMMIT_ID,
+    UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
+};
 
 /// Read-only git access tailored for multi-commit review workflows.
 pub struct GitService {
@@ -183,130 +187,179 @@ impl GitService {
                 .diff_tree_to_tree(parent_tree.as_ref(), Some(&current_tree), Some(&mut opts))
                 .with_context(|| format!("failed to diff commit {commit_id}"))?;
 
-            let summary = commit
-                .summary()
-                .map(str::to_owned)
-                .unwrap_or_else(|| "(no summary)".to_owned());
-            let short = short_id(commit_id);
-
-            let current_path = RefCell::new(String::new());
-            let current_hunk_index = RefCell::new(None::<usize>);
-            let touched_paths = RefCell::new(BTreeSet::<String>::new());
-            let hunked_paths = RefCell::new(BTreeSet::<String>::new());
-            let commit_patches = RefCell::new(BTreeMap::<String, Vec<Hunk>>::new());
-
-            diff.foreach(
-                &mut |delta, _| {
-                    let path = delta
-                        .new_file()
-                        .path()
-                        .or_else(|| delta.old_file().path())
-                        .map(path_to_string)
-                        .unwrap_or_else(|| "(unknown)".to_owned());
-                    *current_path.borrow_mut() = path.clone();
-                    *current_hunk_index.borrow_mut() = None;
-                    touched_paths.borrow_mut().insert(path.clone());
-                    commit_patches.borrow_mut().entry(path).or_default();
-                    true
-                },
-                None,
-                Some(&mut |_delta, hunk| {
-                    let path = current_path.borrow().clone();
-                    let mut patches = commit_patches.borrow_mut();
-                    let file = patches.entry(path.clone()).or_default();
-                    file.push(Hunk {
-                        commit_id: commit_id.clone(),
-                        commit_short: short.clone(),
-                        commit_summary: summary.clone(),
-                        commit_timestamp: commit.time().seconds(),
-                        header: String::from_utf8_lossy(hunk.header())
-                            .trim_end_matches('\n')
-                            .to_owned(),
-                        old_start: hunk.old_start(),
-                        new_start: hunk.new_start(),
-                        lines: Vec::new(),
-                    });
-                    *current_hunk_index.borrow_mut() = Some(file.len() - 1);
-                    hunked_paths.borrow_mut().insert(path);
-                    true
-                }),
-                Some(&mut |_delta, _hunk, line| {
-                    let path = current_path.borrow().clone();
-                    let mut patches = commit_patches.borrow_mut();
-                    let file = patches.entry(path).or_default();
-                    if current_hunk_index.borrow().is_none() {
-                        file.push(Hunk {
-                            commit_id: commit_id.clone(),
-                            commit_short: short.clone(),
-                            commit_summary: summary.clone(),
-                            commit_timestamp: commit.time().seconds(),
-                            header: "@@ -0,0 +0,0 @@".to_owned(),
-                            old_start: 0,
-                            new_start: 0,
-                            lines: Vec::new(),
-                        });
-                        *current_hunk_index.borrow_mut() = Some(file.len() - 1);
-                    }
-
-                    let kind = match line.origin() {
-                        '+' => DiffLineKind::Add,
-                        '-' => DiffLineKind::Remove,
-                        ' ' => DiffLineKind::Context,
-                        _ => DiffLineKind::Meta,
-                    };
-                    let text = String::from_utf8_lossy(line.content())
-                        .trim_end_matches('\n')
-                        .to_owned();
-                    let hunk = file
-                        .get_mut(current_hunk_index.borrow().expect("hunk index set"))
-                        .expect("hunk exists");
-                    hunk.lines.push(HunkLine {
-                        kind,
-                        text,
-                        old_lineno: line.old_lineno(),
-                        new_lineno: line.new_lineno(),
-                    });
-                    true
-                }),
-            )
-            .with_context(|| format!("failed to iterate diff for commit {commit_id}"))?;
-
-            let mut commit_patches = commit_patches.into_inner();
-            for path in touched_paths.into_inner() {
-                if hunked_paths.borrow().contains(&path) {
-                    continue;
-                }
-                commit_patches.entry(path.clone()).or_default().push(Hunk {
-                    commit_id: commit_id.clone(),
-                    commit_short: short.clone(),
-                    commit_summary: summary.clone(),
-                    commit_timestamp: commit.time().seconds(),
-                    header: "@@ binary @@".to_owned(),
-                    old_start: 0,
-                    new_start: 0,
-                    lines: vec![HunkLine {
-                        kind: DiffLineKind::Meta,
-                        text: "[binary or metadata-only change]".to_owned(),
-                        old_lineno: None,
-                        new_lineno: None,
-                    }],
-                });
-            }
-
-            for (path, mut hunks) in commit_patches {
-                files
-                    .entry(path.clone())
-                    .or_insert_with(|| FilePatch {
-                        path,
-                        hunks: Vec::new(),
-                    })
-                    .hunks
-                    .append(&mut hunks);
-            }
+            let source = DiffSourceMeta {
+                commit_id: commit_id.clone(),
+                commit_short: short_id(commit_id),
+                commit_summary: commit
+                    .summary()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| "(no summary)".to_owned()),
+                commit_timestamp: commit.time().seconds(),
+            };
+            append_diff_files(&mut files, &diff, &source)
+                .with_context(|| format!("failed to iterate diff for commit {commit_id}"))?;
         }
 
         Ok(AggregatedDiff { files })
     }
+
+    pub fn aggregate_uncommitted(&self) -> anyhow::Result<AggregatedDiff> {
+        let head_tree = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_tree().ok());
+
+        let mut opts = DiffOptions::new();
+        opts.context_lines(3)
+            .include_untracked(true)
+            .recurse_untracked_dirs(true);
+        let diff = self
+            .repo
+            .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
+            .context("failed to diff uncommitted worktree/index changes")?;
+
+        let mut files = BTreeMap::<String, FilePatch>::new();
+        let source = DiffSourceMeta {
+            commit_id: UNCOMMITTED_COMMIT_ID.to_owned(),
+            commit_short: UNCOMMITTED_COMMIT_SHORT.to_owned(),
+            commit_summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
+            commit_timestamp: Utc::now().timestamp(),
+        };
+        append_diff_files(&mut files, &diff, &source)
+            .context("failed to iterate uncommitted diff")?;
+
+        Ok(AggregatedDiff { files })
+    }
+}
+
+struct DiffSourceMeta {
+    commit_id: String,
+    commit_short: String,
+    commit_summary: String,
+    commit_timestamp: i64,
+}
+
+fn append_diff_files(
+    files: &mut BTreeMap<String, FilePatch>,
+    diff: &git2::Diff<'_>,
+    source: &DiffSourceMeta,
+) -> anyhow::Result<()> {
+    let current_path = RefCell::new(String::new());
+    let current_hunk_index = RefCell::new(None::<usize>);
+    let touched_paths = RefCell::new(BTreeSet::<String>::new());
+    let hunked_paths = RefCell::new(BTreeSet::<String>::new());
+    let commit_patches = RefCell::new(BTreeMap::<String, Vec<Hunk>>::new());
+
+    diff.foreach(
+        &mut |delta, _| {
+            let path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(path_to_string)
+                .unwrap_or_else(|| "(unknown)".to_owned());
+            *current_path.borrow_mut() = path.clone();
+            *current_hunk_index.borrow_mut() = None;
+            touched_paths.borrow_mut().insert(path.clone());
+            commit_patches.borrow_mut().entry(path).or_default();
+            true
+        },
+        None,
+        Some(&mut |_delta, hunk| {
+            let path = current_path.borrow().clone();
+            let mut patches = commit_patches.borrow_mut();
+            let file = patches.entry(path.clone()).or_default();
+            file.push(Hunk {
+                commit_id: source.commit_id.clone(),
+                commit_short: source.commit_short.clone(),
+                commit_summary: source.commit_summary.clone(),
+                commit_timestamp: source.commit_timestamp,
+                header: String::from_utf8_lossy(hunk.header())
+                    .trim_end_matches('\n')
+                    .to_owned(),
+                old_start: hunk.old_start(),
+                new_start: hunk.new_start(),
+                lines: Vec::new(),
+            });
+            *current_hunk_index.borrow_mut() = Some(file.len() - 1);
+            hunked_paths.borrow_mut().insert(path);
+            true
+        }),
+        Some(&mut |_delta, _hunk, line| {
+            let path = current_path.borrow().clone();
+            let mut patches = commit_patches.borrow_mut();
+            let file = patches.entry(path).or_default();
+            if current_hunk_index.borrow().is_none() {
+                file.push(Hunk {
+                    commit_id: source.commit_id.clone(),
+                    commit_short: source.commit_short.clone(),
+                    commit_summary: source.commit_summary.clone(),
+                    commit_timestamp: source.commit_timestamp,
+                    header: "@@ -0,0 +0,0 @@".to_owned(),
+                    old_start: 0,
+                    new_start: 0,
+                    lines: Vec::new(),
+                });
+                *current_hunk_index.borrow_mut() = Some(file.len() - 1);
+            }
+
+            let kind = match line.origin() {
+                '+' => DiffLineKind::Add,
+                '-' => DiffLineKind::Remove,
+                ' ' => DiffLineKind::Context,
+                _ => DiffLineKind::Meta,
+            };
+            let text = String::from_utf8_lossy(line.content())
+                .trim_end_matches('\n')
+                .to_owned();
+            let hunk = file
+                .get_mut(current_hunk_index.borrow().expect("hunk index set"))
+                .expect("hunk exists");
+            hunk.lines.push(HunkLine {
+                kind,
+                text,
+                old_lineno: line.old_lineno(),
+                new_lineno: line.new_lineno(),
+            });
+            true
+        }),
+    )?;
+
+    let mut commit_patches = commit_patches.into_inner();
+    for path in touched_paths.into_inner() {
+        if hunked_paths.borrow().contains(&path) {
+            continue;
+        }
+        commit_patches.entry(path.clone()).or_default().push(Hunk {
+            commit_id: source.commit_id.clone(),
+            commit_short: source.commit_short.clone(),
+            commit_summary: source.commit_summary.clone(),
+            commit_timestamp: source.commit_timestamp,
+            header: "@@ binary @@".to_owned(),
+            old_start: 0,
+            new_start: 0,
+            lines: vec![HunkLine {
+                kind: DiffLineKind::Meta,
+                text: "[binary or metadata-only change]".to_owned(),
+                old_lineno: None,
+                new_lineno: None,
+            }],
+        });
+    }
+
+    for (path, mut hunks) in commit_patches {
+        files
+            .entry(path.clone())
+            .or_insert_with(|| FilePatch {
+                path,
+                hunks: Vec::new(),
+            })
+            .hunks
+            .append(&mut hunks);
+    }
+
+    Ok(())
 }
 
 fn current_branch_name(repo: &Repository) -> anyhow::Result<String> {

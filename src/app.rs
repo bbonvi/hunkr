@@ -24,7 +24,8 @@ use crate::{
     git_data::GitService,
     model::{
         AggregatedDiff, CommentAnchor, CommentTarget, CommentTargetKind, CommitInfo, DiffLineKind,
-        FilePatch, HunkLine, ReviewComment, ReviewState, ReviewStatus,
+        FilePatch, HunkLine, ReviewComment, ReviewState, ReviewStatus, UNCOMMITTED_COMMIT_ID,
+        UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
     },
     store::StateStore,
 };
@@ -161,6 +162,7 @@ struct CommitRow {
     info: CommitInfo,
     selected: bool,
     status: ReviewStatus,
+    is_uncommitted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -830,6 +832,10 @@ impl App {
                 }
             }
             KeyCode::Char('m') => {
+                if self.uncommitted_selected() {
+                    self.status = "Comments are disabled for uncommitted changes".to_owned();
+                    return;
+                }
                 self.input_mode = InputMode::CommentCreate;
                 self.comment_buffer.clear();
                 self.diff_pending_op = None;
@@ -838,9 +844,17 @@ impl App {
                         .to_owned();
             }
             KeyCode::Char('e') => {
+                if self.uncommitted_selected() {
+                    self.status = "Comments are disabled for uncommitted changes".to_owned();
+                    return;
+                }
                 self.start_comment_edit_mode();
             }
             KeyCode::Char('D') => {
+                if self.uncommitted_selected() {
+                    self.status = "Comments are disabled for uncommitted changes".to_owned();
+                    return;
+                }
                 self.delete_current_comment();
             }
             _ => {}
@@ -1380,9 +1394,29 @@ impl App {
                     info,
                     selected,
                     status,
+                    is_uncommitted: false,
                 }
             })
             .collect();
+
+        let uncommitted_selected =
+            preserve_manual_selection && old_selected.contains(UNCOMMITTED_COMMIT_ID);
+        self.commits.insert(
+            0,
+            CommitRow {
+                info: CommitInfo {
+                    short_id: UNCOMMITTED_COMMIT_SHORT.to_owned(),
+                    id: UNCOMMITTED_COMMIT_ID.to_owned(),
+                    summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
+                    author: "local".to_owned(),
+                    timestamp: Utc::now().timestamp(),
+                    unpushed: false,
+                },
+                selected: uncommitted_selected,
+                status: ReviewStatus::Unreviewed,
+                is_uncommitted: true,
+            },
+        );
 
         if self.commit_list_state.selected().is_none() && !self.commits.is_empty() {
             self.commit_list_state.select(Some(0));
@@ -1391,7 +1425,11 @@ impl App {
         let new_commits = self
             .commits
             .iter()
-            .filter(|row| !known.contains(&row.info.id) && row.status == ReviewStatus::Unreviewed)
+            .filter(|row| {
+                !row.is_uncommitted
+                    && !known.contains(&row.info.id)
+                    && row.status == ReviewStatus::Unreviewed
+            })
             .count();
         if new_commits > 0 {
             self.status = format!("{} new unreviewed commit(s) detected", new_commits);
@@ -1404,11 +1442,15 @@ impl App {
 
     fn rebuild_selection_dependent_views(&mut self) -> anyhow::Result<()> {
         let selected_ordered = self.selected_commit_ids_oldest_first();
-        self.aggregate = if selected_ordered.is_empty() {
+        let mut aggregate = if selected_ordered.is_empty() {
             AggregatedDiff::default()
         } else {
             self.git.aggregate_for_commits(&selected_ordered)?
         };
+        if self.uncommitted_selected() {
+            merge_aggregate_diff(&mut aggregate, self.git.aggregate_uncommitted()?);
+        }
+        self.aggregate = aggregate;
         self.reset_diff_positions_for_changed_files();
 
         self.rendered_diff_cache.clear();
@@ -1876,6 +1918,10 @@ impl App {
         let Some(row) = self.commits.get(idx) else {
             return;
         };
+        if row.is_uncommitted {
+            self.status = "Cannot set review status for uncommitted changes".to_owned();
+            return;
+        }
         let ids = BTreeSet::from([row.info.id.clone()]);
         self.set_status_for_ids(&ids, status);
     }
@@ -1884,11 +1930,11 @@ impl App {
         let ids = self
             .commits
             .iter()
-            .filter(|row| row.selected)
+            .filter(|row| row.selected && !row.is_uncommitted)
             .map(|row| row.info.id.clone())
             .collect::<BTreeSet<_>>();
         if ids.is_empty() {
-            self.status = "No selected commits".to_owned();
+            self.status = "No selected committed revisions".to_owned();
             return;
         }
         self.set_status_for_ids(&ids, status);
@@ -2156,6 +2202,9 @@ impl App {
         let mut issue_found = 0;
         let mut resolved = 0;
         for row in &self.commits {
+            if row.is_uncommitted {
+                continue;
+            }
             match row.status {
                 ReviewStatus::Unreviewed => unreviewed += 1,
                 ReviewStatus::Reviewed => reviewed += 1,
@@ -2164,6 +2213,12 @@ impl App {
             }
         }
         (unreviewed, reviewed, issue_found, resolved)
+    }
+
+    fn uncommitted_selected(&self) -> bool {
+        self.commits
+            .iter()
+            .any(|row| row.is_uncommitted && row.selected)
     }
 
     fn sync_comment_report(&self) -> anyhow::Result<()> {
@@ -2505,6 +2560,36 @@ fn compose_commit_line(
     now_ts: i64,
     theme: &UiTheme,
 ) -> Line<'static> {
+    if row.is_uncommitted {
+        let marker = if row.selected { "[x]" } else { "[ ]" };
+        let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
+        let badge = "[UNCOMMITTED]";
+        let right = "draft";
+        let reserved = 1 + badge.chars().count() + 1 + right.chars().count();
+        let max_left = width.saturating_sub(reserved).max(1);
+        let left_render = truncate(&left, max_left);
+        let static_used =
+            left_render.chars().count() + badge.chars().count() + right.chars().count() + 1;
+        let spaces = if static_used >= width {
+            " ".to_owned()
+        } else {
+            " ".repeat(width - static_used)
+        };
+
+        return Line::from(vec![
+            Span::styled(left_render, Style::default().fg(theme.text)),
+            Span::raw(" "),
+            Span::styled(
+                badge,
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(spaces),
+            Span::styled(right, Style::default().fg(theme.dimmed)),
+        ]);
+    }
+
     let marker = if row.selected { "[x]" } else { "[ ]" };
     let left = format!("{} {} {}", marker, row.info.short_id, row.info.summary);
     let status_label = format!("[{}]", status_short_label(row.status));
@@ -2802,9 +2887,22 @@ fn comment_age(comment: &ReviewComment, now_ts: i64) -> String {
 fn selected_ids_oldest_first(rows: &[CommitRow]) -> Vec<String> {
     rows.iter()
         .rev()
-        .filter(|row| row.selected)
+        .filter(|row| row.selected && !row.is_uncommitted)
         .map(|row| row.info.id.clone())
         .collect()
+}
+
+fn merge_aggregate_diff(base: &mut AggregatedDiff, next: AggregatedDiff) {
+    for (path, mut patch) in next.files {
+        base.files
+            .entry(path.clone())
+            .or_insert_with(|| FilePatch {
+                path,
+                hunks: Vec::new(),
+            })
+            .hunks
+            .append(&mut patch.hunks);
+    }
 }
 
 fn apply_range_selection(rows: &mut [CommitRow], start: usize, end: usize) {
@@ -2884,6 +2982,7 @@ mod tests {
             },
             selected,
             status,
+            is_uncommitted: false,
         }
     }
 
@@ -3032,6 +3131,35 @@ mod tests {
             commit_row("middle", false, ReviewStatus::Reviewed),
             commit_row("oldest", true, ReviewStatus::Unreviewed),
         ];
+        assert_eq!(
+            selected_ids_oldest_first(&rows),
+            vec!["oldest".to_owned(), "newest".to_owned()]
+        );
+    }
+
+    #[test]
+    fn selected_ids_skip_uncommitted_entry() {
+        let mut rows = vec![
+            commit_row("newest", true, ReviewStatus::Unreviewed),
+            commit_row("oldest", true, ReviewStatus::Unreviewed),
+        ];
+        rows.insert(
+            0,
+            CommitRow {
+                info: CommitInfo {
+                    id: UNCOMMITTED_COMMIT_ID.to_owned(),
+                    short_id: UNCOMMITTED_COMMIT_SHORT.to_owned(),
+                    summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
+                    author: "local".to_owned(),
+                    timestamp: 0,
+                    unpushed: false,
+                },
+                selected: true,
+                status: ReviewStatus::Unreviewed,
+                is_uncommitted: true,
+            },
+        );
+
         assert_eq!(
             selected_ids_oldest_first(&rows),
             vec!["oldest".to_owned(), "newest".to_owned()]

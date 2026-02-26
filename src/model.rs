@@ -2,6 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+/// Synthetic commit id representing worktree + index changes.
+pub const UNCOMMITTED_COMMIT_ID: &str = "__UNCOMMITTED__";
+/// Label shown for the synthetic uncommitted entry.
+pub const UNCOMMITTED_COMMIT_SHORT: &str = "WORKDIR";
+/// Summary shown for the synthetic uncommitted entry.
+pub const UNCOMMITTED_COMMIT_SUMMARY: &str = "Uncommitted changes";
+
 /// Workflow status for each commit in review.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]

@@ -104,6 +104,30 @@ fn aggregate_binary_change_emits_placeholder_hunk() {
     );
 }
 
+#[test]
+fn aggregate_uncommitted_includes_staged_and_unstaged_changes() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "src.txt", "line1\n", "init");
+
+    fs::write(repo_dir.path().join("src.txt"), "line1\nline2\n").expect("update tracked");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["add", "src.txt"]));
+
+    fs::write(repo_dir.path().join("src.txt"), "line1\nline2\nline3\n")
+        .expect("update tracked unstaged");
+    fs::write(repo_dir.path().join("new.txt"), "new file\n").expect("write untracked");
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let aggregated = service
+        .aggregate_uncommitted()
+        .expect("aggregate uncommitted");
+
+    assert!(aggregated.files.contains_key("src.txt"));
+    assert!(aggregated.files.contains_key("new.txt"));
+}
+
 fn init_repo(path: &Path) {
     run(Command::new("git")
         .current_dir(path)

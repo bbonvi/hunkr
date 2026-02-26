@@ -11,8 +11,9 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 ## Core UX
 
 - 3-pane TUI:
-  - left/top: changed-file tree (only files/directories changed by selected commits)
-  - left/bottom: commit history with multi-select and review status
+- left/top: changed-file tree (only files/directories changed by selected commits)
+- left/bottom: commit history with multi-select and review status
+- commit history includes a synthetic top entry for `Uncommitted changes` (staged + unstaged worktree draft)
 - right: syntax-highlighted diff viewer
 - right pane includes a simple vertical scrollbar for quick position awareness
 - Theme modes: dark and light (`dark` by default)
@@ -30,6 +31,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Hunk comments are rendered inline in the diff and can be edited/deleted in place
 - Hunk comments can be anchored to commit/file/hunk/line or visual range and auto-export to a single Markdown task file
 - Commit-header comments are supported in diff viewer (comment directly on commit banner lines)
+- Uncommitted draft diffs are read-only in review mode (comments/edit/delete are disabled)
 
 ## Data storage
 
