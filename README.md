@@ -11,8 +11,8 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 ## Core UX
 
 - 3-pane TUI:
-- left/top: changed-file tree (only files/directories changed by selected commits)
-- left/bottom: commit history with multi-select and review status
+- left/top: commit history with multi-select and review status
+- left/bottom: changed-file tree (only files/directories changed by selected commits)
 - commit history includes a synthetic top entry for `Uncommitted changes` (staged + unstaged worktree draft)
 - right: syntax-highlighted diff viewer
 - commit banners stay visible at the top of the diff pane while scrolling through their hunks
@@ -49,7 +49,7 @@ This storage is project-local and independent of Git remotes.
 Global:
 
 - `q`: quit
-- `1` / `2` / `3`: focus files/commits/diff pane
+- `1` / `2` / `3`: focus commits/files/diff pane
 - `Tab` / `Shift-Tab`: cycle focus between all panes
 - `h` / `l`: move focus to previous/next pane (same cycle as `Shift-Tab`/`Tab`)
 - `f` / `c` / `d`: jump focus to files/commits/diff

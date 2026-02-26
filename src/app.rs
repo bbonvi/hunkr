@@ -322,14 +322,14 @@ impl App {
             .split(main_chunks[0]);
 
         self.pane_rects = PaneRects {
-            files: left_chunks[0],
-            commits: left_chunks[1],
+            commits: left_chunks[0],
+            files: left_chunks[1],
             diff: main_chunks[1],
         };
 
         self.render_header(frame, root_chunks[0], &theme);
-        self.render_files(frame, self.pane_rects.files, &theme);
         self.render_commits(frame, self.pane_rects.commits, &theme);
+        self.render_files(frame, self.pane_rects.files, &theme);
         self.render_diff(frame, self.pane_rects.diff, &theme);
         self.render_footer(frame, root_chunks[2], &theme);
         if self.show_help {
@@ -421,8 +421,8 @@ impl App {
             KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
                 self.focused = focus_with_h(self.focused)
             }
-            KeyCode::Char('1') => self.focused = FocusPane::Files,
-            KeyCode::Char('2') => self.focused = FocusPane::Commits,
+            KeyCode::Char('1') => self.focused = FocusPane::Commits,
+            KeyCode::Char('2') => self.focused = FocusPane::Files,
             KeyCode::Char('3') => self.focused = FocusPane::Diff,
             KeyCode::Char('f') if key.modifiers == KeyModifiers::NONE => {
                 self.focused = FocusPane::Files
@@ -927,7 +927,7 @@ impl App {
     ) {
         let title = Line::from(vec![
             Span::styled(
-                " 1 FILES ",
+                " 2 FILES ",
                 Style::default()
                     .fg(theme.panel_title_fg)
                     .bg(theme.panel_title_bg)
@@ -997,7 +997,7 @@ impl App {
         let (unreviewed, reviewed, issue_found, resolved) = self.status_counts();
         let title = Line::from(vec![
             Span::styled(
-                " 2 COMMITS ",
+                " 1 COMMITS ",
                 Style::default()
                     .fg(theme.panel_title_fg)
                     .bg(theme.panel_title_bg)
@@ -1327,7 +1327,7 @@ impl App {
             Line::from(""),
             Line::from(vec![
                 key_chip("1/2/3", theme),
-                Span::raw(" focus files/commits/diff"),
+                Span::raw(" focus commits/files/diff"),
             ]),
             Line::from(vec![
                 key_chip("h/l", theme),
@@ -2195,17 +2195,17 @@ impl App {
 
     fn focus_next(&mut self) {
         self.focused = match self.focused {
-            FocusPane::Files => FocusPane::Commits,
-            FocusPane::Commits => FocusPane::Diff,
-            FocusPane::Diff => FocusPane::Files,
+            FocusPane::Commits => FocusPane::Files,
+            FocusPane::Files => FocusPane::Diff,
+            FocusPane::Diff => FocusPane::Commits,
         }
     }
 
     fn focus_prev(&mut self) {
         self.focused = match self.focused {
-            FocusPane::Files => FocusPane::Diff,
-            FocusPane::Commits => FocusPane::Files,
-            FocusPane::Diff => FocusPane::Commits,
+            FocusPane::Commits => FocusPane::Diff,
+            FocusPane::Files => FocusPane::Commits,
+            FocusPane::Diff => FocusPane::Files,
         }
     }
 
@@ -3066,17 +3066,17 @@ fn page_step(height: u16, multiplier: f32) -> isize {
 
 fn focus_with_h(current: FocusPane) -> FocusPane {
     match current {
-        FocusPane::Files => FocusPane::Diff,
-        FocusPane::Commits => FocusPane::Files,
-        FocusPane::Diff => FocusPane::Commits,
+        FocusPane::Commits => FocusPane::Diff,
+        FocusPane::Files => FocusPane::Commits,
+        FocusPane::Diff => FocusPane::Files,
     }
 }
 
 fn focus_with_l(current: FocusPane) -> FocusPane {
     match current {
-        FocusPane::Files => FocusPane::Commits,
-        FocusPane::Commits => FocusPane::Diff,
-        FocusPane::Diff => FocusPane::Files,
+        FocusPane::Commits => FocusPane::Files,
+        FocusPane::Files => FocusPane::Diff,
+        FocusPane::Diff => FocusPane::Commits,
     }
 }
 
@@ -3415,12 +3415,12 @@ mod tests {
 
     #[test]
     fn h_and_l_cycle_all_panes() {
-        assert_eq!(focus_with_h(FocusPane::Files), FocusPane::Diff);
-        assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Files);
-        assert_eq!(focus_with_h(FocusPane::Diff), FocusPane::Commits);
-        assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Commits);
-        assert_eq!(focus_with_l(FocusPane::Commits), FocusPane::Diff);
-        assert_eq!(focus_with_l(FocusPane::Diff), FocusPane::Files);
+        assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Diff);
+        assert_eq!(focus_with_h(FocusPane::Files), FocusPane::Commits);
+        assert_eq!(focus_with_h(FocusPane::Diff), FocusPane::Files);
+        assert_eq!(focus_with_l(FocusPane::Commits), FocusPane::Files);
+        assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Diff);
+        assert_eq!(focus_with_l(FocusPane::Diff), FocusPane::Commits);
     }
 
     #[test]
