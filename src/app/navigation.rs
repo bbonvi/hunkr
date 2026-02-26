@@ -25,7 +25,7 @@ impl App {
             return;
         }
 
-        let mut idx = self.file_list_state.selected().unwrap_or(0) as isize;
+        let mut idx = self.file_ui.list_state.selected().unwrap_or(0) as isize;
         let len = visible.len() as isize;
         loop {
             idx = (idx + delta).clamp(0, len - 1);
@@ -47,20 +47,20 @@ impl App {
         }
 
         let len = visible.len() as isize;
-        let current = self.file_list_state.selected().unwrap_or(0) as isize;
+        let current = self.file_ui.list_state.selected().unwrap_or(0) as isize;
         let next = (current + delta).clamp(0, len - 1) as usize;
         if next == current as usize {
             return;
         }
 
-        self.file_list_state.select(Some(next));
+        self.file_ui.list_state.select(Some(next));
         if self.file_rows[visible[next]].selectable {
             self.select_file_row(next);
         }
     }
 
     pub(super) fn page_files(&mut self, multiplier: f32) {
-        let step = page_step(self.pane_rects.files.height, multiplier);
+        let step = page_step(self.diff_ui.pane_rects.files.height, multiplier);
         self.move_file_cursor(step);
     }
 
@@ -95,12 +95,12 @@ impl App {
 
         self.persist_selected_file_position();
 
-        self.file_list_state.select(Some(visible_idx));
+        self.file_ui.list_state.select(Some(visible_idx));
         let path = self.file_rows[full_idx]
             .path
             .clone()
             .expect("selectable rows always contain path");
-        self.selected_file = Some(path.clone());
+        self.diff_cache.selected_file = Some(path.clone());
         self.restore_diff_position(&path);
         self.sync_diff_cursor_to_content_bounds();
     }
@@ -111,11 +111,11 @@ impl App {
             return;
         }
         let len = visible.len() as isize;
-        let current = self.commit_list_state.selected().unwrap_or(0) as isize;
+        let current = self.commit_ui.list_state.selected().unwrap_or(0) as isize;
         let next = (current + delta).clamp(0, len - 1) as usize;
-        self.commit_list_state.select(Some(next));
+        self.commit_ui.list_state.select(Some(next));
 
-        if self.commit_visual_anchor.is_some() {
+        if self.commit_ui.visual_anchor.is_some() {
             self.apply_commit_visual_range();
         }
     }
@@ -125,7 +125,7 @@ impl App {
     }
 
     pub(super) fn page_commits(&mut self, multiplier: f32) {
-        let step = page_step(self.pane_rects.commits.height, multiplier);
+        let step = page_step(self.diff_ui.pane_rects.commits.height, multiplier);
         self.move_commit_cursor(step);
     }
 
@@ -133,8 +133,8 @@ impl App {
         if self.visible_commit_indices().is_empty() {
             return;
         }
-        self.commit_list_state.select(Some(0));
-        if self.commit_visual_anchor.is_some() {
+        self.commit_ui.list_state.select(Some(0));
+        if self.commit_ui.visual_anchor.is_some() {
             self.apply_commit_visual_range();
         }
     }
@@ -144,8 +144,8 @@ impl App {
         if visible.is_empty() {
             return;
         }
-        self.commit_list_state.select(Some(visible.len() - 1));
-        if self.commit_visual_anchor.is_some() {
+        self.commit_ui.list_state.select(Some(visible.len() - 1));
+        if self.commit_ui.visual_anchor.is_some() {
             self.apply_commit_visual_range();
         }
     }
@@ -159,30 +159,32 @@ impl App {
         let full_idx = visible.get(visible_idx).copied()?;
 
         let prior_cursor_full_idx = self
-            .commit_list_state
+            .commit_ui
+            .list_state
             .selected()
             .and_then(|idx| visible.get(idx).copied());
-        self.commit_list_state.select(Some(visible_idx));
+        self.commit_ui.list_state.select(Some(visible_idx));
 
         match commit_mouse_selection_mode(modifiers) {
             CommitMouseSelectionMode::Replace => {
                 select_only_index(&mut self.commits, full_idx);
-                self.commit_selection_anchor = Some(full_idx);
+                self.commit_ui.selection_anchor = Some(full_idx);
             }
             CommitMouseSelectionMode::Toggle => {
                 if let Some(row) = self.commits.get_mut(full_idx) {
                     row.selected = !row.selected;
                 }
-                self.commit_selection_anchor = Some(full_idx);
+                self.commit_ui.selection_anchor = Some(full_idx);
             }
             CommitMouseSelectionMode::Range => {
                 let anchor = self
-                    .commit_selection_anchor
+                    .commit_ui
+                    .selection_anchor
                     .filter(|anchor| visible.contains(anchor))
                     .or(prior_cursor_full_idx.filter(|cursor| visible.contains(cursor)))
                     .unwrap_or(full_idx);
                 apply_range_selection(&mut self.commits, anchor, full_idx);
-                self.commit_selection_anchor = Some(anchor);
+                self.commit_ui.selection_anchor = Some(anchor);
             }
         }
 
@@ -191,7 +193,7 @@ impl App {
     }
 
     pub(super) fn apply_commit_visual_range(&mut self) {
-        let Some(anchor) = self.commit_visual_anchor else {
+        let Some(anchor) = self.commit_ui.visual_anchor else {
             return;
         };
         let Some(cursor) = self.selected_commit_full_index() else {
@@ -212,7 +214,7 @@ impl App {
             return;
         };
         if row.is_uncommitted {
-            self.status = "Cannot set review status for uncommitted changes".to_owned();
+            self.runtime.status = "Cannot set review status for uncommitted changes".to_owned();
             return;
         }
         let ids = BTreeSet::from([row.info.id.clone()]);
@@ -227,7 +229,7 @@ impl App {
             .map(|row| row.info.id.clone())
             .collect::<BTreeSet<_>>();
         if ids.is_empty() {
-            self.status = "No selected committed revisions".to_owned();
+            self.runtime.status = "No selected committed revisions".to_owned();
             return;
         }
         self.set_status_for_ids(&ids, status);
@@ -235,27 +237,27 @@ impl App {
 
     pub(super) fn cycle_commit_status_filter(&mut self) {
         let preferred_commit_id = self.selected_commit_id();
-        let fallback_visible_idx = self.commit_list_state.selected();
-        self.commit_status_filter = self.commit_status_filter.next();
+        let fallback_visible_idx = self.commit_ui.list_state.selected();
+        self.commit_ui.status_filter = self.commit_ui.status_filter.next();
         let deselected =
-            deselect_rows_outside_status_filter(&mut self.commits, self.commit_status_filter);
+            deselect_rows_outside_status_filter(&mut self.commits, self.commit_ui.status_filter);
         if deselected > 0 {
-            self.commit_visual_anchor = None;
+            self.commit_ui.visual_anchor = None;
             if let Err(err) = self.rebuild_selection_dependent_views() {
-                self.status = format!("failed to rebuild diff: {err:#}");
+                self.runtime.status = format!("failed to rebuild diff: {err:#}");
                 return;
             }
         }
         self.sync_commit_cursor_for_filters(preferred_commit_id.as_deref(), fallback_visible_idx);
-        self.status = if deselected == 0 {
+        self.runtime.status = if deselected == 0 {
             format!(
                 "Commit status filter: {}",
-                self.commit_status_filter.label()
+                self.commit_ui.status_filter.label()
             )
         } else {
             format!(
                 "Commit status filter: {} (deselected {} hidden commit(s))",
-                self.commit_status_filter.label(),
+                self.commit_ui.status_filter.label(),
                 deselected
             )
         };
@@ -273,7 +275,7 @@ impl App {
         );
 
         apply_status_transition(&mut self.commits, ids, status);
-        self.sync_commit_cursor_for_filters(None, self.commit_list_state.selected());
+        self.sync_commit_cursor_for_filters(None, self.commit_ui.list_state.selected());
 
         let save_result = self.store.save(&self.review_state);
         let mut status_message = if let Err(err) = save_result {
@@ -283,16 +285,16 @@ impl App {
         };
 
         if status != ReviewStatus::Unreviewed {
-            self.commit_visual_anchor = None;
+            self.commit_ui.visual_anchor = None;
         }
         if selected_ids_changed && let Err(err) = self.rebuild_selection_dependent_views() {
-            self.status = format!("failed to rebuild diff: {err:#}");
+            self.runtime.status = format!("failed to rebuild diff: {err:#}");
             return;
         }
         if let Err(err) = self.sync_comment_report() {
             status_message.push_str(&format!(", review tasks sync failed: {err:#}"));
         }
-        self.status = status_message;
+        self.runtime.status = status_message;
     }
 
     pub(super) fn move_diff_cursor(&mut self, delta: isize) {
@@ -315,7 +317,7 @@ impl App {
     }
 
     pub(super) fn page_diff(&mut self, multiplier: f32) {
-        let step = page_step(self.pane_rects.diff.height, multiplier);
+        let step = page_step(self.diff_ui.pane_rects.diff.height, multiplier);
         self.move_diff_cursor(step);
     }
 
@@ -324,7 +326,7 @@ impl App {
             return;
         }
         self.set_diff_scroll(self.diff_position.cursor);
-        self.status = "zt".to_owned();
+        self.runtime.status = "zt".to_owned();
     }
 
     pub(super) fn align_diff_cursor_middle(&mut self) {
@@ -334,7 +336,7 @@ impl App {
         let visible = self.visible_diff_rows();
         let scroll = self.diff_position.cursor.saturating_sub(visible / 2);
         self.set_diff_scroll(scroll);
-        self.status = "zz".to_owned();
+        self.runtime.status = "zz".to_owned();
     }
 
     pub(super) fn align_diff_cursor_bottom(&mut self) {
@@ -347,7 +349,7 @@ impl App {
             .cursor
             .saturating_sub(visible.saturating_sub(1));
         self.set_diff_scroll(scroll);
-        self.status = "zb".to_owned();
+        self.runtime.status = "zb".to_owned();
     }
 
     pub(super) fn move_prev_hunk(&mut self) {
@@ -357,11 +359,11 @@ impl App {
         for idx in (0..self.diff_position.cursor).rev() {
             if is_hunk_header_line(&self.rendered_diff[idx]) {
                 self.set_diff_cursor(idx);
-                self.status = format!("hunk {}", idx.saturating_add(1));
+                self.runtime.status = format!("hunk {}", idx.saturating_add(1));
                 return;
             }
         }
-        self.status = "No previous hunk".to_owned();
+        self.runtime.status = "No previous hunk".to_owned();
     }
 
     pub(super) fn move_next_hunk(&mut self) {
@@ -371,11 +373,11 @@ impl App {
         for idx in self.diff_position.cursor.saturating_add(1)..self.rendered_diff.len() {
             if is_hunk_header_line(&self.rendered_diff[idx]) {
                 self.set_diff_cursor(idx);
-                self.status = format!("hunk {}", idx.saturating_add(1));
+                self.runtime.status = format!("hunk {}", idx.saturating_add(1));
                 return;
             }
         }
-        self.status = "No next hunk".to_owned();
+        self.runtime.status = "No next hunk".to_owned();
     }
 
     pub(super) fn sticky_commit_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
@@ -384,7 +386,7 @@ impl App {
         }
         let top = scroll.min(self.rendered_diff.len().saturating_sub(1));
         let file_range_idx = self.file_range_index_for_line(top)?;
-        let file_range = self.file_diff_ranges.get(file_range_idx)?;
+        let file_range = self.diff_cache.file_ranges.get(file_range_idx)?;
         for idx in (file_range.start..=top).rev() {
             let is_commit_banner = self.rendered_diff[idx]
                 .anchor
@@ -403,7 +405,7 @@ impl App {
         }
         let top = scroll.min(self.rendered_diff.len().saturating_sub(1));
         let file_range_idx = self.file_range_index_for_line(top)?;
-        let file_range = self.file_diff_ranges.get(file_range_idx)?;
+        let file_range = self.diff_cache.file_ranges.get(file_range_idx)?;
         (file_range.start < top).then_some(file_range.start)
     }
 
@@ -420,7 +422,7 @@ impl App {
     }
 
     pub(super) fn visible_diff_rows_for_scroll(&self, scroll: usize) -> usize {
-        let viewport_rows = self.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
+        let viewport_rows = self.diff_ui.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
         let sticky_rows = self
             .sticky_banner_indexes_for_scroll(scroll, viewport_rows)
             .len();
@@ -475,7 +477,12 @@ impl App {
             return;
         }
 
-        let local = self.diff_positions.get(path).copied().unwrap_or_default();
+        let local = self
+            .diff_cache
+            .positions
+            .get(path)
+            .copied()
+            .unwrap_or_default();
         let max_local = end - start - 1;
         self.diff_position = DiffPosition {
             scroll: start + local.scroll.min(max_local),
@@ -484,7 +491,7 @@ impl App {
     }
 
     pub(super) fn persist_selected_file_position(&mut self) {
-        let Some(path) = self.selected_file.clone() else {
+        let Some(path) = self.diff_cache.selected_file.clone() else {
             return;
         };
         let Some((start, end)) = self.file_range_for_path(&path) else {
@@ -495,7 +502,7 @@ impl App {
         }
 
         let max_local = end - start - 1;
-        self.diff_positions.insert(
+        self.diff_cache.positions.insert(
             path,
             DiffPosition {
                 scroll: self
@@ -524,15 +531,15 @@ impl App {
             return;
         };
 
-        if self.selected_file.as_deref() != Some(path.as_str()) {
+        if self.diff_cache.selected_file.as_deref() != Some(path.as_str()) {
             self.persist_selected_file_position();
-            self.selected_file = Some(path.clone());
+            self.diff_cache.selected_file = Some(path.clone());
         }
         self.select_file_row_for_path(&path);
     }
 
     pub(super) fn sync_diff_visual_bounds(&mut self) {
-        let Some(visual) = self.diff_visual else {
+        let Some(visual) = self.diff_ui.visual_selection else {
             return;
         };
         if self.rendered_diff.is_empty() {
@@ -541,7 +548,7 @@ impl App {
         let max_idx = self.rendered_diff.len() - 1;
         let clamped_anchor = visual.anchor.min(max_idx);
         if clamped_anchor != visual.anchor {
-            self.diff_visual = Some(DiffVisualSelection {
+            self.diff_ui.visual_selection = Some(DiffVisualSelection {
                 anchor: clamped_anchor,
                 origin: visual.origin,
             });
@@ -549,30 +556,30 @@ impl App {
     }
 
     pub(super) fn clear_diff_visual_selection(&mut self) {
-        self.diff_visual = None;
-        self.diff_mouse_anchor = None;
+        self.diff_ui.visual_selection = None;
+        self.diff_ui.mouse_anchor = None;
     }
 
     pub(super) fn set_focus(&mut self, next: FocusPane) {
-        if self.focused == next {
+        if self.preferences.focused == next {
             return;
         }
 
-        if self.focused == FocusPane::Commits && next != FocusPane::Commits {
+        if self.preferences.focused == FocusPane::Commits && next != FocusPane::Commits {
             self.flush_pending_selection_rebuild();
         }
-        self.focused = next;
-        self.commit_visual_anchor = None;
-        self.commit_mouse_anchor = None;
-        self.commit_mouse_dragging = false;
-        self.commit_mouse_drag_mode = None;
-        self.commit_mouse_drag_baseline = None;
+        self.preferences.focused = next;
+        self.commit_ui.visual_anchor = None;
+        self.commit_ui.mouse_anchor = None;
+        self.commit_ui.mouse_dragging = false;
+        self.commit_ui.mouse_drag_mode = None;
+        self.commit_ui.mouse_drag_baseline = None;
         self.clear_diff_visual_selection();
-        self.diff_pending_op = None;
+        self.diff_ui.pending_op = None;
     }
 
     pub(super) fn focus_next(&mut self) {
-        let next = match self.focused {
+        let next = match self.preferences.focused {
             FocusPane::Commits => FocusPane::Files,
             FocusPane::Files => FocusPane::Diff,
             FocusPane::Diff => FocusPane::Commits,
@@ -581,7 +588,7 @@ impl App {
     }
 
     pub(super) fn focus_prev(&mut self) {
-        let next = match self.focused {
+        let next = match self.preferences.focused {
             FocusPane::Commits => FocusPane::Diff,
             FocusPane::Files => FocusPane::Commits,
             FocusPane::Diff => FocusPane::Files,
@@ -596,7 +603,7 @@ impl App {
         let max_idx = self.rendered_diff.len() - 1;
         let cursor = self.diff_position.cursor.min(max_idx);
 
-        if let Some(visual) = self.diff_visual {
+        if let Some(visual) = self.diff_ui.visual_selection {
             let anchor = visual.anchor.min(max_idx);
             Some((min(anchor, cursor), max(anchor, cursor)))
         } else {
@@ -753,10 +760,11 @@ impl App {
         let report_path = format_path_with_home_tilde(self.comments.report_path());
         match crate::clipboard::copy_to_clipboard_with_fallbacks(&report_path) {
             Ok(backend) => {
-                self.status = format!("Copied review tasks path via {backend}: {report_path}");
+                self.runtime.status =
+                    format!("Copied review tasks path via {backend}: {report_path}");
             }
             Err(err) => {
-                self.status =
+                self.runtime.status =
                     format!("Clipboard unavailable; review tasks path: {report_path} ({err:#})");
             }
         }

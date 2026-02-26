@@ -4,10 +4,11 @@ impl App {
     pub(super) fn reload_commits(&mut self, preserve_manual_selection: bool) -> anyhow::Result<()> {
         let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
         let default_selected = self.git.default_unpushed_commit_ids()?;
-        let prior_cursor_idx = self.commit_list_state.selected();
+        let prior_cursor_idx = self.commit_ui.list_state.selected();
         let prior_cursor_commit_id = self.selected_commit_id();
         let prior_visual_anchor_commit_id = self
-            .commit_visual_anchor
+            .commit_ui
+            .visual_anchor
             .and_then(|idx| self.commits.get(idx))
             .map(|row| row.info.id.clone());
 
@@ -66,14 +67,15 @@ impl App {
         );
 
         self.sync_commit_cursor_for_filters(prior_cursor_commit_id.as_deref(), prior_cursor_idx);
-        self.commit_visual_anchor = prior_visual_anchor_commit_id
+        self.commit_ui.visual_anchor = prior_visual_anchor_commit_id
             .as_deref()
             .and_then(|commit_id| index_of_commit(&self.commits, commit_id));
         if self
-            .commit_visual_anchor
+            .commit_ui
+            .visual_anchor
             .is_some_and(|anchor| !self.visible_commit_indices().contains(&anchor))
         {
-            self.commit_visual_anchor = None;
+            self.commit_ui.visual_anchor = None;
         }
 
         let new_commits = self
@@ -91,7 +93,7 @@ impl App {
             } else {
                 "commits"
             };
-            self.status = format!("{new_commits} new unreviewed {noun} detected");
+            self.runtime.status = format!("{new_commits} new unreviewed {noun} detected");
         }
 
         self.rebuild_selection_dependent_views()?;
@@ -120,12 +122,13 @@ impl App {
         self.prune_diff_positions_for_removed_files();
 
         if aggregate_changed {
-            self.rendered_diff_cache
+            self.diff_cache
+                .rendered_cache
                 .retain(|(path, _), _| !changed_paths.contains(path));
-            self.rendered_diff_key = None;
-            self.file_diff_ranges.clear();
-            self.file_diff_range_by_path.clear();
-            self.diff_pending_op = None;
+            self.diff_cache.rendered_key = None;
+            self.diff_cache.file_ranges.clear();
+            self.diff_cache.file_range_by_path.clear();
+            self.diff_ui.pending_op = None;
         }
 
         self.rebuild_file_tree();
@@ -142,9 +145,9 @@ impl App {
             .keys()
             .cloned()
             .collect::<BTreeSet<_>>();
-        prune_diff_positions_for_missing_paths(&mut self.diff_positions, &existing_paths);
+        prune_diff_positions_for_missing_paths(&mut self.diff_cache.positions, &existing_paths);
 
-        if let Some(path) = self.selected_file.as_ref()
+        if let Some(path) = self.diff_cache.selected_file.as_ref()
             && !existing_paths.contains(path)
         {
             self.diff_position = DiffPosition::default();
@@ -152,12 +155,12 @@ impl App {
     }
 
     pub(super) fn capture_pending_diff_view_anchor(&mut self) {
-        self.pending_diff_view_anchor =
+        self.diff_cache.pending_view_anchor =
             capture_pending_diff_view_anchor(&self.rendered_diff, self.diff_position);
     }
 
     pub(super) fn apply_pending_diff_view_anchor(&mut self) {
-        let Some(pending) = self.pending_diff_view_anchor.take() else {
+        let Some(pending) = self.diff_cache.pending_view_anchor.take() else {
             return;
         };
         if self.rendered_diff.is_empty() {
@@ -188,19 +191,19 @@ impl App {
     pub(super) fn ensure_rendered_diff(&mut self) {
         if self.file_rows.is_empty() {
             self.rendered_diff = Arc::new(Vec::new());
-            self.rendered_diff_key = None;
-            self.file_diff_ranges.clear();
-            self.file_diff_range_by_path.clear();
+            self.diff_cache.rendered_key = None;
+            self.diff_cache.file_ranges.clear();
+            self.diff_cache.file_range_by_path.clear();
             self.diff_position = DiffPosition::default();
             return;
         }
 
         let ordered_paths = self.file_tree_paths_in_order();
         let key = RenderedDiffKey {
-            theme_mode: self.theme_mode,
+            theme_mode: self.preferences.theme_mode,
             visible_paths: ordered_paths.clone(),
         };
-        if self.rendered_diff_key.as_ref() == Some(&key) {
+        if self.diff_cache.rendered_key.as_ref() == Some(&key) {
             return;
         }
 
@@ -209,14 +212,14 @@ impl App {
 
         if ordered_paths.is_empty() {
             self.rendered_diff = Arc::new(Vec::new());
-            self.file_diff_ranges.clear();
-            self.file_diff_range_by_path.clear();
-            self.rendered_diff_key = Some(key);
+            self.diff_cache.file_ranges.clear();
+            self.diff_cache.file_range_by_path.clear();
+            self.diff_cache.rendered_key = Some(key);
             self.diff_position = DiffPosition::default();
             return;
         }
 
-        let theme = UiTheme::from_mode(self.theme_mode);
+        let theme = UiTheme::from_mode(self.preferences.theme_mode);
         let mut rendered = Vec::new();
         let mut ranges = Vec::new();
         let mut range_by_path = HashMap::new();
@@ -229,12 +232,13 @@ impl App {
                 idx + 1,
                 total_files,
                 &theme,
-                self.nerd_fonts,
-                &self.nerd_font_theme,
+                self.preferences.nerd_fonts,
+                &self.preferences.nerd_font_theme,
             ));
 
-            let file_key = (path.clone(), self.theme_mode);
-            let file_rendered = if let Some(cached) = self.rendered_diff_cache.get(&file_key) {
+            let file_key = (path.clone(), self.preferences.theme_mode);
+            let file_rendered = if let Some(cached) = self.diff_cache.rendered_cache.get(&file_key)
+            {
                 cached.clone()
             } else {
                 let built = self
@@ -243,7 +247,8 @@ impl App {
                     .get(path)
                     .map(|patch| Arc::new(self.build_diff_lines(patch)))
                     .unwrap_or_else(|| Arc::new(Vec::new()));
-                self.rendered_diff_cache
+                self.diff_cache
+                    .rendered_cache
                     .insert(file_key.clone(), built.clone());
                 built
             };
@@ -264,11 +269,11 @@ impl App {
         }
 
         self.rendered_diff = Arc::new(rendered);
-        self.file_diff_ranges = ranges;
-        self.file_diff_range_by_path = range_by_path;
-        self.rendered_diff_key = Some(key);
-        if let Some(path) = self.selected_file.clone()
-            && self.file_diff_range_by_path.contains_key(&path)
+        self.diff_cache.file_ranges = ranges;
+        self.diff_cache.file_range_by_path = range_by_path;
+        self.diff_cache.rendered_key = Some(key);
+        if let Some(path) = self.diff_cache.selected_file.clone()
+            && self.diff_cache.file_range_by_path.contains_key(&path)
         {
             self.restore_diff_position(&path);
         } else {
@@ -293,10 +298,10 @@ impl App {
     }
 
     pub(super) fn invalidate_diff_cache(&mut self) {
-        self.rendered_diff_cache.clear();
-        self.rendered_diff_key = None;
-        self.file_diff_ranges.clear();
-        self.file_diff_range_by_path.clear();
+        self.diff_cache.rendered_cache.clear();
+        self.diff_cache.rendered_key = None;
+        self.diff_cache.file_ranges.clear();
+        self.diff_cache.file_range_by_path.clear();
         self.ensure_rendered_diff();
     }
 
@@ -308,7 +313,7 @@ impl App {
 
     pub(super) fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
-        let theme = UiTheme::from_mode(self.theme_mode);
+        let theme = UiTheme::from_mode(self.preferences.theme_mode);
         let now_ts = Utc::now().timestamp();
         let file_comments: Vec<&ReviewComment> = self
             .comments
@@ -530,7 +535,10 @@ impl App {
             tree.insert(path, modified_ts);
         }
 
-        self.file_rows = tree.flattened_rows(self.nerd_fonts, &self.nerd_font_theme);
+        self.file_rows = tree.flattened_rows(
+            self.preferences.nerd_fonts,
+            &self.preferences.nerd_font_theme,
+        );
         for row in &mut self.file_rows {
             if row.selectable
                 && row
@@ -542,30 +550,30 @@ impl App {
             }
         }
         if self.file_rows.is_empty() {
-            self.file_list_state.select(None);
-            self.selected_file = None;
+            self.file_ui.list_state.select(None);
+            self.diff_cache.selected_file = None;
         }
     }
 
     pub(super) fn ensure_selected_file_exists(&mut self) {
         if self.file_rows.is_empty() {
-            self.selected_file = None;
-            self.file_list_state.select(None);
+            self.diff_cache.selected_file = None;
+            self.file_ui.list_state.select(None);
             return;
         }
 
-        if let Some(path) = self.selected_file.clone()
+        if let Some(path) = self.diff_cache.selected_file.clone()
             && let Some(idx) = self
                 .file_rows
                 .iter()
                 .position(|row| row.selectable && row.path.as_ref() == Some(&path))
         {
-            self.selected_file = self.file_rows[idx].path.clone();
+            self.diff_cache.selected_file = self.file_rows[idx].path.clone();
             return;
         }
 
         if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
-            self.selected_file = self.file_rows[idx].path.clone();
+            self.diff_cache.selected_file = self.file_rows[idx].path.clone();
         }
     }
 
@@ -573,19 +581,20 @@ impl App {
         self.commits
             .iter()
             .enumerate()
-            .filter(|(_, row)| self.commit_status_filter.matches_row(row))
-            .filter(|(_, row)| commit_row_matches_filter_query(row, &self.commit_search_query))
+            .filter(|(_, row)| self.commit_ui.status_filter.matches_row(row))
+            .filter(|(_, row)| commit_row_matches_filter_query(row, &self.search.commit_query))
             .map(|(idx, _)| idx)
             .collect()
     }
 
     pub(super) fn visible_file_indices(&self) -> Vec<usize> {
-        matching_file_indices_with_parent_dirs(&self.file_rows, &self.file_search_query)
+        matching_file_indices_with_parent_dirs(&self.file_rows, &self.search.file_query)
     }
 
     pub(super) fn selected_commit_full_index(&self) -> Option<usize> {
         let visible = self.visible_commit_indices();
-        self.commit_list_state
+        self.commit_ui
+            .list_state
             .selected()
             .and_then(|idx| visible.get(idx).copied())
     }
@@ -603,8 +612,8 @@ impl App {
     ) {
         let visible = self.visible_commit_indices();
         if visible.is_empty() {
-            self.commit_list_state.select(None);
-            self.commit_visual_anchor = None;
+            self.commit_ui.list_state.select(None);
+            self.commit_ui.visual_anchor = None;
             return;
         }
 
@@ -612,42 +621,44 @@ impl App {
             && let Some(full_idx) = index_of_commit(&self.commits, commit_id)
             && let Some(visible_idx) = visible.iter().position(|entry| *entry == full_idx)
         {
-            self.commit_list_state.select(Some(visible_idx));
+            self.commit_ui.list_state.select(Some(visible_idx));
             return;
         }
 
         let selected_idx = fallback_visible_idx.unwrap_or(0).min(visible.len() - 1);
-        self.commit_list_state.select(Some(selected_idx));
+        self.commit_ui.list_state.select(Some(selected_idx));
 
         if self
-            .commit_visual_anchor
+            .commit_ui
+            .visual_anchor
             .is_some_and(|anchor| !visible.contains(&anchor))
         {
-            self.commit_visual_anchor = None;
+            self.commit_ui.visual_anchor = None;
         }
         if self
-            .commit_selection_anchor
+            .commit_ui
+            .selection_anchor
             .is_some_and(|anchor| !visible.contains(&anchor))
         {
-            self.commit_selection_anchor = None;
+            self.commit_ui.selection_anchor = None;
         }
     }
 
     pub(super) fn sync_file_cursor_for_filters(&mut self) {
         let visible = self.visible_file_indices();
         if visible.is_empty() {
-            self.file_list_state.select(None);
+            self.file_ui.list_state.select(None);
             return;
         }
 
-        if let Some(path) = self.selected_file.clone()
+        if let Some(path) = self.diff_cache.selected_file.clone()
             && let Some(full_idx) = self
                 .file_rows
                 .iter()
                 .position(|row| row.selectable && row.path.as_ref() == Some(&path))
             && let Some(visible_idx) = visible.iter().position(|entry| *entry == full_idx)
         {
-            self.file_list_state.select(Some(visible_idx));
+            self.file_ui.list_state.select(Some(visible_idx));
             return;
         }
 
@@ -657,15 +668,15 @@ impl App {
             .find(|(_, idx)| self.file_rows[**idx].selectable)
             .map(|(visible_idx, idx)| (visible_idx, *idx))
         else {
-            self.file_list_state.select(None);
+            self.file_ui.list_state.select(None);
             return;
         };
 
-        self.file_list_state.select(Some(visible_idx));
+        self.file_ui.list_state.select(Some(visible_idx));
         let next_path = self.file_rows[full_idx].path.clone();
-        if next_path != self.selected_file {
+        if next_path != self.diff_cache.selected_file {
             self.persist_selected_file_position();
-            self.selected_file = next_path.clone();
+            self.diff_cache.selected_file = next_path.clone();
             if let Some(path) = next_path {
                 self.restore_diff_position(&path);
                 self.sync_diff_cursor_to_content_bounds();
@@ -674,42 +685,42 @@ impl App {
     }
 
     pub(super) fn on_selection_changed(&mut self) {
-        self.selection_rebuild_due = None;
+        self.runtime.selection_rebuild_due = None;
         self.reset_diff_view_for_commit_selection_change();
         if let Err(err) = self.rebuild_selection_dependent_views() {
-            self.status = format!("failed to rebuild diff: {err:#}");
+            self.runtime.status = format!("failed to rebuild diff: {err:#}");
         } else {
             let selected = self.commits.iter().filter(|row| row.selected).count();
-            self.status = format!("{} commit(s) selected", selected);
+            self.runtime.status = format!("{} commit(s) selected", selected);
         }
     }
 
     pub(super) fn on_selection_changed_debounced(&mut self) {
-        self.selection_rebuild_due = Some(Instant::now() + SELECTION_REBUILD_DEBOUNCE);
+        self.runtime.selection_rebuild_due = Some(Instant::now() + SELECTION_REBUILD_DEBOUNCE);
         self.reset_diff_view_for_commit_selection_change();
         let selected = self.commits.iter().filter(|row| row.selected).count();
-        self.status = format!("{} commit(s) selected", selected);
+        self.runtime.status = format!("{} commit(s) selected", selected);
     }
 
     pub(super) fn flush_pending_selection_rebuild(&mut self) {
-        if self.selection_rebuild_due.take().is_none() {
+        if self.runtime.selection_rebuild_due.take().is_none() {
             return;
         }
         self.reset_diff_view_for_commit_selection_change();
         if let Err(err) = self.rebuild_selection_dependent_views() {
-            self.status = format!("failed to rebuild diff: {err:#}");
+            self.runtime.status = format!("failed to rebuild diff: {err:#}");
             return;
         }
         let selected = self.commits.iter().filter(|row| row.selected).count();
-        self.status = format!("{} commit(s) selected", selected);
+        self.runtime.status = format!("{} commit(s) selected", selected);
     }
 
     pub(super) fn reset_diff_view_for_commit_selection_change(&mut self) {
-        self.pending_diff_view_anchor = None;
-        self.diff_positions.clear();
+        self.diff_cache.pending_view_anchor = None;
+        self.diff_cache.positions.clear();
         self.diff_position = DiffPosition::default();
-        self.diff_visual = None;
-        self.diff_mouse_anchor = None;
+        self.diff_ui.visual_selection = None;
+        self.diff_ui.mouse_anchor = None;
     }
 
     pub(super) fn selected_commit_ids_oldest_first(&self) -> Vec<String> {
@@ -726,19 +737,19 @@ impl App {
     }
 
     pub(super) fn file_range_for_path(&self, path: &str) -> Option<(usize, usize)> {
-        self.file_diff_range_by_path.get(path).copied()
+        self.diff_cache.file_range_by_path.get(path).copied()
     }
 
     pub(super) fn file_range_index_for_line(&self, line: usize) -> Option<usize> {
-        if self.file_diff_ranges.is_empty() {
+        if self.diff_cache.file_ranges.is_empty() {
             return None;
         }
 
         let mut left = 0usize;
-        let mut right = self.file_diff_ranges.len();
+        let mut right = self.diff_cache.file_ranges.len();
         while left < right {
             let mid = left + ((right - left) / 2);
-            let range = &self.file_diff_ranges[mid];
+            let range = &self.diff_cache.file_ranges[mid];
             if line < range.start {
                 right = mid;
             } else if line >= range.end {
@@ -752,7 +763,7 @@ impl App {
 
     pub(super) fn file_path_for_line(&self, line: usize) -> Option<&str> {
         self.file_range_index_for_line(line)
-            .and_then(|idx| self.file_diff_ranges.get(idx))
+            .and_then(|idx| self.diff_cache.file_ranges.get(idx))
             .map(|range| range.path.as_str())
     }
 
@@ -764,15 +775,16 @@ impl App {
         {
             let visible = self.visible_file_indices();
             let visible_idx = visible.iter().position(|entry| *entry == idx);
-            self.file_list_state.select(visible_idx);
+            self.file_ui.list_state.select(visible_idx);
         }
     }
 
     pub(super) fn selected_file_progress(&self) -> Option<(usize, usize)> {
-        let path = self.selected_file.as_deref()?;
-        let total = self.file_diff_ranges.len();
+        let path = self.diff_cache.selected_file.as_deref()?;
+        let total = self.diff_cache.file_ranges.len();
         let index = self
-            .file_diff_ranges
+            .diff_cache
+            .file_ranges
             .iter()
             .position(|range| range.path == path)?;
         Some((index + 1, total))
