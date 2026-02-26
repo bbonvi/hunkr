@@ -638,7 +638,7 @@ impl App {
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if in_diff {
-                    self.scroll_diff_viewport(3);
+                    self.scroll_diff_viewport(DIFF_WHEEL_SCROLL_LINES);
                 } else if in_files {
                     self.move_file_cursor(1);
                 } else if in_commits {
@@ -647,7 +647,7 @@ impl App {
             }
             MouseEventKind::ScrollUp => {
                 if in_diff {
-                    self.scroll_diff_viewport(-3);
+                    self.scroll_diff_viewport(-DIFF_WHEEL_SCROLL_LINES);
                 } else if in_files {
                     self.move_file_cursor(-1);
                 } else if in_commits {
