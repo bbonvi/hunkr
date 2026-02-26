@@ -16,7 +16,10 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, ListState, Paragraph},
 };
 use syntect::{
-    easy::HighlightLines, highlighting::Theme, highlighting::ThemeSet, parsing::SyntaxSet,
+    easy::HighlightLines,
+    highlighting::Theme,
+    highlighting::ThemeSet,
+    parsing::{SyntaxReference, SyntaxSet},
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -52,6 +55,7 @@ use crate::{
 const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
+const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,7 +132,10 @@ impl CommitStatusFilter {
             Self::All => true,
             Self::UnreviewedOrIssueFound => {
                 row.is_uncommitted
-                    || matches!(row.status, ReviewStatus::Unreviewed | ReviewStatus::IssueFound)
+                    || matches!(
+                        row.status,
+                        ReviewStatus::Unreviewed | ReviewStatus::IssueFound
+                    )
             }
             Self::ReviewedOrResolved => {
                 !row.is_uncommitted
@@ -332,6 +339,7 @@ pub struct App {
     file_search_query: String,
     commit_status_filter: CommitStatusFilter,
     diff_pending_op: Option<DiffPendingOp>,
+    selection_rebuild_due: Option<Instant>,
     show_help: bool,
     last_refresh: Instant,
     last_relative_time_redraw: Instant,
@@ -443,18 +451,24 @@ impl DiffSyntaxHighlighter {
         }
     }
 
-    fn highlight(&self, mode: ThemeMode, path: &str, line: &str) -> Vec<Span<'static>> {
-        let syntax = self
-            .syntaxes
+    fn syntax_for_path(&self, path: &str) -> &SyntaxReference {
+        self.syntaxes
             .find_syntax_for_file(path)
             .ok()
             .flatten()
-            .unwrap_or_else(|| self.syntaxes.find_syntax_plain_text());
+            .unwrap_or_else(|| self.syntaxes.find_syntax_plain_text())
+    }
 
-        let theme = match mode {
+    fn theme_for_mode(&self, mode: ThemeMode) -> &Theme {
+        match mode {
             ThemeMode::Dark => &self.dark_theme,
             ThemeMode::Light => &self.light_theme,
-        };
+        }
+    }
+
+    fn highlight_single_line(&self, mode: ThemeMode, path: &str, line: &str) -> Vec<Span<'static>> {
+        let syntax = self.syntax_for_path(path);
+        let theme = self.theme_for_mode(mode);
         let mut highlighter = HighlightLines::new(syntax, theme);
         let highlighted = highlighter
             .highlight_line(line, &self.syntaxes)
@@ -1350,6 +1364,18 @@ fn apply_status_transition(rows: &mut [CommitRow], ids: &BTreeSet<String>, statu
     }
 }
 
+fn selected_ids_will_change_for_status_update(
+    rows: &[CommitRow],
+    ids: &BTreeSet<String>,
+    status: ReviewStatus,
+) -> bool {
+    if !auto_deselect_status(status) {
+        return false;
+    }
+    rows.iter()
+        .any(|row| row.selected && ids.contains(&row.info.id))
+}
+
 fn deselect_rows_outside_status_filter(
     rows: &mut [CommitRow],
     status_filter: CommitStatusFilter,
@@ -1369,11 +1395,20 @@ fn page_step(height: u16, multiplier: f32) -> isize {
     (visible * multiplier).round() as isize
 }
 
-fn next_poll_timeout(refresh_elapsed: Duration, relative_elapsed: Duration) -> Duration {
+fn next_poll_timeout(
+    refresh_elapsed: Duration,
+    relative_elapsed: Duration,
+    selection_rebuild_in: Option<Duration>,
+) -> Duration {
     // Sleep until the earliest maintenance deadline: git auto-refresh or coarse age-label repaint.
-    AUTO_REFRESH_EVERY
+    let timeout = AUTO_REFRESH_EVERY
         .saturating_sub(refresh_elapsed)
-        .min(RELATIVE_TIME_REDRAW_EVERY.saturating_sub(relative_elapsed))
+        .min(RELATIVE_TIME_REDRAW_EVERY.saturating_sub(relative_elapsed));
+    if let Some(selection_timeout) = selection_rebuild_in {
+        timeout.min(selection_timeout)
+    } else {
+        timeout
+    }
 }
 
 fn scrolled_diff_position_preserving_offset(

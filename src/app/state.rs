@@ -65,10 +65,7 @@ impl App {
             },
         );
 
-        self.sync_commit_cursor_for_filters(
-            prior_cursor_commit_id.as_deref(),
-            prior_cursor_idx,
-        );
+        self.sync_commit_cursor_for_filters(prior_cursor_commit_id.as_deref(), prior_cursor_idx);
         self.commit_visual_anchor = prior_visual_anchor_commit_id
             .as_deref()
             .and_then(|commit_id| index_of_commit(&self.commits, commit_id));
@@ -421,7 +418,7 @@ impl App {
                     new_lineno: line.new_lineno,
                 };
                 rendered.push(RenderedDiffLine {
-                    line: self.render_code_line(&patch.path, line, &theme),
+                    line: self.render_code_line(line, &theme),
                     raw_text: raw_diff_text(line),
                     anchor: Some(anchor.clone()),
                     comment_id: None,
@@ -448,12 +445,7 @@ impl App {
         rendered
     }
 
-    pub(super) fn render_code_line(
-        &self,
-        path: &str,
-        line: &HunkLine,
-        theme: &UiTheme,
-    ) -> Line<'static> {
+    pub(super) fn render_code_line(&self, line: &HunkLine, theme: &UiTheme) -> Line<'static> {
         let (prefix, accent, bg) = match line.kind {
             DiffLineKind::Add => ('+', theme.diff_add, Some(theme.diff_add_bg)),
             DiffLineKind::Remove => ('-', theme.diff_remove, Some(theme.diff_remove_bg)),
@@ -482,15 +474,11 @@ impl App {
             Span::raw(" "),
         ];
 
-        let highlighted = self
-            .highlighter
-            .highlight(self.theme_mode, path, &line.text);
-        for mut span in highlighted {
-            if let Some(bg_color) = bg {
-                span.style = span.style.bg(bg_color);
-            }
-            spans.push(span);
+        let mut text_style = Style::default();
+        if let Some(bg_color) = bg {
+            text_style = text_style.bg(bg_color);
         }
+        spans.push(Span::styled(line.text.clone(), text_style));
 
         Line::from(spans)
     }
@@ -653,12 +641,31 @@ impl App {
     }
 
     pub(super) fn on_selection_changed(&mut self) {
+        self.selection_rebuild_due = None;
         if let Err(err) = self.rebuild_selection_dependent_views() {
             self.status = format!("failed to rebuild diff: {err:#}");
         } else {
             let selected = self.commits.iter().filter(|row| row.selected).count();
             self.status = format!("{} commit(s) selected", selected);
         }
+    }
+
+    pub(super) fn on_selection_changed_debounced(&mut self) {
+        self.selection_rebuild_due = Some(Instant::now() + SELECTION_REBUILD_DEBOUNCE);
+        let selected = self.commits.iter().filter(|row| row.selected).count();
+        self.status = format!("{} commit(s) selected (diff update pending)", selected);
+    }
+
+    pub(super) fn flush_pending_selection_rebuild(&mut self) {
+        if self.selection_rebuild_due.take().is_none() {
+            return;
+        }
+        if let Err(err) = self.rebuild_selection_dependent_views() {
+            self.status = format!("failed to rebuild diff: {err:#}");
+            return;
+        }
+        let selected = self.commits.iter().filter(|row| row.selected).count();
+        self.status = format!("{} commit(s) selected", selected);
     }
 
     pub(super) fn selected_commit_ids_oldest_first(&self) -> Vec<String> {

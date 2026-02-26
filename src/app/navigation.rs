@@ -150,7 +150,7 @@ impl App {
         let start = min(anchor, cursor);
         let end = max(anchor, cursor);
         apply_range_selection(&mut self.commits, start, end);
-        self.on_selection_changed();
+        self.on_selection_changed_debounced();
     }
 
     pub(super) fn set_current_commit_status(&mut self, status: ReviewStatus) {
@@ -195,12 +195,12 @@ impl App {
                 return;
             }
         }
-        self.sync_commit_cursor_for_filters(
-            preferred_commit_id.as_deref(),
-            fallback_visible_idx,
-        );
+        self.sync_commit_cursor_for_filters(preferred_commit_id.as_deref(), fallback_visible_idx);
         self.status = if deselected == 0 {
-            format!("Commit status filter: {}", self.commit_status_filter.label())
+            format!(
+                "Commit status filter: {}",
+                self.commit_status_filter.label()
+            )
         } else {
             format!(
                 "Commit status filter: {} (deselected {} hidden commit(s))",
@@ -211,6 +211,9 @@ impl App {
     }
 
     pub(super) fn set_status_for_ids(&mut self, ids: &BTreeSet<String>, status: ReviewStatus) {
+        self.flush_pending_selection_rebuild();
+        let selected_ids_changed =
+            selected_ids_will_change_for_status_update(&self.commits, ids, status);
         self.store.set_many_status(
             &mut self.review_state,
             ids.iter().cloned(),
@@ -231,7 +234,7 @@ impl App {
         if status != ReviewStatus::Unreviewed {
             self.commit_visual_anchor = None;
         }
-        if let Err(err) = self.rebuild_selection_dependent_views() {
+        if selected_ids_changed && let Err(err) = self.rebuild_selection_dependent_views() {
             self.status = format!("failed to rebuild diff: {err:#}");
             return;
         }
@@ -503,6 +506,9 @@ impl App {
             return;
         }
 
+        if self.focused == FocusPane::Commits && next != FocusPane::Commits {
+            self.flush_pending_selection_rebuild();
+        }
         self.focused = next;
         self.commit_visual_anchor = None;
         self.clear_diff_visual_selection();

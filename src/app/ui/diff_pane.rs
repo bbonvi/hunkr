@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -39,6 +41,8 @@ pub(in crate::app) struct DiffPaneBody<'a> {
     pub diff_position: DiffPosition,
     pub visual_range: Option<(usize, usize)>,
     pub sticky_banner_indexes: &'a [usize],
+    pub empty_state_message: Option<&'a str>,
+    pub line_overrides: &'a HashMap<usize, Line<'static>>,
 }
 
 /// Renders the diff pane so App can focus on orchestration/state transitions.
@@ -119,6 +123,7 @@ impl<'a> DiffPaneRenderer<'a> {
                 .map(|line| {
                     display_line_with_selection(
                         line,
+                        body.line_overrides.get(sticky_idx),
                         *sticky_idx,
                         body.visual_range,
                         body.diff_position.cursor,
@@ -148,6 +153,7 @@ impl<'a> DiffPaneRenderer<'a> {
                 };
                 body_lines.push(display_line_with_selection(
                     line,
+                    body.line_overrides.get(&line_idx),
                     line_idx,
                     body.visual_range,
                     body.diff_position.cursor,
@@ -157,8 +163,11 @@ impl<'a> DiffPaneRenderer<'a> {
             }
 
             if body_lines.is_empty() {
+                let empty_state = body
+                    .empty_state_message
+                    .unwrap_or("No selected commits or no textual diff for this range");
                 body_lines.push(Line::from(Span::styled(
-                    "No selected commits or no textual diff for this range",
+                    empty_state,
                     Style::default().fg(self.theme.muted),
                 )));
             }
@@ -440,13 +449,16 @@ fn find_index_for_raw_text_occurrence_in_candidates(
 
 fn display_line_with_selection(
     rendered: &RenderedDiffLine,
+    override_line: Option<&Line<'static>>,
     idx: usize,
     visual_range: Option<(usize, usize)>,
     cursor: usize,
     focused_diff: bool,
     theme: &UiTheme,
 ) -> Line<'static> {
-    let mut line = rendered.line.clone();
+    let mut line = override_line
+        .cloned()
+        .unwrap_or_else(|| rendered.line.clone());
     if let Some((start, end)) = visual_range
         && idx >= start
         && idx <= end

@@ -100,8 +100,17 @@ impl StateStore {
         status: ReviewStatus,
         branch: &str,
     ) {
+        let branch = branch.to_owned();
+        let updated_at = Utc::now().to_rfc3339();
         for commit_id in commit_ids {
-            self.set_status(state, &commit_id, status, branch);
+            state.statuses.insert(
+                commit_id,
+                CommitStatusEntry {
+                    status,
+                    branch: branch.clone(),
+                    updated_at: updated_at.clone(),
+                },
+            );
         }
     }
 }

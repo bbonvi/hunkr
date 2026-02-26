@@ -54,6 +54,7 @@ impl App {
             file_search_query: String::new(),
             commit_status_filter: CommitStatusFilter::All,
             diff_pending_op: None,
+            selection_rebuild_due: None,
             show_help: false,
             last_refresh: Instant::now(),
             last_relative_time_redraw: Instant::now(),
@@ -62,6 +63,7 @@ impl App {
         };
 
         app.reload_commits(true)?;
+        app.ensure_rendered_diff();
         if app.status.is_empty() {
             app.status =
                 "Ready. Select commit range with <space>/v, set statuses with r/i/s/u.".to_owned();
@@ -82,9 +84,13 @@ impl App {
     }
 
     pub fn poll_timeout(&self) -> Duration {
+        let selection_rebuild_in = self
+            .selection_rebuild_due
+            .map(|due| due.saturating_duration_since(Instant::now()));
         next_poll_timeout(
             self.last_refresh.elapsed(),
             self.last_relative_time_redraw.elapsed(),
+            selection_rebuild_in,
         )
     }
 
@@ -203,6 +209,12 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        let now = Instant::now();
+        if self.selection_rebuild_due.is_some_and(|due| now >= due) {
+            self.flush_pending_selection_rebuild();
+            self.needs_redraw = true;
+        }
+
         let mut refreshed = false;
         if self.last_refresh.elapsed() >= AUTO_REFRESH_EVERY {
             if let Err(err) = self.reload_commits(true) {
@@ -716,24 +728,22 @@ impl App {
                     }
                 };
             }
-            KeyCode::Backspace => {
-                match pane {
-                    FocusPane::Commits => {
-                        self.commit_search_query.pop();
-                        self.sync_commit_cursor_for_filters(
-                            preferred_commit_id.as_deref(),
-                            fallback_visible_idx,
-                        );
-                        self.status = format!("/{}", self.commit_search_query);
-                    }
-                    FocusPane::Files => {
-                        self.file_search_query.pop();
-                        self.sync_file_cursor_for_filters();
-                        self.status = format!("/{}", self.file_search_query);
-                    }
-                    FocusPane::Diff => {}
+            KeyCode::Backspace => match pane {
+                FocusPane::Commits => {
+                    self.commit_search_query.pop();
+                    self.sync_commit_cursor_for_filters(
+                        preferred_commit_id.as_deref(),
+                        fallback_visible_idx,
+                    );
+                    self.status = format!("/{}", self.commit_search_query);
                 }
-            }
+                FocusPane::Files => {
+                    self.file_search_query.pop();
+                    self.sync_file_cursor_for_filters();
+                    self.status = format!("/{}", self.file_search_query);
+                }
+                FocusPane::Diff => {}
+            },
             KeyCode::Char(c) => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     return;
@@ -1288,6 +1298,27 @@ impl App {
         let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
         let sticky_banner_indexes =
             self.sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
+        let sticky_rows = sticky_banner_indexes
+            .len()
+            .min(viewport_rows.saturating_sub(1));
+        let body_rows = viewport_rows.saturating_sub(sticky_rows);
+        let mut visible_indexes = BTreeSet::new();
+        for idx in sticky_banner_indexes.iter().take(sticky_rows) {
+            visible_indexes.insert(*idx);
+        }
+        for row in 0..body_rows {
+            let idx = self.diff_position.scroll.saturating_add(row);
+            if idx >= self.rendered_diff.len() {
+                break;
+            }
+            visible_indexes.insert(idx);
+        }
+        let mut line_overrides = HashMap::new();
+        for idx in visible_indexes {
+            if let Some(line) = self.highlight_visible_diff_line(idx, theme) {
+                line_overrides.insert(idx, line);
+            }
+        }
         let title = DiffPaneTitle {
             selected_file: self.selected_file.as_deref(),
             selected_file_progress: self.selected_file_progress(),
@@ -1300,8 +1331,53 @@ impl App {
             diff_position: self.diff_position,
             visual_range: self.diff_selected_range(),
             sticky_banner_indexes: &sticky_banner_indexes,
+            empty_state_message: None,
+            line_overrides: &line_overrides,
         };
         DiffPaneRenderer::new(theme, self.focused).render(frame, rect, title, body);
+    }
+
+    fn highlight_visible_diff_line(&self, idx: usize, theme: &UiTheme) -> Option<Line<'static>> {
+        let rendered = self.rendered_diff.get(idx)?;
+        let anchor = rendered.anchor.as_ref()?;
+        if is_commit_anchor(anchor) {
+            return None;
+        }
+
+        let mut chars = rendered.raw_text.chars();
+        let prefix = chars.next()?;
+        if !matches!(prefix, '+' | '-' | ' ') {
+            return None;
+        }
+        if rendered.line.spans.len() < 4 {
+            return None;
+        }
+
+        let code_text = chars.as_str();
+        let mut spans = vec![
+            rendered.line.spans[0].clone(),
+            rendered.line.spans[1].clone(),
+            rendered.line.spans[2].clone(),
+        ];
+        let mut highlighted =
+            self.highlighter
+                .highlight_single_line(self.theme_mode, &anchor.file_path, code_text);
+        if highlighted.is_empty() {
+            highlighted.push(Span::raw(code_text.to_owned()));
+        }
+
+        let bg = match prefix {
+            '+' => Some(theme.diff_add_bg),
+            '-' => Some(theme.diff_remove_bg),
+            _ => None,
+        };
+        if let Some(bg_color) = bg {
+            for span in &mut highlighted {
+                span.style = span.style.bg(bg_color);
+            }
+        }
+        spans.extend(highlighted);
+        Some(Line::from(spans))
     }
 
     pub(super) fn render_footer(

@@ -226,8 +226,16 @@ fn file_filter_keeps_parent_directories_for_matching_files() {
 
     assert!(visible_labels.iter().any(|label| label.contains("[D] src")));
     assert!(visible_labels.iter().any(|label| label.contains("[D] app")));
-    assert!(visible_labels.iter().any(|label| label.contains("[F] main.rs")));
-    assert!(visible_labels.iter().any(|label| label.contains("[D] tests")));
+    assert!(
+        visible_labels
+            .iter()
+            .any(|label| label.contains("[F] main.rs"))
+    );
+    assert!(
+        visible_labels
+            .iter()
+            .any(|label| label.contains("[D] tests"))
+    );
     assert!(
         visible_labels
             .iter()
@@ -1026,20 +1034,63 @@ fn relative_time_formats_expected_units() {
 
 #[test]
 fn next_poll_timeout_uses_nearest_deadline() {
-    let timeout = next_poll_timeout(Duration::from_secs(1), Duration::from_secs(10));
+    let timeout = next_poll_timeout(Duration::from_secs(1), Duration::from_secs(10), None);
     assert_eq!(timeout, Duration::from_secs(3));
 }
 
 #[test]
 fn next_poll_timeout_zero_when_any_deadline_elapsed() {
-    let timeout = next_poll_timeout(Duration::from_secs(5), Duration::from_secs(1));
+    let timeout = next_poll_timeout(Duration::from_secs(5), Duration::from_secs(1), None);
     assert_eq!(timeout, Duration::from_secs(0));
 }
 
 #[test]
 fn next_poll_timeout_after_refresh_waits_for_auto_refresh_window() {
-    let timeout = next_poll_timeout(Duration::from_secs(0), Duration::from_secs(0));
+    let timeout = next_poll_timeout(Duration::from_secs(0), Duration::from_secs(0), None);
     assert_eq!(timeout, AUTO_REFRESH_EVERY);
+}
+
+#[test]
+fn next_poll_timeout_honors_selection_rebuild_deadline() {
+    let timeout = next_poll_timeout(
+        Duration::from_secs(0),
+        Duration::from_secs(0),
+        Some(Duration::from_millis(80)),
+    );
+    assert_eq!(timeout, Duration::from_millis(80));
+}
+
+#[test]
+fn status_update_selection_change_detects_auto_deselect_targets() {
+    let rows = vec![
+        commit_row("a", true, ReviewStatus::Unreviewed),
+        commit_row("b", false, ReviewStatus::Unreviewed),
+    ];
+    let ids = BTreeSet::from(["a".to_owned()]);
+    assert!(selected_ids_will_change_for_status_update(
+        &rows,
+        &ids,
+        ReviewStatus::Reviewed
+    ));
+    assert!(!selected_ids_will_change_for_status_update(
+        &rows,
+        &ids,
+        ReviewStatus::IssueFound
+    ));
+}
+
+#[test]
+fn status_update_selection_change_ignores_unselected_targets() {
+    let rows = vec![
+        commit_row("a", false, ReviewStatus::Unreviewed),
+        commit_row("b", true, ReviewStatus::Unreviewed),
+    ];
+    let ids = BTreeSet::from(["a".to_owned()]);
+    assert!(!selected_ids_will_change_for_status_update(
+        &rows,
+        &ids,
+        ReviewStatus::Resolved
+    ));
 }
 
 #[test]
