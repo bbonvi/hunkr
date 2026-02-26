@@ -2674,6 +2674,14 @@ fn compose_commit_line(
     now_ts: i64,
     theme: &UiTheme,
 ) -> Line<'static> {
+    let emphasize_selected = |line: Line<'static>| -> Line<'static> {
+        if row.selected {
+            tint_line_background(&line, theme.visual_bg, false)
+        } else {
+            line
+        }
+    };
+
     if row.is_uncommitted {
         let marker = if row.selected { "[x]" } else { "[ ]" };
         let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
@@ -2690,7 +2698,7 @@ fn compose_commit_line(
             " ".repeat(width - static_used)
         };
 
-        return Line::from(vec![
+        return emphasize_selected(Line::from(vec![
             Span::styled(left_render, Style::default().fg(theme.text)),
             Span::raw(" "),
             Span::styled(
@@ -2701,7 +2709,7 @@ fn compose_commit_line(
             ),
             Span::raw(spaces),
             Span::styled(right, Style::default().fg(theme.dimmed)),
-        ]);
+        ]));
     }
 
     let marker = if row.selected { "[x]" } else { "[ ]" };
@@ -2724,14 +2732,14 @@ fn compose_commit_line(
         " ".repeat(width - static_used)
     };
 
-    Line::from(vec![
+    emphasize_selected(Line::from(vec![
         Span::styled(left_render, Style::default().fg(theme.text)),
         Span::raw(" "),
         Span::styled(status_label, status_style(row.status, theme)),
         Span::styled(unpushed.to_owned(), Style::default().fg(theme.unpushed)),
         Span::raw(spaces),
         Span::styled(right, Style::default().fg(theme.dimmed)),
-    ])
+    ]))
 }
 
 fn centered_rect(
@@ -3396,6 +3404,20 @@ mod tests {
             .map(|s| s.content.to_string())
             .collect::<String>();
         assert!(flattened.ends_with("1h ago"));
+    }
+
+    #[test]
+    fn compose_commit_line_tints_selected_rows() {
+        let row = commit_row("abc1234", true, ReviewStatus::Unreviewed);
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = compose_commit_line(&row, 80, 3_600, &theme);
+
+        assert!(
+            rendered
+                .spans
+                .iter()
+                .any(|span| span.style.bg == Some(theme.visual_bg))
+        );
     }
 
     #[test]
