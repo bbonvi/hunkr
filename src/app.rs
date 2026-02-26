@@ -57,7 +57,7 @@ const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
-const LIST_WHEEL_EVENT_MIN_INTERVAL: Duration = Duration::from_millis(45);
+const LIST_WHEEL_EVENT_MIN_INTERVAL: Duration = Duration::from_millis(16);
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
