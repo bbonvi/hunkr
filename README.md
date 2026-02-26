@@ -13,7 +13,7 @@ It lets you review a selected commit range as one net diff across all changed fi
 - Auto-generated review task markdown for agent handoff and follow-up
 - Built-in filters/search for commits and files
 - Keyboard-first UX with mouse support (drag-select commit ranges with edge auto-scroll, wheel scroll in list panes)
-- Local performance optimizations for large diff sessions (viewport-based rendering and lazy syntax highlighting)
+- Local performance optimizations for large diff sessions (viewport-based rendering and bounded, lazy syntax highlighting cache)
 
 ## Local-First Data
 

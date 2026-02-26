@@ -1,6 +1,6 @@
 use std::{
     cmp::{max, min},
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -58,6 +58,7 @@ const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
+const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -443,10 +444,21 @@ impl FileTree {
     }
 }
 
+/// Cache key for a single highlighted source line in a specific theme mode.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DiffHighlightCacheKey {
+    mode: ThemeMode,
+    path: String,
+    line: String,
+}
+
 struct DiffSyntaxHighlighter {
     syntaxes: SyntaxSet,
     dark_theme: Theme,
     light_theme: Theme,
+    highlight_cache: HashMap<DiffHighlightCacheKey, Vec<Span<'static>>>,
+    highlight_cache_order: VecDeque<DiffHighlightCacheKey>,
+    highlight_cache_capacity: usize,
 }
 
 impl DiffSyntaxHighlighter {
@@ -470,6 +482,9 @@ impl DiffSyntaxHighlighter {
             syntaxes,
             dark_theme,
             light_theme,
+            highlight_cache: HashMap::new(),
+            highlight_cache_order: VecDeque::new(),
+            highlight_cache_capacity: SYNTAX_HIGHLIGHT_CACHE_CAPACITY,
         }
     }
 
@@ -488,7 +503,21 @@ impl DiffSyntaxHighlighter {
         }
     }
 
-    fn highlight_single_line(&self, mode: ThemeMode, path: &str, line: &str) -> Vec<Span<'static>> {
+    fn highlight_single_line(
+        &mut self,
+        mode: ThemeMode,
+        path: &str,
+        line: &str,
+    ) -> Vec<Span<'static>> {
+        let cache_key = DiffHighlightCacheKey {
+            mode,
+            path: path.to_owned(),
+            line: line.to_owned(),
+        };
+        if let Some(cached) = self.highlight_cache.get(&cache_key) {
+            return cached.clone();
+        }
+
         let syntax = self.syntax_for_path(path);
         let theme = self.theme_for_mode(mode);
         let mut highlighter = HighlightLines::new(syntax, theme);
@@ -496,10 +525,23 @@ impl DiffSyntaxHighlighter {
             .highlight_line(line, &self.syntaxes)
             .unwrap_or_default();
 
-        highlighted
+        let highlighted: Vec<Span<'static>> = highlighted
             .into_iter()
             .map(|(style, text)| Span::styled(text.to_owned(), syntect_to_ratatui(style)))
-            .collect()
+            .collect();
+
+        if self.highlight_cache_capacity > 0 {
+            while self.highlight_cache.len() >= self.highlight_cache_capacity {
+                let Some(oldest_key) = self.highlight_cache_order.pop_front() else {
+                    break;
+                };
+                self.highlight_cache.remove(&oldest_key);
+            }
+            self.highlight_cache_order.push_back(cache_key.clone());
+            self.highlight_cache.insert(cache_key, highlighted.clone());
+        }
+
+        highlighted
     }
 }
 

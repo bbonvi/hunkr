@@ -1467,7 +1467,11 @@ impl App {
         DiffPaneRenderer::new(theme, self.focused).render(frame, rect, title, body);
     }
 
-    fn highlight_visible_diff_line(&self, idx: usize, theme: &UiTheme) -> Option<Line<'static>> {
+    fn highlight_visible_diff_line(
+        &mut self,
+        idx: usize,
+        theme: &UiTheme,
+    ) -> Option<Line<'static>> {
         let rendered = self.rendered_diff.get(idx)?;
         let anchor = rendered.anchor.as_ref()?;
         if is_commit_anchor(anchor) {
