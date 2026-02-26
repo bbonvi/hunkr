@@ -15,6 +15,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - left/bottom: commit history with multi-select and review status
 - commit history includes a synthetic top entry for `Uncommitted changes` (staged + unstaged worktree draft)
 - right: syntax-highlighted diff viewer
+- commit banners stay visible at the top of the diff pane while scrolling through their hunks
 - right pane includes a simple vertical scrollbar for quick position awareness
 - Theme modes: dark and light (`dark` by default)
 - Initial default selection: unpushed + unreviewed commits; newly arriving commits are highlighted but not auto-selected

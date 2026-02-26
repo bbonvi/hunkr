@@ -905,9 +905,12 @@ impl App {
                     }
                 } else if in_diff {
                     self.focused = FocusPane::Diff;
-                    if let Some(row) =
-                        list_index_at(y, self.pane_rects.diff, self.diff_position.scroll)
-                    {
+                    if let Some(row) = diff_index_at(
+                        y,
+                        self.pane_rects.diff,
+                        self.diff_position.scroll,
+                        self.sticky_commit_banner_index_for_scroll(self.diff_position.scroll),
+                    ) {
                         self.set_diff_cursor(row);
                     }
                 }
@@ -1094,18 +1097,52 @@ impl App {
             )));
         }
 
-        let paragraph = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(border_style),
-            )
-            .scroll((self.diff_position.scroll as u16, 0));
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style);
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+        if inner.height == 0 || inner.width == 0 {
+            return;
+        }
 
-        frame.render_widget(paragraph, rect);
-        self.render_diff_scrollbar(frame, rect, theme);
+        let sticky_commit_idx =
+            self.sticky_commit_banner_index_for_scroll(self.diff_position.scroll);
+        let sticky_rows = usize::from(sticky_commit_idx.is_some() && inner.height > 1);
+
+        if sticky_rows == 1 {
+            let sticky_idx = sticky_commit_idx.expect("sticky row requires banner index");
+            let sticky_line = lines
+                .get(sticky_idx)
+                .cloned()
+                .unwrap_or_else(|| Line::from(""));
+            frame.render_widget(
+                Paragraph::new(vec![sticky_line]),
+                ratatui::layout::Rect {
+                    x: inner.x,
+                    y: inner.y,
+                    width: inner.width,
+                    height: 1,
+                },
+            );
+        }
+
+        let body_height = inner.height.saturating_sub(sticky_rows as u16);
+        if body_height > 0 {
+            frame.render_widget(
+                Paragraph::new(lines).scroll((self.diff_position.scroll as u16, 0)),
+                ratatui::layout::Rect {
+                    x: inner.x,
+                    y: inner.y + sticky_rows as u16,
+                    width: inner.width,
+                    height: body_height,
+                },
+            );
+        }
+
+        self.render_diff_scrollbar(frame, rect, theme, sticky_rows);
     }
 
     fn render_diff_scrollbar(
@@ -1113,6 +1150,7 @@ impl App {
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
+        sticky_rows: usize,
     ) {
         if rect.width < 3 || rect.height < 3 {
             return;
@@ -1122,24 +1160,29 @@ impl App {
         if inner_height == 0 {
             return;
         }
+        let sticky_rows = sticky_rows.min(inner_height.saturating_sub(1));
+        let viewport_height = inner_height.saturating_sub(sticky_rows);
+        if viewport_height == 0 {
+            return;
+        }
 
         let total = self.rendered_diff.len().max(1);
         let (thumb_start, thumb_len) =
-            scrollbar_thumb(total, inner_height, self.diff_position.scroll);
+            scrollbar_thumb(total, viewport_height, self.diff_position.scroll);
 
         let x = rect.x.saturating_add(rect.width.saturating_sub(2));
-        let y = rect.y.saturating_add(1);
+        let y = rect.y.saturating_add(1 + sticky_rows as u16);
         let track_style = Style::default().fg(theme.dimmed);
         let thumb_style = Style::default()
             .fg(theme.muted)
             .add_modifier(Modifier::BOLD);
 
         let buffer = frame.buffer_mut();
-        for row in 0..inner_height {
+        for row in 0..viewport_height {
             buffer.set_string(x, y + row as u16, "│", track_style);
         }
         for row in thumb_start..thumb_start.saturating_add(thumb_len) {
-            if row < inner_height {
+            if row < viewport_height {
                 buffer.set_string(x, y + row as u16, "█", thumb_style);
             }
         }
@@ -2053,14 +2096,60 @@ impl App {
         self.status = "No next hunk".to_owned();
     }
 
+    fn sticky_commit_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
+        if scroll == 0 || self.rendered_diff.is_empty() {
+            return None;
+        }
+        let top = scroll.min(self.rendered_diff.len().saturating_sub(1));
+        for idx in (0..=top).rev() {
+            let is_commit_banner = self.rendered_diff[idx]
+                .anchor
+                .as_ref()
+                .is_some_and(is_commit_anchor);
+            if is_commit_banner {
+                return (idx < top).then_some(idx);
+            }
+        }
+        None
+    }
+
+    fn visible_diff_rows_for_scroll(&self, scroll: usize) -> usize {
+        let viewport_rows = self.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
+        if viewport_rows <= 1 {
+            return viewport_rows;
+        }
+        if self.sticky_commit_banner_index_for_scroll(scroll).is_some() {
+            viewport_rows - 1
+        } else {
+            viewport_rows
+        }
+    }
+
     fn visible_diff_rows(&self) -> usize {
-        self.pane_rects.diff.height.saturating_sub(2).max(1) as usize
+        self.visible_diff_rows_for_scroll(self.diff_position.scroll)
     }
 
     fn max_diff_scroll(&self) -> usize {
-        self.rendered_diff
-            .len()
-            .saturating_sub(self.visible_diff_rows().min(self.rendered_diff.len()))
+        let len = self.rendered_diff.len();
+        if len == 0 {
+            return 0;
+        }
+        let base_rows = self.visible_diff_rows_for_scroll(0).min(len);
+        let mut max_scroll = len.saturating_sub(base_rows);
+
+        let sticky_rows = self
+            .visible_diff_rows_for_scroll(len.saturating_sub(1))
+            .min(len);
+        let sticky_max_scroll = len.saturating_sub(sticky_rows);
+        if sticky_max_scroll > max_scroll
+            && self
+                .sticky_commit_banner_index_for_scroll(sticky_max_scroll)
+                .is_some()
+        {
+            max_scroll = sticky_max_scroll;
+        }
+
+        max_scroll
     }
 
     fn set_diff_scroll(&mut self, scroll: usize) {
@@ -2451,6 +2540,31 @@ fn list_index_at(mouse_y: u16, rect: ratatui::layout::Rect, offset: usize) -> Op
     }
     let row = mouse_y.saturating_sub(rect.y + 1) as usize;
     Some(offset + row)
+}
+
+fn diff_index_at(
+    mouse_y: u16,
+    rect: ratatui::layout::Rect,
+    scroll: usize,
+    sticky_banner_index: Option<usize>,
+) -> Option<usize> {
+    if rect.height < 3 {
+        return None;
+    }
+    if mouse_y <= rect.y || mouse_y >= rect.y + rect.height - 1 {
+        return None;
+    }
+
+    let row = mouse_y.saturating_sub(rect.y + 1) as usize;
+    if let Some(sticky_idx) = sticky_banner_index {
+        if row == 0 {
+            Some(sticky_idx)
+        } else {
+            Some(scroll + row - 1)
+        }
+    } else {
+        Some(scroll + row)
+    }
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
@@ -3068,6 +3182,22 @@ mod tests {
         assert_eq!(list_index_at(0, rect, 3), None);
         assert_eq!(list_index_at(5, rect, 3), None);
         assert_eq!(list_index_at(1, rect, 3), Some(3));
+    }
+
+    #[test]
+    fn diff_index_maps_sticky_row_to_banner_line() {
+        let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
+        assert_eq!(diff_index_at(1, rect, 20, Some(7)), Some(7));
+        assert_eq!(diff_index_at(2, rect, 20, Some(7)), Some(20));
+        assert_eq!(diff_index_at(3, rect, 20, Some(7)), Some(21));
+    }
+
+    #[test]
+    fn diff_index_matches_list_behavior_without_sticky_banner() {
+        let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
+        assert_eq!(diff_index_at(1, rect, 20, None), Some(20));
+        assert_eq!(diff_index_at(2, rect, 20, None), Some(21));
+        assert_eq!(diff_index_at(7, rect, 20, None), None);
     }
 
     #[test]
