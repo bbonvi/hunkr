@@ -132,16 +132,24 @@ fn special_file_icon(lower_name: &str) -> Option<&'static str> {
     if is_docker_compose_file_name(lower_name) {
         return Some("");
     }
+    if is_dockerfile_name(lower_name) {
+        return Some("");
+    }
 
     match lower_name {
         ".gitignore" | ".gitattributes" | ".gitmodules" => Some(""),
         ".dockerignore" => Some(""),
-        "dockerfile" => Some(""),
         "makefile" => Some(""),
         "readme" | "readme.md" | "readme.txt" => Some(""),
         "license" | "copying" => Some(""),
         _ => None,
     }
+}
+
+fn is_dockerfile_name(lower_name: &str) -> bool {
+    lower_name == "dockerfile"
+        || lower_name.starts_with("dockerfile.")
+        || lower_name.starts_with("dockerfile-")
 }
 
 fn is_docker_compose_file_name(lower_name: &str) -> bool {
@@ -274,6 +282,22 @@ mod tests {
             format_path_with_icon("docker-compose.override.yaml", true),
             " docker-compose.override.yaml"
         );
-        assert_eq!(format_path_with_icon("compose.yaml", true), " compose.yaml");
+        assert_eq!(
+            format_path_with_icon("compose.yaml", true),
+            " compose.yaml"
+        );
+    }
+
+    #[test]
+    fn dockerfile_variants_use_docker_icon() {
+        assert_eq!(format_path_with_icon("Dockerfile", true), " Dockerfile");
+        assert_eq!(
+            format_path_with_icon("Dockerfile.dev", true),
+            " Dockerfile.dev"
+        );
+        assert_eq!(
+            format_path_with_icon("Dockerfile-prod", true),
+            " Dockerfile-prod"
+        );
     }
 }
