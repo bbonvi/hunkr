@@ -945,30 +945,14 @@ impl App {
         let width = list_content_width(rect.width);
         let now_ts = Utc::now().timestamp();
         let cursor_idx = self.file_list_state.selected();
+        let presenter = ListLinePresenter::new(width, now_ts, theme);
 
         let items: Vec<ListItem<'static>> = self
             .file_rows
             .iter()
             .enumerate()
             .map(|(idx, row)| {
-                let line = if row.selectable {
-                    let right = row
-                        .modified_ts
-                        .map(|ts| format_relative_time(ts, now_ts))
-                        .unwrap_or_default();
-                    line_with_right(
-                        row.label.clone(),
-                        Style::default().fg(theme.text),
-                        right,
-                        Style::default().fg(theme.dimmed),
-                        width,
-                    )
-                } else {
-                    Line::from(Span::styled(
-                        row.label.clone(),
-                        Style::default().fg(theme.dir).add_modifier(Modifier::BOLD),
-                    ))
-                };
+                let line = presenter.file_row_line(row);
 
                 let is_cursor = cursor_idx == Some(idx);
                 ListItem::new(line).style(list_row_style(
@@ -1029,12 +1013,13 @@ impl App {
         let width = list_content_width(rect.width);
         let now_ts = Utc::now().timestamp();
         let cursor_idx = self.commit_list_state.selected();
+        let presenter = ListLinePresenter::new(width, now_ts, theme);
         let items: Vec<ListItem<'static>> = self
             .commits
             .iter()
             .enumerate()
             .map(|(idx, row)| {
-                let line = compose_commit_line(row, width, now_ts, theme);
+                let line = presenter.commit_row_line(row);
                 let is_cursor = cursor_idx == Some(idx);
                 ListItem::new(line).style(list_row_style(
                     row.selected,
@@ -2702,6 +2687,110 @@ fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
     }
 }
 
+/// Presenter for composing list pane rows with shared truncation and age columns.
+struct ListLinePresenter<'a> {
+    width: usize,
+    now_ts: i64,
+    theme: &'a UiTheme,
+}
+
+impl<'a> ListLinePresenter<'a> {
+    fn new(width: usize, now_ts: i64, theme: &'a UiTheme) -> Self {
+        Self {
+            width,
+            now_ts,
+            theme,
+        }
+    }
+
+    fn file_row_line(&self, row: &TreeRow) -> Line<'static> {
+        if row.selectable {
+            let right = row
+                .modified_ts
+                .map(|ts| format_relative_time(ts, self.now_ts))
+                .unwrap_or_default();
+            line_with_right(
+                row.label.clone(),
+                Style::default().fg(self.theme.text),
+                right,
+                Style::default().fg(self.theme.dimmed),
+                self.width,
+            )
+        } else {
+            Line::from(Span::styled(
+                row.label.clone(),
+                Style::default()
+                    .fg(self.theme.dir)
+                    .add_modifier(Modifier::BOLD),
+            ))
+        }
+    }
+
+    fn commit_row_line(&self, row: &CommitRow) -> Line<'static> {
+        if row.is_uncommitted {
+            let marker = if row.selected { "[x]" } else { "[ ]" };
+            let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
+            let badge = "[UNCOMMITTED]";
+            let right = "draft";
+            let reserved = 1 + badge.chars().count() + 1 + right.chars().count();
+            let max_left = self.width.saturating_sub(reserved).max(1);
+            let left_render = truncate(&left, max_left);
+            let static_used =
+                left_render.chars().count() + badge.chars().count() + right.chars().count() + 1;
+            let spaces = if static_used >= self.width {
+                " ".to_owned()
+            } else {
+                " ".repeat(self.width - static_used)
+            };
+
+            return Line::from(vec![
+                Span::styled(left_render, Style::default().fg(self.theme.text)),
+                Span::raw(" "),
+                Span::styled(
+                    badge,
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(spaces),
+                Span::styled(right, Style::default().fg(self.theme.dimmed)),
+            ]);
+        }
+
+        let marker = if row.selected { "[x]" } else { "[ ]" };
+        let left = format!("{} {} {}", marker, row.info.short_id, row.info.summary);
+        let status_label = format!("[{}]", status_short_label(row.status));
+        let unpushed = if row.info.unpushed { " [^]" } else { "" };
+        let right = format_relative_time(row.info.timestamp, self.now_ts);
+        let reserved =
+            1 + status_label.chars().count() + unpushed.chars().count() + 1 + right.chars().count();
+        let max_left = self.width.saturating_sub(reserved).max(1);
+        let left_render = truncate(&left, max_left);
+        let static_used = left_render.chars().count()
+            + status_label.chars().count()
+            + unpushed.chars().count()
+            + right.chars().count()
+            + 1;
+        let spaces = if static_used >= self.width {
+            " ".to_owned()
+        } else {
+            " ".repeat(self.width - static_used)
+        };
+
+        Line::from(vec![
+            Span::styled(left_render, Style::default().fg(self.theme.text)),
+            Span::raw(" "),
+            Span::styled(status_label, status_style(row.status, self.theme)),
+            Span::styled(
+                unpushed.to_owned(),
+                Style::default().fg(self.theme.unpushed),
+            ),
+            Span::raw(spaces),
+            Span::styled(right, Style::default().fg(self.theme.dimmed)),
+        ])
+    }
+}
+
 fn list_row_style(
     selected: bool,
     cursor: bool,
@@ -2728,72 +2817,6 @@ fn list_row_style(
         return Style::default().bg(selected_bg);
     }
     Style::default()
-}
-
-fn compose_commit_line(
-    row: &CommitRow,
-    width: usize,
-    now_ts: i64,
-    theme: &UiTheme,
-) -> Line<'static> {
-    if row.is_uncommitted {
-        let marker = if row.selected { "[x]" } else { "[ ]" };
-        let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
-        let badge = "[UNCOMMITTED]";
-        let right = "draft";
-        let reserved = 1 + badge.chars().count() + 1 + right.chars().count();
-        let max_left = width.saturating_sub(reserved).max(1);
-        let left_render = truncate(&left, max_left);
-        let static_used =
-            left_render.chars().count() + badge.chars().count() + right.chars().count() + 1;
-        let spaces = if static_used >= width {
-            " ".to_owned()
-        } else {
-            " ".repeat(width - static_used)
-        };
-
-        return Line::from(vec![
-            Span::styled(left_render, Style::default().fg(theme.text)),
-            Span::raw(" "),
-            Span::styled(
-                badge,
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(spaces),
-            Span::styled(right, Style::default().fg(theme.dimmed)),
-        ]);
-    }
-
-    let marker = if row.selected { "[x]" } else { "[ ]" };
-    let left = format!("{} {} {}", marker, row.info.short_id, row.info.summary);
-    let status_label = format!("[{}]", status_short_label(row.status));
-    let unpushed = if row.info.unpushed { " [^]" } else { "" };
-    let right = format_relative_time(row.info.timestamp, now_ts);
-    let reserved =
-        1 + status_label.chars().count() + unpushed.chars().count() + 1 + right.chars().count();
-    let max_left = width.saturating_sub(reserved).max(1);
-    let left_render = truncate(&left, max_left);
-    let static_used = left_render.chars().count()
-        + status_label.chars().count()
-        + unpushed.chars().count()
-        + right.chars().count()
-        + 1;
-    let spaces = if static_used >= width {
-        " ".to_owned()
-    } else {
-        " ".repeat(width - static_used)
-    };
-
-    Line::from(vec![
-        Span::styled(left_render, Style::default().fg(theme.text)),
-        Span::raw(" "),
-        Span::styled(status_label, status_style(row.status, theme)),
-        Span::styled(unpushed.to_owned(), Style::default().fg(theme.unpushed)),
-        Span::raw(spaces),
-        Span::styled(right, Style::default().fg(theme.dimmed)),
-    ])
 }
 
 fn centered_rect(
@@ -3508,7 +3531,8 @@ mod tests {
     fn compose_commit_line_preserves_age_column_on_narrow_width() {
         let row = commit_row("abc1234", false, ReviewStatus::IssueFound);
         let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let rendered = compose_commit_line(&row, 24, 3_600, &theme);
+        let presenter = ListLinePresenter::new(24, 3_600, &theme);
+        let rendered = presenter.commit_row_line(&row);
         let flattened = rendered
             .spans
             .iter()
@@ -3521,7 +3545,8 @@ mod tests {
     fn compose_commit_line_marks_selected_rows() {
         let row = commit_row("abc1234", true, ReviewStatus::Unreviewed);
         let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let rendered = compose_commit_line(&row, 80, 3_600, &theme);
+        let presenter = ListLinePresenter::new(80, 3_600, &theme);
+        let rendered = presenter.commit_row_line(&row);
         let flattened = rendered
             .spans
             .iter()
