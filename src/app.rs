@@ -212,6 +212,21 @@ enum DiffPendingOp {
     Z,
 }
 
+#[derive(Debug, Clone)]
+struct PendingDiffViewAnchor {
+    path: String,
+    cursor_line: DiffLineLocator,
+    top_line: DiffLineLocator,
+    cursor_to_top_offset: usize,
+}
+
+#[derive(Debug, Clone)]
+struct DiffLineLocator {
+    anchor: Option<CommentAnchor>,
+    raw_text: String,
+    raw_text_occurrence: usize,
+}
+
 /// High-level app state and interaction flow for the hunkr UI.
 pub struct App {
     git: GitService,
@@ -230,6 +245,7 @@ pub struct App {
     aggregate: AggregatedDiff,
     selected_file: Option<String>,
     diff_positions: HashMap<String, DiffPosition>,
+    pending_diff_view_anchor: Option<PendingDiffViewAnchor>,
     diff_position: DiffPosition,
     rendered_diff: Arc<Vec<RenderedDiffLine>>,
     rendered_diff_cache: HashMap<(String, ThemeMode), Arc<Vec<RenderedDiffLine>>>,
@@ -270,6 +286,7 @@ impl App {
             aggregate: AggregatedDiff::default(),
             selected_file: None,
             diff_positions: HashMap::new(),
+            pending_diff_view_anchor: None,
             diff_position: DiffPosition::default(),
             rendered_diff: Arc::new(Vec::new()),
             rendered_diff_cache: HashMap::new(),
@@ -1295,6 +1312,7 @@ impl App {
         }
         self.aggregate = aggregate;
         self.prune_diff_positions_for_removed_files();
+        self.capture_pending_diff_view_anchor();
 
         self.rendered_diff_cache.clear();
         self.rendered_diff_key = None;
@@ -1322,6 +1340,44 @@ impl App {
         }
     }
 
+    fn capture_pending_diff_view_anchor(&mut self) {
+        self.pending_diff_view_anchor = self.selected_file.as_ref().and_then(|path| {
+            capture_pending_diff_view_anchor(path, &self.rendered_diff, self.diff_position)
+        });
+    }
+
+    fn apply_pending_diff_view_anchor(&mut self, path: &str) {
+        let Some(pending) = self.pending_diff_view_anchor.take() else {
+            return;
+        };
+        if pending.path != path {
+            return;
+        }
+        if self.rendered_diff.is_empty() {
+            self.diff_position = DiffPosition::default();
+            return;
+        }
+
+        let cursor_idx = find_index_for_line_locator(&self.rendered_diff, &pending.cursor_line);
+        let top_idx = find_index_for_line_locator(&self.rendered_diff, &pending.top_line);
+
+        match (cursor_idx, top_idx) {
+            (Some(cursor), Some(top)) => {
+                self.diff_position.cursor = cursor;
+                self.diff_position.scroll = top;
+            }
+            (Some(cursor), None) => {
+                self.diff_position.cursor = cursor;
+                self.diff_position.scroll = cursor.saturating_sub(pending.cursor_to_top_offset);
+            }
+            (None, Some(top)) => {
+                self.diff_position.scroll = top;
+                self.diff_position.cursor = top.saturating_add(pending.cursor_to_top_offset);
+            }
+            (None, None) => {}
+        }
+    }
+
     fn ensure_rendered_diff(&mut self) {
         let Some(path) = self.selected_file.clone() else {
             self.rendered_diff = Arc::new(Vec::new());
@@ -1338,6 +1394,7 @@ impl App {
         if let Some(cached) = self.rendered_diff_cache.get(&key) {
             self.rendered_diff = cached.clone();
             self.rendered_diff_key = Some(key);
+            self.apply_pending_diff_view_anchor(&path);
             self.sync_diff_cursor_to_content_bounds();
             return;
         }
@@ -1353,6 +1410,7 @@ impl App {
             .insert(key.clone(), rendered.clone());
         self.rendered_diff = rendered;
         self.rendered_diff_key = Some(key);
+        self.apply_pending_diff_view_anchor(&path);
         self.sync_diff_cursor_to_content_bounds();
     }
 
@@ -2382,6 +2440,126 @@ fn raw_diff_text(line: &HunkLine) -> String {
     format!("{}{}", prefix, line.text)
 }
 
+fn capture_pending_diff_view_anchor(
+    path: &str,
+    lines: &[RenderedDiffLine],
+    diff_position: DiffPosition,
+) -> Option<PendingDiffViewAnchor> {
+    if lines.is_empty() {
+        return None;
+    }
+
+    let cursor_idx = diff_position.cursor.min(lines.len() - 1);
+    let top_idx = diff_position.scroll.min(lines.len() - 1);
+    let cursor_line = diff_line_locator_for_index(lines, cursor_idx);
+    let top_line = diff_line_locator_for_index(lines, top_idx);
+
+    Some(PendingDiffViewAnchor {
+        path: path.to_owned(),
+        cursor_line,
+        top_line,
+        cursor_to_top_offset: cursor_idx.saturating_sub(top_idx),
+    })
+}
+
+fn diff_line_locator_for_index(lines: &[RenderedDiffLine], idx: usize) -> DiffLineLocator {
+    let idx = idx.min(lines.len().saturating_sub(1));
+    let line = &lines[idx];
+    DiffLineLocator {
+        anchor: line.anchor.clone(),
+        raw_text: line.raw_text.clone(),
+        raw_text_occurrence: raw_text_occurrence_at_index(lines, idx, &line.raw_text),
+    }
+}
+
+fn find_index_for_line_locator(
+    lines: &[RenderedDiffLine],
+    locator: &DiffLineLocator,
+) -> Option<usize> {
+    if lines.is_empty() {
+        return None;
+    }
+
+    if let Some(expected_anchor) = &locator.anchor {
+        let anchor_matches = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                line.anchor.as_ref().and_then(|actual| {
+                    comment_anchor_matches(actual, expected_anchor).then_some(idx)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if anchor_matches.len() == 1 {
+            return anchor_matches.first().copied();
+        }
+        if !anchor_matches.is_empty() {
+            if let Some(idx) = find_index_for_raw_text_occurrence_in_candidates(
+                lines,
+                &anchor_matches,
+                &locator.raw_text,
+                locator.raw_text_occurrence,
+            ) {
+                return Some(idx);
+            }
+            return anchor_matches.last().copied();
+        }
+    }
+
+    find_index_for_raw_text_occurrence(lines, &locator.raw_text, locator.raw_text_occurrence)
+}
+
+fn raw_text_occurrence_at_index(lines: &[RenderedDiffLine], idx: usize, raw_text: &str) -> usize {
+    lines[..=idx]
+        .iter()
+        .filter(|line| line.raw_text == raw_text)
+        .count()
+        .saturating_sub(1)
+}
+
+fn find_index_for_raw_text_occurrence(
+    lines: &[RenderedDiffLine],
+    raw_text: &str,
+    occurrence: usize,
+) -> Option<usize> {
+    let mut seen = 0usize;
+    let mut last_match = None;
+    for (idx, line) in lines.iter().enumerate() {
+        if line.raw_text == raw_text {
+            if seen == occurrence {
+                return Some(idx);
+            }
+            seen = seen.saturating_add(1);
+            last_match = Some(idx);
+        }
+    }
+    last_match
+}
+
+fn find_index_for_raw_text_occurrence_in_candidates(
+    lines: &[RenderedDiffLine],
+    candidate_indexes: &[usize],
+    raw_text: &str,
+    occurrence: usize,
+) -> Option<usize> {
+    let mut seen = 0usize;
+    let mut last_match = None;
+    for idx in candidate_indexes {
+        let Some(line) = lines.get(*idx) else {
+            continue;
+        };
+        if line.raw_text == raw_text {
+            if seen == occurrence {
+                return Some(*idx);
+            }
+            seen = seen.saturating_add(1);
+            last_match = Some(*idx);
+        }
+    }
+    last_match
+}
+
 fn prune_diff_positions_for_missing_paths(
     diff_positions: &mut HashMap<String, DiffPosition>,
     existing_paths: &BTreeSet<String>,
@@ -2808,6 +2986,223 @@ mod tests {
         let pos = positions.get("src/lib.rs").expect("src/lib.rs");
         assert_eq!(pos.scroll, 42);
         assert_eq!(pos.cursor, 45);
+    }
+
+    #[test]
+    fn pending_anchor_resolves_cursor_and_top_after_insertions() {
+        let anchor = CommentAnchor {
+            commit_id: "abc123".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+        };
+        let old_lines = vec![
+            RenderedDiffLine {
+                line: Line::from("context-a"),
+                raw_text: "context-a".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("+target"),
+                raw_text: "+target".to_owned(),
+                anchor: Some(anchor.clone()),
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("context-b"),
+                raw_text: "context-b".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+        let pending = capture_pending_diff_view_anchor(
+            "src/lib.rs",
+            &old_lines,
+            DiffPosition {
+                scroll: 0,
+                cursor: 1,
+            },
+        )
+        .expect("pending");
+
+        let new_lines = vec![
+            RenderedDiffLine {
+                line: Line::from("inserted"),
+                raw_text: "inserted".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("context-a"),
+                raw_text: "context-a".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("+target"),
+                raw_text: "+target".to_owned(),
+                anchor: Some(anchor),
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("context-b"),
+                raw_text: "context-b".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+
+        let cursor_idx =
+            find_index_for_line_locator(&new_lines, &pending.cursor_line).expect("cursor");
+        let top_idx = find_index_for_line_locator(&new_lines, &pending.top_line).expect("top");
+        assert_eq!(cursor_idx, 2);
+        assert_eq!(top_idx, 1);
+    }
+
+    #[test]
+    fn line_locator_falls_back_to_raw_text_occurrence() {
+        let old_lines = vec![
+            RenderedDiffLine {
+                line: Line::from("repeat"),
+                raw_text: "repeat".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("repeat"),
+                raw_text: "repeat".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+        let locator = diff_line_locator_for_index(&old_lines, 1);
+
+        let new_lines = vec![
+            RenderedDiffLine {
+                line: Line::from("repeat"),
+                raw_text: "repeat".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("other"),
+                raw_text: "other".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("repeat"),
+                raw_text: "repeat".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+
+        let idx = find_index_for_line_locator(&new_lines, &locator).expect("match");
+        assert_eq!(idx, 2);
+    }
+
+    #[test]
+    fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
+        let anchor = CommentAnchor {
+            commit_id: "abc123".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/lib.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(1),
+            new_lineno: Some(1),
+        };
+        let old_lines = vec![
+            RenderedDiffLine {
+                line: Line::from("dup"),
+                raw_text: "dup".to_owned(),
+                anchor: Some(anchor.clone()),
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("dup"),
+                raw_text: "dup".to_owned(),
+                anchor: Some(anchor.clone()),
+                comment_id: None,
+            },
+        ];
+        let locator = diff_line_locator_for_index(&old_lines, 1);
+
+        let new_lines = vec![
+            RenderedDiffLine {
+                line: Line::from("dup"),
+                raw_text: "dup".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("dup"),
+                raw_text: "dup".to_owned(),
+                anchor: Some(anchor.clone()),
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("x"),
+                raw_text: "x".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("dup"),
+                raw_text: "dup".to_owned(),
+                anchor: Some(anchor),
+                comment_id: None,
+            },
+        ];
+
+        let idx = find_index_for_line_locator(&new_lines, &locator).expect("match");
+        assert_eq!(idx, 3);
+    }
+
+    #[test]
+    fn line_locator_handles_empty_raw_text_occurrence() {
+        let old_lines = vec![
+            RenderedDiffLine {
+                line: Line::from(""),
+                raw_text: String::new(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from(""),
+                raw_text: String::new(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+        let locator = diff_line_locator_for_index(&old_lines, 1);
+
+        let new_lines = vec![
+            RenderedDiffLine {
+                line: Line::from(""),
+                raw_text: String::new(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("x"),
+                raw_text: "x".to_owned(),
+                anchor: None,
+                comment_id: None,
+            },
+            RenderedDiffLine {
+                line: Line::from(""),
+                raw_text: String::new(),
+                anchor: None,
+                comment_id: None,
+            },
+        ];
+
+        let idx = find_index_for_line_locator(&new_lines, &locator).expect("match");
+        assert_eq!(idx, 2);
     }
 
     #[test]
