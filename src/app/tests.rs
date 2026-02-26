@@ -288,6 +288,18 @@ fn diff_index_matches_list_behavior_without_sticky_banner() {
 }
 
 #[test]
+fn diff_visual_from_drag_anchor_requires_anchor() {
+    assert!(diff_visual_from_drag_anchor(None, 14).is_none());
+}
+
+#[test]
+fn diff_visual_from_drag_anchor_only_activates_after_cursor_moves() {
+    assert!(diff_visual_from_drag_anchor(Some(14), 14).is_none());
+    let visual = diff_visual_from_drag_anchor(Some(14), 17).expect("visual range");
+    assert_eq!(visual.anchor, 14);
+}
+
+#[test]
 fn list_content_width_accounts_for_border_and_highlight_symbol() {
     assert_eq!(list_content_width(20, 3), 15);
     assert_eq!(list_content_width(4, 3), 1);

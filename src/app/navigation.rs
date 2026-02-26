@@ -448,20 +448,38 @@ impl App {
         }
     }
 
+    pub(super) fn clear_diff_visual_selection(&mut self) {
+        self.diff_visual = None;
+        self.diff_mouse_anchor = None;
+    }
+
+    pub(super) fn set_focus(&mut self, next: FocusPane) {
+        if self.focused == next {
+            return;
+        }
+
+        self.focused = next;
+        self.commit_visual_anchor = None;
+        self.clear_diff_visual_selection();
+        self.diff_pending_op = None;
+    }
+
     pub(super) fn focus_next(&mut self) {
-        self.focused = match self.focused {
+        let next = match self.focused {
             FocusPane::Commits => FocusPane::Files,
             FocusPane::Files => FocusPane::Diff,
             FocusPane::Diff => FocusPane::Commits,
-        }
+        };
+        self.set_focus(next);
     }
 
     pub(super) fn focus_prev(&mut self) {
-        self.focused = match self.focused {
+        let next = match self.focused {
             FocusPane::Commits => FocusPane::Diff,
             FocusPane::Files => FocusPane::Commits,
             FocusPane::Diff => FocusPane::Files,
-        }
+        };
+        self.set_focus(next);
     }
 
     pub(super) fn diff_selected_range(&self) -> Option<(usize, usize)> {

@@ -26,6 +26,7 @@ impl App {
             nerd_font_theme: NerdFontTheme::default(),
             commit_visual_anchor: None,
             diff_visual: None,
+            diff_mouse_anchor: None,
             aggregate: AggregatedDiff::default(),
             selected_file: None,
             diff_positions: HashMap::new(),
@@ -250,22 +251,22 @@ impl App {
             KeyCode::Tab if key.modifiers == KeyModifiers::NONE => self.focus_next(),
             KeyCode::BackTab if key.modifiers == KeyModifiers::NONE => self.focus_prev(),
             KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
-                self.focused = focus_with_l(self.focused)
+                self.set_focus(focus_with_l(self.focused))
             }
             KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
-                self.focused = focus_with_h(self.focused)
+                self.set_focus(focus_with_h(self.focused))
             }
-            KeyCode::Char('1') => self.focused = FocusPane::Commits,
-            KeyCode::Char('2') => self.focused = FocusPane::Files,
-            KeyCode::Char('3') => self.focused = FocusPane::Diff,
+            KeyCode::Char('1') => self.set_focus(FocusPane::Commits),
+            KeyCode::Char('2') => self.set_focus(FocusPane::Files),
+            KeyCode::Char('3') => self.set_focus(FocusPane::Diff),
             KeyCode::Char('f') if key.modifiers == KeyModifiers::NONE => {
-                self.focused = FocusPane::Files
+                self.set_focus(FocusPane::Files)
             }
             KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
-                self.focused = FocusPane::Commits
+                self.set_focus(FocusPane::Commits)
             }
             KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => {
-                self.focused = FocusPane::Diff
+                self.set_focus(FocusPane::Diff)
             }
             KeyCode::Char('t') => self.toggle_theme(),
             KeyCode::F(5) => self.refresh_now(),
@@ -524,6 +525,7 @@ impl App {
 
     fn cancel_comment_input(&mut self) {
         self.input_mode = InputMode::Normal;
+        self.clear_diff_visual_selection();
         self.comment_buffer.clear();
         self.comment_cursor = 0;
         self.comment_selection = None;
@@ -613,6 +615,7 @@ impl App {
 
         if close_editor {
             self.input_mode = InputMode::Normal;
+            self.clear_diff_visual_selection();
             self.comment_buffer.clear();
             self.comment_cursor = 0;
             self.comment_selection = None;
@@ -756,7 +759,7 @@ impl App {
             KeyCode::PageUp => self.page_files(-1.0),
             KeyCode::Char('g') => self.select_first_file(),
             KeyCode::Char('G') => self.select_last_file(),
-            KeyCode::Enter | KeyCode::Char(' ') => self.focused = FocusPane::Diff,
+            KeyCode::Enter | KeyCode::Char(' ') => self.set_focus(FocusPane::Diff),
             _ => {}
         }
     }
@@ -850,7 +853,7 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.move_diff_cursor(-1),
             KeyCode::Esc => {
                 if self.diff_visual.is_some() {
-                    self.diff_visual = None;
+                    self.clear_diff_visual_selection();
                     self.status = "Diff visual range off".to_owned();
                 }
             }
@@ -894,9 +897,10 @@ impl App {
                     return;
                 }
                 if self.diff_visual.is_some() {
-                    self.diff_visual = None;
+                    self.clear_diff_visual_selection();
                     self.status = "Diff visual range off".to_owned();
                 } else {
+                    self.diff_mouse_anchor = None;
                     self.diff_visual = Some(DiffVisualSelection {
                         anchor: self.diff_position.cursor,
                     });
@@ -948,6 +952,17 @@ impl App {
         let in_files = contains(self.pane_rects.files, x, y);
         let in_commits = contains(self.pane_rects.commits, x, y);
         let in_diff = contains(self.pane_rects.diff, x, y);
+        let resolve_diff_row = |app: &Self, mouse_y: u16| -> Option<usize> {
+            let viewport_rows = app.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
+            let sticky_banner_indexes =
+                app.sticky_banner_indexes_for_scroll(app.diff_position.scroll, viewport_rows);
+            diff_index_at(
+                mouse_y,
+                app.pane_rects.diff,
+                app.diff_position.scroll,
+                &sticky_banner_indexes,
+            )
+        };
 
         match mouse.kind {
             MouseEventKind::ScrollDown => {
@@ -970,34 +985,53 @@ impl App {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if in_files {
-                    self.focused = FocusPane::Files;
+                    self.set_focus(FocusPane::Files);
+                    self.diff_mouse_anchor = None;
                     if let Some(idx) =
                         list_index_at(y, self.pane_rects.files, self.file_list_state.offset())
                     {
                         self.select_file_row(idx);
                     }
                 } else if in_commits {
-                    self.focused = FocusPane::Commits;
+                    self.set_focus(FocusPane::Commits);
+                    self.diff_mouse_anchor = None;
                     if let Some(idx) =
                         list_index_at(y, self.pane_rects.commits, self.commit_list_state.offset())
                     {
                         self.select_commit_row(idx, true);
                     }
                 } else if in_diff {
-                    self.focused = FocusPane::Diff;
-                    let viewport_rows =
-                        self.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
-                    let sticky_banner_indexes = self
-                        .sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
-                    if let Some(row) = diff_index_at(
-                        y,
-                        self.pane_rects.diff,
-                        self.diff_position.scroll,
-                        &sticky_banner_indexes,
-                    ) {
+                    self.set_focus(FocusPane::Diff);
+                    self.diff_visual = None;
+                    if let Some(row) = resolve_diff_row(self, y) {
                         self.set_diff_cursor(row);
+                        self.diff_mouse_anchor = Some(self.diff_position.cursor);
+                    } else {
+                        self.diff_mouse_anchor = None;
                     }
+                } else {
+                    self.diff_mouse_anchor = None;
                 }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if in_diff => {
+                if let Some(row) = resolve_diff_row(self, y) {
+                    self.set_diff_cursor(row);
+                    self.diff_visual = diff_visual_from_drag_anchor(
+                        self.diff_mouse_anchor,
+                        self.diff_position.cursor,
+                    );
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if in_diff => {
+                if let Some(row) = resolve_diff_row(self, y) {
+                    self.set_diff_cursor(row);
+                }
+                self.diff_visual =
+                    diff_visual_from_drag_anchor(self.diff_mouse_anchor, self.diff_position.cursor);
+                self.diff_mouse_anchor = None;
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.diff_mouse_anchor = None;
             }
             _ => {}
         }

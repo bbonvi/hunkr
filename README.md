@@ -96,6 +96,7 @@ Diff pane:
 - `Ctrl-d` / `Ctrl-u`: half-page scroll
 - `PageDown` / `PageUp`: page scroll
 - `v` / `V`: visual line-range selection (toggle off with `v` / `V` or `Esc`)
+- mouse left-drag: visual line-range selection
 - `zz` / `zt` / `zb`: center/top/bottom cursor in viewport
 - `[` / `]`: jump to previous/next hunk
 - `/`: start diff search (`Enter` run, `Esc` cancel)
@@ -103,6 +104,7 @@ Diff pane:
 - `m`: add comment for current commit/hunk anchor or selected visual range
 - `e`: edit comment under cursor
 - `D`: delete comment under cursor
+- switching panes clears active visual selections
 
 Comment mode:
 

@@ -263,6 +263,7 @@ pub struct App {
     nerd_font_theme: NerdFontTheme,
     commit_visual_anchor: Option<usize>,
     diff_visual: Option<DiffVisualSelection>,
+    diff_mouse_anchor: Option<usize>,
     aggregate: AggregatedDiff,
     selected_file: Option<String>,
     diff_positions: HashMap<String, DiffPosition>,
@@ -479,6 +480,14 @@ fn diff_index_at(
     } else {
         Some(scroll + row.saturating_sub(sticky_banner_indexes.len()))
     }
+}
+
+fn diff_visual_from_drag_anchor(
+    anchor: Option<usize>,
+    cursor: usize,
+) -> Option<DiffVisualSelection> {
+    let anchor = anchor?;
+    (anchor != cursor).then_some(DiffVisualSelection { anchor })
 }
 
 fn compose_sticky_banner_indexes(
