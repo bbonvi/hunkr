@@ -1213,7 +1213,7 @@ impl App {
             key_chip("Tab", theme),
             Span::styled(" cycle all ", Style::default().fg(theme.dimmed)),
             key_chip("h/l", theme),
-            Span::styled(" files<->diff ", Style::default().fg(theme.dimmed)),
+            Span::styled(" prev/next pane ", Style::default().fg(theme.dimmed)),
             key_chip("t", theme),
             Span::styled(" theme ", Style::default().fg(theme.dimmed)),
             key_chip("?", theme),
@@ -1288,7 +1288,7 @@ impl App {
             ]),
             Line::from(vec![
                 key_chip("h/l", theme),
-                Span::raw(" switch files <-> diff"),
+                Span::raw(" cycle panes prev/next"),
             ]),
             Line::from(vec![key_chip("space", theme), Span::raw(" select commits")]),
             Line::from(vec![
@@ -2952,17 +2952,17 @@ fn page_step(height: u16, multiplier: f32) -> isize {
 
 fn focus_with_h(current: FocusPane) -> FocusPane {
     match current {
-        FocusPane::Files => FocusPane::Files,
+        FocusPane::Files => FocusPane::Diff,
         FocusPane::Commits => FocusPane::Files,
-        FocusPane::Diff => FocusPane::Files,
+        FocusPane::Diff => FocusPane::Commits,
     }
 }
 
 fn focus_with_l(current: FocusPane) -> FocusPane {
     match current {
-        FocusPane::Files => FocusPane::Diff,
+        FocusPane::Files => FocusPane::Commits,
         FocusPane::Commits => FocusPane::Diff,
-        FocusPane::Diff => FocusPane::Diff,
+        FocusPane::Diff => FocusPane::Files,
     }
 }
 
@@ -3284,11 +3284,13 @@ mod tests {
     }
 
     #[test]
-    fn h_and_l_only_target_files_and_diff() {
-        assert_eq!(focus_with_h(FocusPane::Diff), FocusPane::Files);
+    fn h_and_l_cycle_all_panes() {
+        assert_eq!(focus_with_h(FocusPane::Files), FocusPane::Diff);
         assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Files);
-        assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Diff);
+        assert_eq!(focus_with_h(FocusPane::Diff), FocusPane::Commits);
+        assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Commits);
         assert_eq!(focus_with_l(FocusPane::Commits), FocusPane::Diff);
+        assert_eq!(focus_with_l(FocusPane::Diff), FocusPane::Files);
     }
 
     #[test]
