@@ -21,6 +21,9 @@ use syntect::{
 
 mod ui;
 
+use self::ui::diff_pane::{DiffPaneRenderer, find_diff_match_from_cursor, is_hunk_header_line};
+#[cfg(test)]
+use self::ui::diff_pane::{scrollbar_thumb, tint_line_background};
 #[cfg(test)]
 use self::ui::list_panes::ListLinePresenter;
 use self::ui::list_panes::ListPaneRenderer;
@@ -955,151 +958,22 @@ impl App {
     }
 
     fn render_diff(&mut self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
-        let border_style = if self.focused == FocusPane::Diff {
-            Style::default().fg(theme.focus_border)
-        } else {
-            Style::default().fg(theme.border)
-        };
-
-        let file_label = self
-            .selected_file
-            .clone()
-            .unwrap_or_else(|| "(no file selected)".to_owned());
-        let selected = self
+        let selected_lines = self
             .diff_selected_range()
             .map(|(start, end)| end.saturating_sub(start) + 1)
             .unwrap_or(0);
-        let title = Line::from(vec![
-            Span::styled(
-                " 3 DIFF ",
-                Style::default()
-                    .fg(theme.panel_title_fg)
-                    .bg(theme.panel_title_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(file_label, Style::default().fg(theme.text)),
-            Span::raw(" "),
-            Span::styled(
-                format!("{} line(s) selected", selected),
-                Style::default().fg(theme.muted),
-            ),
-        ]);
-
-        let visual_range = self.diff_selected_range();
-        let mut lines = Vec::with_capacity(self.rendered_diff.len());
-        for (idx, rendered) in self.rendered_diff.iter().enumerate() {
-            let mut line = rendered.line.clone();
-
-            if let Some((start, end)) = visual_range
-                && idx >= start
-                && idx <= end
-            {
-                line = tint_line_background(&line, theme.visual_bg, false);
-            }
-
-            if idx == self.diff_position.cursor && self.focused == FocusPane::Diff {
-                line = tint_line_background(&line, theme.cursor_bg, true);
-            }
-            lines.push(line);
-        }
-
-        if lines.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "No selected commits or no textual diff for this file",
-                Style::default().fg(theme.muted),
-            )));
-        }
-
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(border_style);
-        let inner = block.inner(rect);
-        frame.render_widget(block, rect);
-        if inner.height == 0 || inner.width == 0 {
-            return;
-        }
-
         let sticky_commit_idx =
             self.sticky_commit_banner_index_for_scroll(self.diff_position.scroll);
-        let sticky_rows = usize::from(sticky_commit_idx.is_some() && inner.height > 1);
-
-        if sticky_rows == 1 {
-            let sticky_idx = sticky_commit_idx.expect("sticky row requires banner index");
-            let sticky_line = lines
-                .get(sticky_idx)
-                .cloned()
-                .unwrap_or_else(|| Line::from(""));
-            frame.render_widget(
-                Paragraph::new(vec![sticky_line]),
-                ratatui::layout::Rect {
-                    x: inner.x,
-                    y: inner.y,
-                    width: inner.width,
-                    height: 1,
-                },
-            );
-        }
-
-        let body_height = inner.height.saturating_sub(sticky_rows as u16);
-        if body_height > 0 {
-            frame.render_widget(
-                Paragraph::new(lines).scroll((self.diff_position.scroll as u16, 0)),
-                ratatui::layout::Rect {
-                    x: inner.x,
-                    y: inner.y + sticky_rows as u16,
-                    width: inner.width,
-                    height: body_height,
-                },
-            );
-        }
-
-        self.render_diff_scrollbar(frame, rect, theme, sticky_rows);
-    }
-
-    fn render_diff_scrollbar(
-        &self,
-        frame: &mut Frame<'_>,
-        rect: ratatui::layout::Rect,
-        theme: &UiTheme,
-        sticky_rows: usize,
-    ) {
-        if rect.width < 3 || rect.height < 3 {
-            return;
-        }
-
-        let inner_height = rect.height.saturating_sub(2) as usize;
-        if inner_height == 0 {
-            return;
-        }
-        let sticky_rows = sticky_rows.min(inner_height.saturating_sub(1));
-        let viewport_height = inner_height.saturating_sub(sticky_rows);
-        if viewport_height == 0 {
-            return;
-        }
-
-        let total = self.rendered_diff.len().max(1);
-        let (thumb_start, thumb_len) =
-            scrollbar_thumb(total, viewport_height, self.diff_position.scroll);
-
-        let x = rect.x.saturating_add(rect.width.saturating_sub(2));
-        let y = rect.y.saturating_add(1 + sticky_rows as u16);
-        let track_style = Style::default().fg(theme.dimmed);
-        let thumb_style = Style::default()
-            .fg(theme.muted)
-            .add_modifier(Modifier::BOLD);
-
-        let buffer = frame.buffer_mut();
-        for row in 0..viewport_height {
-            buffer.set_string(x, y + row as u16, "│", track_style);
-        }
-        for row in thumb_start..thumb_start.saturating_add(thumb_len) {
-            if row < viewport_height {
-                buffer.set_string(x, y + row as u16, "█", thumb_style);
-            }
-        }
+        DiffPaneRenderer::new(theme, self.focused).render(
+            frame,
+            rect,
+            self.selected_file.as_deref(),
+            selected_lines,
+            &self.rendered_diff,
+            self.diff_position,
+            self.diff_selected_range(),
+            sticky_commit_idx,
+        );
     }
 
     fn render_footer(&self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
@@ -2373,22 +2247,6 @@ fn syntect_to_ratatui(style: syntect::highlighting::Style) -> Style {
     ))
 }
 
-fn tint_line_background(line: &Line<'static>, tint: Color, blend_existing: bool) -> Line<'static> {
-    let mut patched = line.clone();
-    for span in &mut patched.spans {
-        let bg = if blend_existing {
-            span.style
-                .bg
-                .map(|existing| blend_colors(existing, tint, 170))
-                .unwrap_or(tint)
-        } else {
-            tint
-        };
-        span.style = span.style.patch(Style::default().bg(bg));
-    }
-    patched
-}
-
 fn blend_colors(base: Color, overlay: Color, overlay_weight: u8) -> Color {
     match (base, overlay) {
         (Color::Rgb(br, bg, bb), Color::Rgb(or, og, ob)) => {
@@ -2401,55 +2259,6 @@ fn blend_colors(base: Color, overlay: Color, overlay_weight: u8) -> Color {
         }
         (_, over) => over,
     }
-}
-
-fn is_hunk_header_line(line: &RenderedDiffLine) -> bool {
-    line.raw_text.starts_with("@@ ")
-        && line
-            .anchor
-            .as_ref()
-            .is_some_and(|anchor| !is_commit_anchor(anchor))
-}
-
-fn find_diff_match_from_cursor(
-    lines: &[RenderedDiffLine],
-    query: &str,
-    forward: bool,
-    cursor: usize,
-) -> Option<usize> {
-    if lines.is_empty() {
-        return None;
-    }
-    let query = query.to_ascii_lowercase();
-    if query.is_empty() {
-        return None;
-    }
-
-    let current = cursor.min(lines.len().saturating_sub(1));
-    if forward {
-        for idx in current.saturating_add(1)..lines.len() {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
-        for idx in 0..=current {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
-    } else {
-        for idx in (0..current).rev() {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
-        for idx in (current..lines.len()).rev() {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
-    }
-    None
 }
 
 fn contains(rect: ratatui::layout::Rect, x: u16, y: u16) -> bool {
@@ -2505,26 +2314,6 @@ fn truncate(text: &str, max_chars: usize) -> String {
         .collect::<String>();
     out.push('…');
     out
-}
-
-fn scrollbar_thumb(total: usize, viewport: usize, scroll: usize) -> (usize, usize) {
-    if viewport == 0 {
-        return (0, 0);
-    }
-    if total <= viewport {
-        return (0, viewport);
-    }
-
-    let max_scroll = total - viewport;
-    let clamped_scroll = scroll.min(max_scroll);
-    let thumb_len = ((viewport * viewport) / total).clamp(1, viewport);
-    let track_len = viewport - thumb_len;
-    let thumb_start = if max_scroll == 0 {
-        0
-    } else {
-        (clamped_scroll * track_len) / max_scroll
-    };
-    (thumb_start, thumb_len)
 }
 
 fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {
