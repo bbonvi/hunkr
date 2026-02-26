@@ -1047,6 +1047,30 @@ fn commit_status_filter_cycles_in_expected_order() {
 }
 
 #[test]
+fn commit_mouse_selection_mode_matches_modifier_intent() {
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::NONE),
+        CommitMouseSelectionMode::Replace
+    );
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::CONTROL),
+        CommitMouseSelectionMode::Toggle
+    );
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::SUPER),
+        CommitMouseSelectionMode::Toggle
+    );
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::SHIFT),
+        CommitMouseSelectionMode::Range
+    );
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::SHIFT | KeyModifiers::CONTROL),
+        CommitMouseSelectionMode::Range
+    );
+}
+
+#[test]
 fn commit_status_filter_groups_rows_correctly() {
     let unreviewed = commit_row("a", false, ReviewStatus::Unreviewed);
     let issue = commit_row("b", false, ReviewStatus::IssueFound);

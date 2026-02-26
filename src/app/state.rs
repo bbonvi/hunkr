@@ -598,6 +598,12 @@ impl App {
         {
             self.commit_visual_anchor = None;
         }
+        if self
+            .commit_selection_anchor
+            .is_some_and(|anchor| !visible.contains(&anchor))
+        {
+            self.commit_selection_anchor = None;
+        }
     }
 
     pub(super) fn sync_file_cursor_for_filters(&mut self) {

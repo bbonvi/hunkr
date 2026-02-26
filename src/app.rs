@@ -301,6 +301,13 @@ enum DiffPendingOp {
     Z,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommitMouseSelectionMode {
+    Replace,
+    Toggle,
+    Range,
+}
+
 /// High-level app state and interaction flow for the hunkr UI.
 pub struct App {
     git: GitService,
@@ -319,6 +326,7 @@ pub struct App {
     nerd_fonts: bool,
     nerd_font_theme: NerdFontTheme,
     commit_visual_anchor: Option<usize>,
+    commit_selection_anchor: Option<usize>,
     commit_mouse_anchor: Option<usize>,
     commit_mouse_dragging: bool,
     last_list_wheel_event: Option<(FocusPane, isize, Instant)>,
@@ -597,6 +605,16 @@ fn diff_visual_from_drag_anchor(
 
 fn should_clear_diff_visual_on_wheel(visual: Option<DiffVisualSelection>) -> bool {
     visual.is_some_and(|selection| selection.origin == DiffVisualOrigin::Keyboard)
+}
+
+fn commit_mouse_selection_mode(modifiers: KeyModifiers) -> CommitMouseSelectionMode {
+    if modifiers.contains(KeyModifiers::SHIFT) {
+        return CommitMouseSelectionMode::Range;
+    }
+    if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) {
+        return CommitMouseSelectionMode::Toggle;
+    }
+    CommitMouseSelectionMode::Replace
 }
 
 fn compose_sticky_banner_indexes(

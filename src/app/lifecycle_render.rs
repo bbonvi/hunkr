@@ -26,6 +26,7 @@ impl App {
             nerd_fonts: config.nerd_fonts,
             nerd_font_theme: NerdFontTheme::default(),
             commit_visual_anchor: None,
+            commit_selection_anchor: None,
             commit_mouse_anchor: None,
             commit_mouse_dragging: false,
             last_list_wheel_event: None,
@@ -921,6 +922,7 @@ impl App {
                     row.selected = false;
                 }
                 self.commit_visual_anchor = None;
+                self.commit_selection_anchor = None;
                 self.on_selection_changed();
             }
             KeyCode::Char(' ') => {
@@ -928,6 +930,7 @@ impl App {
                     && let Some(row) = self.commits.get_mut(idx)
                 {
                     row.selected = !row.selected;
+                    self.commit_selection_anchor = Some(idx);
                 }
                 self.commit_visual_anchor = None;
                 self.on_selection_changed();
@@ -936,6 +939,7 @@ impl App {
                 if let Some(idx) = self.selected_commit_full_index() {
                     select_only_index(&mut self.commits, idx);
                     self.commit_visual_anchor = None;
+                    self.commit_selection_anchor = Some(idx);
                     self.on_selection_changed();
                 }
             }
@@ -1144,11 +1148,16 @@ impl App {
                     self.set_focus(FocusPane::Commits);
                     self.diff_mouse_anchor = None;
                     self.commit_visual_anchor = None;
-                    if let Some(idx) = resolve_commit_visible_idx(self, y)
-                        && let Some(full_idx) = self.visible_commit_indices().get(idx).copied()
-                    {
-                        self.commit_mouse_anchor = Some(full_idx);
-                        self.select_commit_row(idx, true);
+                    if let Some(idx) = resolve_commit_visible_idx(self, y) {
+                        let clicked_full_idx =
+                            self.select_commit_row_with_mouse(idx, mouse.modifiers);
+                        if commit_mouse_selection_mode(mouse.modifiers)
+                            == CommitMouseSelectionMode::Replace
+                        {
+                            self.commit_mouse_anchor = clicked_full_idx;
+                        } else {
+                            self.commit_mouse_anchor = None;
+                        }
                     }
                 } else if in_diff {
                     self.set_focus(FocusPane::Diff);

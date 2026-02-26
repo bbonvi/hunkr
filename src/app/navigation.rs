@@ -150,16 +150,44 @@ impl App {
         }
     }
 
-    pub(super) fn select_commit_row(&mut self, visible_idx: usize, toggle: bool) {
+    pub(super) fn select_commit_row_with_mouse(
+        &mut self,
+        visible_idx: usize,
+        modifiers: KeyModifiers,
+    ) -> Option<usize> {
         let visible = self.visible_commit_indices();
-        let Some(full_idx) = visible.get(visible_idx).copied() else {
-            return;
-        };
+        let full_idx = visible.get(visible_idx).copied()?;
+
+        let prior_cursor_full_idx = self
+            .commit_list_state
+            .selected()
+            .and_then(|idx| visible.get(idx).copied());
         self.commit_list_state.select(Some(visible_idx));
-        if toggle && let Some(row) = self.commits.get_mut(full_idx) {
-            row.selected = !row.selected;
-            self.on_selection_changed();
+
+        match commit_mouse_selection_mode(modifiers) {
+            CommitMouseSelectionMode::Replace => {
+                select_only_index(&mut self.commits, full_idx);
+                self.commit_selection_anchor = Some(full_idx);
+            }
+            CommitMouseSelectionMode::Toggle => {
+                if let Some(row) = self.commits.get_mut(full_idx) {
+                    row.selected = !row.selected;
+                }
+                self.commit_selection_anchor = Some(full_idx);
+            }
+            CommitMouseSelectionMode::Range => {
+                let anchor = self
+                    .commit_selection_anchor
+                    .filter(|anchor| visible.contains(anchor))
+                    .or(prior_cursor_full_idx.filter(|cursor| visible.contains(cursor)))
+                    .unwrap_or(full_idx);
+                apply_range_selection(&mut self.commits, anchor, full_idx);
+                self.commit_selection_anchor = Some(anchor);
+            }
         }
+
+        self.on_selection_changed();
+        Some(full_idx)
     }
 
     pub(super) fn apply_commit_visual_range(&mut self) {
