@@ -35,7 +35,7 @@ use self::ui::diff_pane::{
     capture_pending_diff_view_anchor, find_diff_match_from_cursor, find_index_for_line_locator,
     is_hunk_header_line,
 };
-use self::ui::list_panes::ListPaneRenderer;
+use self::ui::list_panes::{CommitPaneModel, FilePaneModel, ListPaneRenderer};
 
 use crate::{
     comments::CommentStore,
@@ -67,6 +67,7 @@ enum InputMode {
     CommentCreate,
     CommentEdit(u64),
     DiffSearch,
+    ListSearch(FocusPane),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -94,6 +95,45 @@ impl ThemeMode {
         match self {
             Self::Dark => "dark",
             Self::Light => "light",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommitStatusFilter {
+    All,
+    UnreviewedOrIssueFound,
+    ReviewedOrResolved,
+}
+
+impl CommitStatusFilter {
+    fn next(self) -> Self {
+        match self {
+            Self::All => Self::UnreviewedOrIssueFound,
+            Self::UnreviewedOrIssueFound => Self::ReviewedOrResolved,
+            Self::ReviewedOrResolved => Self::All,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::UnreviewedOrIssueFound => "unreviewed|issue_found",
+            Self::ReviewedOrResolved => "reviewed|resolved",
+        }
+    }
+
+    fn matches_row(self, row: &CommitRow) -> bool {
+        match self {
+            Self::All => true,
+            Self::UnreviewedOrIssueFound => {
+                row.is_uncommitted
+                    || matches!(row.status, ReviewStatus::Unreviewed | ReviewStatus::IssueFound)
+            }
+            Self::ReviewedOrResolved => {
+                !row.is_uncommitted
+                    && matches!(row.status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
+            }
         }
     }
 }
@@ -287,6 +327,9 @@ pub struct App {
     comment_editor_text_offset: u16,
     diff_search_buffer: String,
     diff_search_query: Option<String>,
+    commit_search_query: String,
+    file_search_query: String,
+    commit_status_filter: CommitStatusFilter,
     diff_pending_op: Option<DiffPendingOp>,
     show_help: bool,
     last_refresh: Instant,
@@ -540,6 +583,19 @@ fn truncate(text: &str, max_chars: usize) -> String {
 
 fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
+}
+
+fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
+    haystack.to_lowercase().contains(&needle.to_lowercase())
+}
+
+fn commit_row_matches_query(row: &CommitRow, query: &str) -> bool {
+    let status = status_short_label(row.status);
+    contains_case_insensitive(&row.info.short_id, query)
+        || contains_case_insensitive(&row.info.id, query)
+        || contains_case_insensitive(&row.info.summary, query)
+        || contains_case_insensitive(&row.info.author, query)
+        || contains_case_insensitive(status, query)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1175,6 +1231,7 @@ fn index_of_commit(rows: &[CommitRow], commit_id: &str) -> Option<usize> {
     rows.iter().position(|row| row.info.id == commit_id)
 }
 
+#[cfg(test)]
 fn restore_list_index_by_commit_id(
     rows: &[CommitRow],
     previous_commit_id: Option<&str>,

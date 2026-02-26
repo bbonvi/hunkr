@@ -24,6 +24,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Review statuses: `UNREVIEWED`, `REVIEWED`, `ISSUE_FOUND`, `RESOLVED`
 - Leaving a comment automatically marks referenced commit(s) as `ISSUE_FOUND`
 - Commit status can be changed from any status to any status
+- Commit list supports status filtering cycle: `all` -> `unreviewed|issue_found` -> `reviewed|resolved`
 - Commits moved to `REVIEWED` or `RESOLVED` are auto-deselected; their comments are hidden from the review-task markdown file
 - Unreviewed/issue/resolved/reviewed are explicitly badged in commit list
 - File-switch memory: each file remembers last diff cursor/scroll position
@@ -88,8 +89,14 @@ Commit pane:
 - `space`: toggle commit selection
 - `v`: visual range selection (moves select an inclusive range)
 - `x`: clear selection
+- `e`: cycle commit status filter (`all` -> `unreviewed|issue_found` -> `reviewed|resolved`)
+- `/`: live commit filter as you type (`Esc` clears, `Enter` defocuses search input)
 - `u` / `r` / `i` / `s`: set current commit to `UNREVIEWED` / `REVIEWED` / `ISSUE_FOUND` / `RESOLVED`
 - `U` / `R` / `I` / `S`: set all selected commits to target status
+
+Files pane:
+
+- `/`: live file-tree filter as you type (`Esc` clears, `Enter` defocuses search input)
 
 Diff pane:
 

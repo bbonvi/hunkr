@@ -905,6 +905,53 @@ fn status_badges_use_exact_workflow_labels() {
 }
 
 #[test]
+fn commit_status_filter_cycles_in_expected_order() {
+    assert_eq!(
+        CommitStatusFilter::All.next(),
+        CommitStatusFilter::UnreviewedOrIssueFound
+    );
+    assert_eq!(
+        CommitStatusFilter::UnreviewedOrIssueFound.next(),
+        CommitStatusFilter::ReviewedOrResolved
+    );
+    assert_eq!(
+        CommitStatusFilter::ReviewedOrResolved.next(),
+        CommitStatusFilter::All
+    );
+}
+
+#[test]
+fn commit_status_filter_groups_rows_correctly() {
+    let unreviewed = commit_row("a", false, ReviewStatus::Unreviewed);
+    let issue = commit_row("b", false, ReviewStatus::IssueFound);
+    let reviewed = commit_row("c", false, ReviewStatus::Reviewed);
+    let resolved = commit_row("d", false, ReviewStatus::Resolved);
+    let mut draft = commit_row("wip", false, ReviewStatus::Unreviewed);
+    draft.is_uncommitted = true;
+
+    assert!(CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&unreviewed));
+    assert!(CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&issue));
+    assert!(CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&draft));
+    assert!(!CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&reviewed));
+    assert!(!CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&resolved));
+
+    assert!(CommitStatusFilter::ReviewedOrResolved.matches_row(&reviewed));
+    assert!(CommitStatusFilter::ReviewedOrResolved.matches_row(&resolved));
+    assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&unreviewed));
+    assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&issue));
+    assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&draft));
+}
+
+#[test]
+fn commit_search_matches_text_and_status_case_insensitively() {
+    let row = commit_row("abc1234", false, ReviewStatus::IssueFound);
+    assert!(commit_row_matches_query(&row, "ABC"));
+    assert!(commit_row_matches_query(&row, "issue_found"));
+    assert!(commit_row_matches_query(&row, "SUMMARY-abc1234"));
+    assert!(!commit_row_matches_query(&row, "missing-value"));
+}
+
+#[test]
 fn relative_time_formats_expected_units() {
     assert_eq!(format_relative_time(100, 130), "30s ago");
     assert_eq!(format_relative_time(100, 220), "2m ago");

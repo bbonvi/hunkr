@@ -50,6 +50,9 @@ impl App {
             comment_editor_text_offset: 0,
             diff_search_buffer: String::new(),
             diff_search_query: None,
+            commit_search_query: String::new(),
+            file_search_query: String::new(),
+            commit_status_filter: CommitStatusFilter::All,
             diff_pending_op: None,
             show_help: false,
             last_refresh: Instant::now(),
@@ -302,6 +305,7 @@ impl App {
         match self.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => self.handle_comment_input(key),
             InputMode::DiffSearch => self.handle_diff_search_input(key),
+            InputMode::ListSearch(pane) => self.handle_list_search_input(pane, key),
             InputMode::Normal => {}
         }
     }
@@ -610,7 +614,7 @@ impl App {
                     }
                 }
             }
-            InputMode::DiffSearch | InputMode::Normal => {}
+            InputMode::DiffSearch | InputMode::ListSearch(_) | InputMode::Normal => {}
         }
 
         if close_editor {
@@ -654,6 +658,102 @@ impl App {
                 }
                 self.diff_search_buffer.push(c);
                 self.status = format!("/{}", self.diff_search_buffer);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_list_search_input(&mut self, pane: FocusPane, key: KeyEvent) {
+        let preferred_commit_id = (pane == FocusPane::Commits)
+            .then(|| self.selected_commit_id())
+            .flatten();
+        let fallback_visible_idx = self.commit_list_state.selected();
+
+        match key.code {
+            KeyCode::Esc => {
+                self.input_mode = InputMode::Normal;
+                match pane {
+                    FocusPane::Commits => {
+                        self.commit_search_query.clear();
+                        self.sync_commit_cursor_for_filters(
+                            preferred_commit_id.as_deref(),
+                            fallback_visible_idx,
+                        );
+                        self.status = "Commit search cleared".to_owned();
+                    }
+                    FocusPane::Files => {
+                        self.file_search_query.clear();
+                        self.sync_file_cursor_for_filters();
+                        self.status = "File search cleared".to_owned();
+                    }
+                    FocusPane::Diff => {}
+                }
+            }
+            KeyCode::Enter => {
+                self.input_mode = InputMode::Normal;
+                let query = match pane {
+                    FocusPane::Commits => self.commit_search_query.trim(),
+                    FocusPane::Files => self.file_search_query.trim(),
+                    FocusPane::Diff => "",
+                };
+                self.status = if query.is_empty() {
+                    match pane {
+                        FocusPane::Commits => {
+                            format!("Commit search off ({})", self.commit_status_filter.label())
+                        }
+                        FocusPane::Files => "File search off".to_owned(),
+                        FocusPane::Diff => "Search off".to_owned(),
+                    }
+                } else {
+                    match pane {
+                        FocusPane::Commits => format!(
+                            "Commit filter: /{} ({})",
+                            query,
+                            self.commit_status_filter.label()
+                        ),
+                        FocusPane::Files => format!("File filter: /{query}"),
+                        FocusPane::Diff => format!("/{query}"),
+                    }
+                };
+            }
+            KeyCode::Backspace => {
+                match pane {
+                    FocusPane::Commits => {
+                        self.commit_search_query.pop();
+                        self.sync_commit_cursor_for_filters(
+                            preferred_commit_id.as_deref(),
+                            fallback_visible_idx,
+                        );
+                        self.status = format!("/{}", self.commit_search_query);
+                    }
+                    FocusPane::Files => {
+                        self.file_search_query.pop();
+                        self.sync_file_cursor_for_filters();
+                        self.status = format!("/{}", self.file_search_query);
+                    }
+                    FocusPane::Diff => {}
+                }
+            }
+            KeyCode::Char(c) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    return;
+                }
+                match pane {
+                    FocusPane::Commits => {
+                        self.commit_search_query.push(c);
+                        self.sync_commit_cursor_for_filters(
+                            preferred_commit_id.as_deref(),
+                            fallback_visible_idx,
+                        );
+                        self.status = format!("/{}", self.commit_search_query);
+                    }
+                    FocusPane::Files => {
+                        self.file_search_query.push(c);
+                        self.sync_file_cursor_for_filters();
+                        self.status = format!("/{}", self.file_search_query);
+                    }
+                    FocusPane::Diff => {}
+                }
             }
             _ => {}
         }
@@ -759,6 +859,10 @@ impl App {
             KeyCode::PageUp => self.page_files(-1.0),
             KeyCode::Char('g') => self.select_first_file(),
             KeyCode::Char('G') => self.select_last_file(),
+            KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
+                self.input_mode = InputMode::ListSearch(FocusPane::Files);
+                self.status = format!("/{}", self.file_search_query);
+            }
             KeyCode::Enter | KeyCode::Char(' ') => self.set_focus(FocusPane::Diff),
             _ => {}
         }
@@ -778,12 +882,16 @@ impl App {
             KeyCode::PageUp => self.page_commits(-1.0),
             KeyCode::Char('g') => self.select_first_commit(),
             KeyCode::Char('G') => self.select_last_commit(),
+            KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
+                self.input_mode = InputMode::ListSearch(FocusPane::Commits);
+                self.status = format!("/{}", self.commit_search_query);
+            }
             KeyCode::Char('v') => {
                 if self.commit_visual_anchor.is_some() {
                     self.commit_visual_anchor = None;
                     self.status = "Commit visual range off".to_owned();
                 } else {
-                    self.commit_visual_anchor = self.commit_list_state.selected();
+                    self.commit_visual_anchor = self.selected_commit_full_index();
                     self.status = "Commit visual range on".to_owned();
                     self.apply_commit_visual_range();
                 }
@@ -796,7 +904,7 @@ impl App {
                 self.on_selection_changed();
             }
             KeyCode::Char(' ') => {
-                if let Some(idx) = self.commit_list_state.selected()
+                if let Some(idx) = self.selected_commit_full_index()
                     && let Some(row) = self.commits.get_mut(idx)
                 {
                     row.selected = !row.selected;
@@ -805,11 +913,14 @@ impl App {
                 self.on_selection_changed();
             }
             KeyCode::Enter => {
-                if let Some(idx) = self.commit_list_state.selected() {
+                if let Some(idx) = self.selected_commit_full_index() {
                     select_only_index(&mut self.commits, idx);
                     self.commit_visual_anchor = None;
                     self.on_selection_changed();
                 }
+            }
+            KeyCode::Char('e') if key.modifiers == KeyModifiers::NONE => {
+                self.cycle_commit_status_filter();
             }
             KeyCode::Char('u') => self.set_current_commit_status(ReviewStatus::Unreviewed),
             KeyCode::Char('r') => self.set_current_commit_status(ReviewStatus::Reviewed),
@@ -1097,12 +1208,21 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
+        let visible_indices = self.visible_file_indices();
+        let visible_rows: Vec<TreeRow> = visible_indices
+            .iter()
+            .filter_map(|idx| self.file_rows.get(*idx).cloned())
+            .collect();
         ListPaneRenderer::new(theme, self.focused, self.nerd_fonts).render_files(
             frame,
             rect,
-            &self.file_rows,
-            self.aggregate.files.len(),
-            &mut self.file_list_state,
+            FilePaneModel {
+                file_rows: &visible_rows,
+                changed_files: self.aggregate.files.len(),
+                shown_files: visible_rows.iter().filter(|row| row.selectable).count(),
+                search_query: &self.file_search_query,
+                file_list_state: &mut self.file_list_state,
+            },
         );
     }
 
@@ -1112,12 +1232,25 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
+        let visible_indices = self.visible_commit_indices();
+        let visible_rows: Vec<CommitRow> = visible_indices
+            .iter()
+            .filter_map(|idx| self.commits.get(*idx).cloned())
+            .collect();
+        let selected_total = self.commits.iter().filter(|row| row.selected).count();
         ListPaneRenderer::new(theme, self.focused, self.nerd_fonts).render_commits(
             frame,
             rect,
-            &self.commits,
-            self.status_counts(),
-            &mut self.commit_list_state,
+            CommitPaneModel {
+                commits: &visible_rows,
+                status_counts: self.status_counts(),
+                selected_total,
+                shown_commits: visible_rows.len(),
+                total_commits: self.commits.len(),
+                status_filter: self.commit_status_filter.label(),
+                search_query: &self.commit_search_query,
+                commit_list_state: &mut self.commit_list_state,
+            },
         );
     }
 
@@ -1160,7 +1293,7 @@ impl App {
             InputMode::Normal => "NORMAL",
             InputMode::CommentCreate => "COMMENT+",
             InputMode::CommentEdit(_) => "COMMENT*",
-            InputMode::DiffSearch => "SEARCH/",
+            InputMode::DiffSearch | InputMode::ListSearch(_) => "SEARCH/",
         };
         let focus = match self.focused {
             FocusPane::Files => "files",
@@ -1185,12 +1318,22 @@ impl App {
                 key_chip("Esc", theme),
                 Span::styled(" cancel search", Style::default().fg(theme.muted)),
             ]),
+            InputMode::ListSearch(_) => Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" defocus ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" clear ", Style::default().fg(theme.muted)),
+                key_chip("Backspace", theme),
+                Span::styled(" edit", Style::default().fg(theme.muted)),
+            ]),
             InputMode::Normal => match self.focused {
                 FocusPane::Files => Line::from(vec![
                     key_chip("j/k", theme),
                     Span::styled(" move ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
                     Span::styled(" jump ", Style::default().fg(theme.muted)),
+                    key_chip("/", theme),
+                    Span::styled(" filter ", Style::default().fg(theme.muted)),
                     key_chip("Enter", theme),
                     Span::styled(" focus diff", Style::default().fg(theme.muted)),
                 ]),
@@ -1200,7 +1343,11 @@ impl App {
                     key_chip("u/r/i/s", theme),
                     Span::styled(" current ", Style::default().fg(theme.muted)),
                     key_chip("U/R/I/S", theme),
-                    Span::styled(" selected", Style::default().fg(theme.muted)),
+                    Span::styled(" selected ", Style::default().fg(theme.muted)),
+                    key_chip("e", theme),
+                    Span::styled(" status filter ", Style::default().fg(theme.muted)),
+                    key_chip("/", theme),
+                    Span::styled(" search", Style::default().fg(theme.muted)),
                 ]),
                 FocusPane::Diff => Line::from(vec![
                     key_chip("v", theme),
@@ -1262,6 +1409,21 @@ impl App {
                 self.theme_mode.label(),
                 self.diff_search_buffer
             ),
+            InputMode::ListSearch(pane) => {
+                let query = match pane {
+                    FocusPane::Commits => &self.commit_search_query,
+                    FocusPane::Files => &self.file_search_query,
+                    FocusPane::Diff => "",
+                };
+                format!(
+                    "{} | mode={} focus={} theme={} /{}",
+                    self.status,
+                    mode,
+                    focus,
+                    self.theme_mode.label(),
+                    query
+                )
+            }
             InputMode::Normal => format!(
                 "{} | mode={} focus={} theme={}",
                 self.status,
@@ -1299,7 +1461,7 @@ impl App {
         let title = match self.input_mode {
             InputMode::CommentCreate => " NEW COMMENT ",
             InputMode::CommentEdit(_) => " EDIT COMMENT ",
-            InputMode::Normal | InputMode::DiffSearch => " COMMENT ",
+            InputMode::Normal | InputMode::DiffSearch | InputMode::ListSearch(_) => " COMMENT ",
         };
         let shell = Block::default()
             .title(Span::styled(
@@ -1330,7 +1492,7 @@ impl App {
         let mode_badge = match self.input_mode {
             InputMode::CommentCreate => "create",
             InputMode::CommentEdit(_) => "edit",
-            InputMode::Normal | InputMode::DiffSearch => "idle",
+            InputMode::Normal | InputMode::DiffSearch | InputMode::ListSearch(_) => "idle",
         };
         let status_style = if self.status.contains("Failed")
             || self.status.contains("failed")
@@ -1506,7 +1668,7 @@ impl App {
                     ]));
                 }
             },
-            InputMode::Normal | InputMode::DiffSearch => {}
+            InputMode::Normal | InputMode::DiffSearch | InputMode::ListSearch(_) => {}
         }
 
         if !has_primary_context && !self.rendered_diff.is_empty() {
@@ -1636,7 +1798,11 @@ impl App {
             ]),
             Line::from(vec![
                 key_chip("/", theme),
-                Span::raw(" diff search (Esc cancel, Enter run)"),
+                Span::raw(" diff search or live list filter"),
+            ]),
+            Line::from(vec![
+                key_chip("Esc/Enter", theme),
+                Span::raw(" search: clear / defocus"),
             ]),
             Line::from(vec![
                 key_chip("n/N", theme),
@@ -1652,7 +1818,11 @@ impl App {
             ]),
             Line::from(vec![
                 key_chip("e", theme),
-                Span::raw(" edit comment under cursor"),
+                Span::raw(" commits pane: cycle status filter"),
+            ]),
+            Line::from(vec![
+                key_chip("e", theme),
+                Span::raw(" diff pane: edit comment under cursor"),
             ]),
             Line::from(vec![
                 key_chip("D", theme),

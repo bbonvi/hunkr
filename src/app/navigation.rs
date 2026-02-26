@@ -20,15 +20,16 @@ impl App {
     }
 
     pub(super) fn move_file_cursor(&mut self, delta: isize) {
-        if self.file_rows.is_empty() {
+        let visible = self.visible_file_indices();
+        if visible.is_empty() {
             return;
         }
 
         let mut idx = self.file_list_state.selected().unwrap_or(0) as isize;
-        let len = self.file_rows.len() as isize;
+        let len = visible.len() as isize;
         loop {
             idx = (idx + delta).clamp(0, len - 1);
-            if self.file_rows[idx as usize].selectable || idx == 0 || idx == len - 1 {
+            if self.file_rows[visible[idx as usize]].selectable || idx == 0 || idx == len - 1 {
                 break;
             }
             if (delta > 0 && idx == len - 1) || (delta < 0 && idx == 0) {
@@ -45,26 +46,38 @@ impl App {
     }
 
     pub(super) fn select_first_file(&mut self) {
-        if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
+        let visible = self.visible_file_indices();
+        if let Some(idx) = visible
+            .iter()
+            .position(|entry| self.file_rows[*entry].selectable)
+        {
             self.select_file_row(idx);
         }
     }
 
     pub(super) fn select_last_file(&mut self) {
-        if let Some(idx) = self.file_rows.iter().rposition(|row| row.selectable) {
+        let visible = self.visible_file_indices();
+        if let Some(idx) = visible
+            .iter()
+            .rposition(|entry| self.file_rows[*entry].selectable)
+        {
             self.select_file_row(idx);
         }
     }
 
-    pub(super) fn select_file_row(&mut self, idx: usize) {
-        if idx >= self.file_rows.len() || !self.file_rows[idx].selectable {
+    pub(super) fn select_file_row(&mut self, visible_idx: usize) {
+        let visible = self.visible_file_indices();
+        let Some(full_idx) = visible.get(visible_idx).copied() else {
+            return;
+        };
+        if !self.file_rows[full_idx].selectable {
             return;
         }
 
         self.persist_selected_file_position();
 
-        self.file_list_state.select(Some(idx));
-        let path = self.file_rows[idx]
+        self.file_list_state.select(Some(visible_idx));
+        let path = self.file_rows[full_idx]
             .path
             .clone()
             .expect("selectable rows always contain path");
@@ -74,10 +87,11 @@ impl App {
     }
 
     pub(super) fn move_commit_cursor(&mut self, delta: isize) {
-        if self.commits.is_empty() {
+        let visible = self.visible_commit_indices();
+        if visible.is_empty() {
             return;
         }
-        let len = self.commits.len() as isize;
+        let len = visible.len() as isize;
         let current = self.commit_list_state.selected().unwrap_or(0) as isize;
         let next = (current + delta).clamp(0, len - 1) as usize;
         self.commit_list_state.select(Some(next));
@@ -93,7 +107,7 @@ impl App {
     }
 
     pub(super) fn select_first_commit(&mut self) {
-        if self.commits.is_empty() {
+        if self.visible_commit_indices().is_empty() {
             return;
         }
         self.commit_list_state.select(Some(0));
@@ -103,21 +117,23 @@ impl App {
     }
 
     pub(super) fn select_last_commit(&mut self) {
-        if self.commits.is_empty() {
+        let visible = self.visible_commit_indices();
+        if visible.is_empty() {
             return;
         }
-        self.commit_list_state.select(Some(self.commits.len() - 1));
+        self.commit_list_state.select(Some(visible.len() - 1));
         if self.commit_visual_anchor.is_some() {
             self.apply_commit_visual_range();
         }
     }
 
-    pub(super) fn select_commit_row(&mut self, idx: usize, toggle: bool) {
-        if idx >= self.commits.len() {
+    pub(super) fn select_commit_row(&mut self, visible_idx: usize, toggle: bool) {
+        let visible = self.visible_commit_indices();
+        let Some(full_idx) = visible.get(visible_idx).copied() else {
             return;
-        }
-        self.commit_list_state.select(Some(idx));
-        if toggle && let Some(row) = self.commits.get_mut(idx) {
+        };
+        self.commit_list_state.select(Some(visible_idx));
+        if toggle && let Some(row) = self.commits.get_mut(full_idx) {
             row.selected = !row.selected;
             self.on_selection_changed();
         }
@@ -127,7 +143,7 @@ impl App {
         let Some(anchor) = self.commit_visual_anchor else {
             return;
         };
-        let Some(cursor) = self.commit_list_state.selected() else {
+        let Some(cursor) = self.selected_commit_full_index() else {
             return;
         };
 
@@ -138,7 +154,7 @@ impl App {
     }
 
     pub(super) fn set_current_commit_status(&mut self, status: ReviewStatus) {
-        let Some(idx) = self.commit_list_state.selected() else {
+        let Some(idx) = self.selected_commit_full_index() else {
             return;
         };
         let Some(row) = self.commits.get(idx) else {
@@ -166,6 +182,17 @@ impl App {
         self.set_status_for_ids(&ids, status);
     }
 
+    pub(super) fn cycle_commit_status_filter(&mut self) {
+        let preferred_commit_id = self.selected_commit_id();
+        let fallback_visible_idx = self.commit_list_state.selected();
+        self.commit_status_filter = self.commit_status_filter.next();
+        self.sync_commit_cursor_for_filters(
+            preferred_commit_id.as_deref(),
+            fallback_visible_idx,
+        );
+        self.status = format!("Commit status filter: {}", self.commit_status_filter.label());
+    }
+
     pub(super) fn set_status_for_ids(&mut self, ids: &BTreeSet<String>, status: ReviewStatus) {
         self.store.set_many_status(
             &mut self.review_state,
@@ -175,6 +202,7 @@ impl App {
         );
 
         apply_status_transition(&mut self.commits, ids, status);
+        self.sync_commit_cursor_for_filters(None, self.commit_list_state.selected());
 
         let save_result = self.store.save(&self.review_state);
         let mut status_message = if let Err(err) = save_result {

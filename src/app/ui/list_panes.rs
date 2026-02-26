@@ -21,6 +21,27 @@ pub(in crate::app) struct ListPaneRenderer<'a> {
     now_ts: i64,
 }
 
+/// Render payload for the files pane.
+pub(in crate::app) struct FilePaneModel<'a> {
+    pub file_rows: &'a [TreeRow],
+    pub changed_files: usize,
+    pub shown_files: usize,
+    pub search_query: &'a str,
+    pub file_list_state: &'a mut ListState,
+}
+
+/// Render payload for the commits pane.
+pub(in crate::app) struct CommitPaneModel<'a> {
+    pub commits: &'a [CommitRow],
+    pub status_counts: (usize, usize, usize, usize),
+    pub selected_total: usize,
+    pub shown_commits: usize,
+    pub total_commits: usize,
+    pub status_filter: &'a str,
+    pub search_query: &'a str,
+    pub commit_list_state: &'a mut ListState,
+}
+
 impl<'a> ListPaneRenderer<'a> {
     pub(in crate::app) fn new(theme: &'a UiTheme, focused: FocusPane, nerd_fonts: bool) -> Self {
         Self {
@@ -35,10 +56,20 @@ impl<'a> ListPaneRenderer<'a> {
         &self,
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
-        file_rows: &[TreeRow],
-        changed_files: usize,
-        file_list_state: &mut ListState,
+        model: FilePaneModel<'_>,
     ) {
+        let FilePaneModel {
+            file_rows,
+            changed_files,
+            shown_files,
+            search_query,
+            file_list_state,
+        } = model;
+        let search_badge = if search_query.trim().is_empty() {
+            String::new()
+        } else {
+            format!("  /{}", search_query.trim())
+        };
         let title = Line::from(vec![
             Span::styled(
                 " 2 FILES ",
@@ -49,7 +80,7 @@ impl<'a> ListPaneRenderer<'a> {
             ),
             Span::raw(" "),
             Span::styled(
-                format!("{} changed", changed_files),
+                format!("{shown_files}/{changed_files} shown{search_badge}"),
                 Style::default().fg(self.theme.muted),
             ),
         ]);
@@ -98,12 +129,24 @@ impl<'a> ListPaneRenderer<'a> {
         &self,
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
-        commits: &[CommitRow],
-        status_counts: (usize, usize, usize, usize),
-        commit_list_state: &mut ListState,
+        model: CommitPaneModel<'_>,
     ) {
-        let selected = commits.iter().filter(|row| row.selected).count();
+        let CommitPaneModel {
+            commits,
+            status_counts,
+            selected_total,
+            shown_commits,
+            total_commits,
+            status_filter,
+            search_query,
+            commit_list_state,
+        } = model;
         let (unreviewed, reviewed, issue_found, resolved) = status_counts;
+        let search_badge = if search_query.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" /{}", search_query.trim())
+        };
         let title = Line::from(vec![
             Span::styled(
                 " 1 COMMITS ",
@@ -115,8 +158,7 @@ impl<'a> ListPaneRenderer<'a> {
             Span::raw(" "),
             Span::styled(
                 format!(
-                    "sel:{}  U:{} R:{} I:{} Z:{}",
-                    selected, unreviewed, reviewed, issue_found, resolved
+                    "sel:{selected_total}  U:{unreviewed} R:{reviewed} I:{issue_found} Z:{resolved}  {shown_commits}/{total_commits}  [{status_filter}]{search_badge}",
                 ),
                 Style::default().fg(self.theme.muted),
             ),

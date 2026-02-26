@@ -5,9 +5,7 @@ impl App {
         let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
         let default_selected = self.git.default_unpushed_commit_ids()?;
         let prior_cursor_idx = self.commit_list_state.selected();
-        let prior_cursor_commit_id = prior_cursor_idx
-            .and_then(|idx| self.commits.get(idx))
-            .map(|row| row.info.id.clone());
+        let prior_cursor_commit_id = self.selected_commit_id();
         let prior_visual_anchor_commit_id = self
             .commit_visual_anchor
             .and_then(|idx| self.commits.get(idx))
@@ -67,15 +65,19 @@ impl App {
             },
         );
 
-        let restored_cursor = restore_list_index_by_commit_id(
-            &self.commits,
+        self.sync_commit_cursor_for_filters(
             prior_cursor_commit_id.as_deref(),
             prior_cursor_idx,
         );
-        self.commit_list_state.select(restored_cursor);
         self.commit_visual_anchor = prior_visual_anchor_commit_id
             .as_deref()
             .and_then(|commit_id| index_of_commit(&self.commits, commit_id));
+        if self
+            .commit_visual_anchor
+            .is_some_and(|anchor| !self.visible_commit_indices().contains(&anchor))
+        {
+            self.commit_visual_anchor = None;
+        }
 
         let new_commits = self
             .commits
@@ -126,6 +128,7 @@ impl App {
 
         self.rebuild_file_tree();
         self.ensure_selected_file_exists();
+        self.sync_file_cursor_for_filters();
         self.ensure_rendered_diff();
         Ok(())
     }
@@ -526,14 +529,6 @@ impl App {
         if self.file_rows.is_empty() {
             self.file_list_state.select(None);
             self.selected_file = None;
-            return;
-        }
-
-        if self.file_list_state.selected().is_none()
-            && let Some(idx) = self.file_rows.iter().position(|row| row.selectable)
-        {
-            self.file_list_state.select(Some(idx));
-            self.selected_file = self.file_rows[idx].path.clone();
         }
     }
 
@@ -550,13 +545,132 @@ impl App {
                 .iter()
                 .position(|row| row.selectable && row.path.as_ref() == Some(&path))
         {
-            self.file_list_state.select(Some(idx));
+            self.selected_file = self.file_rows[idx].path.clone();
             return;
         }
 
         if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
-            self.file_list_state.select(Some(idx));
             self.selected_file = self.file_rows[idx].path.clone();
+        }
+    }
+
+    pub(super) fn visible_commit_indices(&self) -> Vec<usize> {
+        self.commits
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| self.commit_status_filter.matches_row(row))
+            .filter(|(_, row)| {
+                self.commit_search_query.is_empty()
+                    || commit_row_matches_query(row, &self.commit_search_query)
+            })
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+
+    pub(super) fn visible_file_indices(&self) -> Vec<usize> {
+        if self.file_search_query.is_empty() {
+            return self
+                .file_rows
+                .iter()
+                .enumerate()
+                .map(|(idx, _)| idx)
+                .collect();
+        }
+
+        self.file_rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.selectable)
+            .filter(|(_, row)| {
+                row.path
+                    .as_ref()
+                    .is_some_and(|path| contains_case_insensitive(path, &self.file_search_query))
+            })
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+
+    pub(super) fn selected_commit_full_index(&self) -> Option<usize> {
+        let visible = self.visible_commit_indices();
+        self.commit_list_state
+            .selected()
+            .and_then(|idx| visible.get(idx).copied())
+    }
+
+    pub(super) fn selected_commit_id(&self) -> Option<String> {
+        self.selected_commit_full_index()
+            .and_then(|idx| self.commits.get(idx))
+            .map(|row| row.info.id.clone())
+    }
+
+    pub(super) fn sync_commit_cursor_for_filters(
+        &mut self,
+        preferred_commit_id: Option<&str>,
+        fallback_visible_idx: Option<usize>,
+    ) {
+        let visible = self.visible_commit_indices();
+        if visible.is_empty() {
+            self.commit_list_state.select(None);
+            self.commit_visual_anchor = None;
+            return;
+        }
+
+        if let Some(commit_id) = preferred_commit_id
+            && let Some(full_idx) = index_of_commit(&self.commits, commit_id)
+            && let Some(visible_idx) = visible.iter().position(|entry| *entry == full_idx)
+        {
+            self.commit_list_state.select(Some(visible_idx));
+            return;
+        }
+
+        let selected_idx = fallback_visible_idx.unwrap_or(0).min(visible.len() - 1);
+        self.commit_list_state.select(Some(selected_idx));
+
+        if self
+            .commit_visual_anchor
+            .is_some_and(|anchor| !visible.contains(&anchor))
+        {
+            self.commit_visual_anchor = None;
+        }
+    }
+
+    pub(super) fn sync_file_cursor_for_filters(&mut self) {
+        let visible = self.visible_file_indices();
+        if visible.is_empty() {
+            self.file_list_state.select(None);
+            return;
+        }
+
+        if let Some(path) = self.selected_file.clone()
+            && let Some(full_idx) = self
+                .file_rows
+                .iter()
+                .position(|row| row.selectable && row.path.as_ref() == Some(&path))
+            && let Some(visible_idx) = visible.iter().position(|entry| *entry == full_idx)
+        {
+            self.file_list_state.select(Some(visible_idx));
+            return;
+        }
+
+        let Some((visible_idx, full_idx)) = visible
+            .iter()
+            .enumerate()
+            .find(|(_, idx)| self.file_rows[**idx].selectable)
+            .map(|(visible_idx, idx)| (visible_idx, *idx))
+        else {
+            self.file_list_state.select(None);
+            return;
+        };
+
+        self.file_list_state.select(Some(visible_idx));
+        let next_path = self.file_rows[full_idx].path.clone();
+        if next_path != self.selected_file {
+            self.persist_selected_file_position();
+            self.selected_file = next_path.clone();
+            if let Some(path) = next_path {
+                self.restore_diff_position(&path);
+                self.sync_diff_cursor_to_content_bounds();
+            }
         }
     }
 
@@ -618,7 +732,9 @@ impl App {
             .iter()
             .position(|row| row.selectable && row.path.as_deref() == Some(path))
         {
-            self.file_list_state.select(Some(idx));
+            let visible = self.visible_file_indices();
+            let visible_idx = visible.iter().position(|entry| *entry == idx);
+            self.file_list_state.select(visible_idx);
         }
     }
 
