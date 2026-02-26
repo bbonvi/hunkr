@@ -230,7 +230,6 @@ pub struct App {
     aggregate: AggregatedDiff,
     selected_file: Option<String>,
     diff_positions: HashMap<String, DiffPosition>,
-    file_diff_signatures: HashMap<String, u64>,
     diff_position: DiffPosition,
     rendered_diff: Arc<Vec<RenderedDiffLine>>,
     rendered_diff_cache: HashMap<(String, ThemeMode), Arc<Vec<RenderedDiffLine>>>,
@@ -271,7 +270,6 @@ impl App {
             aggregate: AggregatedDiff::default(),
             selected_file: None,
             diff_positions: HashMap::new(),
-            file_diff_signatures: HashMap::new(),
             diff_position: DiffPosition::default(),
             rendered_diff: Arc::new(Vec::new()),
             rendered_diff_cache: HashMap::new(),
@@ -1296,7 +1294,7 @@ impl App {
             merge_aggregate_diff(&mut aggregate, self.git.aggregate_uncommitted()?);
         }
         self.aggregate = aggregate;
-        self.reset_diff_positions_for_changed_files();
+        self.prune_diff_positions_for_removed_files();
 
         self.rendered_diff_cache.clear();
         self.rendered_diff_key = None;
@@ -1308,22 +1306,20 @@ impl App {
         Ok(())
     }
 
-    fn reset_diff_positions_for_changed_files(&mut self) {
-        let mut next_signatures = HashMap::new();
-        for (path, patch) in &self.aggregate.files {
-            next_signatures.insert(path.clone(), file_patch_signature(patch));
-        }
+    fn prune_diff_positions_for_removed_files(&mut self) {
+        let existing_paths = self
+            .aggregate
+            .files
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        prune_diff_positions_for_missing_paths(&mut self.diff_positions, &existing_paths);
 
-        let changed_or_removed =
-            changed_or_removed_paths(&self.file_diff_signatures, &next_signatures);
-        for path in changed_or_removed {
-            self.diff_positions.remove(&path);
-            if self.selected_file.as_ref() == Some(&path) {
-                self.diff_position = DiffPosition::default();
-            }
+        if let Some(path) = self.selected_file.as_ref()
+            && !existing_paths.contains(path)
+        {
+            self.diff_position = DiffPosition::default();
         }
-
-        self.file_diff_signatures = next_signatures;
     }
 
     fn ensure_rendered_diff(&mut self) {
@@ -2386,78 +2382,11 @@ fn raw_diff_text(line: &HunkLine) -> String {
     format!("{}{}", prefix, line.text)
 }
 
-fn changed_or_removed_paths(
-    previous: &HashMap<String, u64>,
-    next: &HashMap<String, u64>,
-) -> BTreeSet<String> {
-    let mut changed = BTreeSet::new();
-    for (path, prev_sig) in previous {
-        if next.get(path).copied() != Some(*prev_sig) {
-            changed.insert(path.clone());
-        }
-    }
-    changed
-}
-
-fn file_patch_signature(patch: &FilePatch) -> u64 {
-    let mut h = 1_469_598_103_934_665_603_u64;
-    h = hash_str(h, &patch.path);
-    for hunk in &patch.hunks {
-        h = hash_str(h, &hunk.commit_id);
-        h = hash_str(h, &hunk.commit_short);
-        h = hash_str(h, &hunk.commit_summary);
-        h = hash_i64(h, hunk.commit_timestamp);
-        h = hash_str(h, &hunk.header);
-        h = hash_u32(h, hunk.old_start);
-        h = hash_u32(h, hunk.new_start);
-        for line in &hunk.lines {
-            h = hash_u8(h, diff_line_kind_code(line.kind));
-            h = hash_str(h, &line.text);
-            h = hash_option_u32(h, line.old_lineno);
-            h = hash_option_u32(h, line.new_lineno);
-        }
-    }
-    h
-}
-
-fn diff_line_kind_code(kind: DiffLineKind) -> u8 {
-    match kind {
-        DiffLineKind::Context => 0,
-        DiffLineKind::Add => 1,
-        DiffLineKind::Remove => 2,
-        DiffLineKind::Meta => 3,
-    }
-}
-
-fn hash_u8(seed: u64, value: u8) -> u64 {
-    let next = seed ^ u64::from(value);
-    next.wrapping_mul(1_099_511_628_211)
-}
-
-fn hash_u32(seed: u64, value: u32) -> u64 {
-    hash_bytes(seed, &value.to_le_bytes())
-}
-
-fn hash_i64(seed: u64, value: i64) -> u64 {
-    hash_bytes(seed, &value.to_le_bytes())
-}
-
-fn hash_option_u32(seed: u64, value: Option<u32>) -> u64 {
-    match value {
-        Some(v) => hash_u32(hash_u8(seed, 1), v),
-        None => hash_u8(seed, 0),
-    }
-}
-
-fn hash_str(seed: u64, value: &str) -> u64 {
-    hash_bytes(seed, value.as_bytes())
-}
-
-fn hash_bytes(mut seed: u64, bytes: &[u8]) -> u64 {
-    for byte in bytes {
-        seed = hash_u8(seed, *byte);
-    }
-    seed
+fn prune_diff_positions_for_missing_paths(
+    diff_positions: &mut HashMap<String, DiffPosition>,
+    existing_paths: &BTreeSet<String>,
+) {
+    diff_positions.retain(|path, _| existing_paths.contains(path));
 }
 
 fn should_render_commit_banner(previous_commit_id: Option<&str>, current_commit_id: &str) -> bool {
@@ -2755,27 +2684,6 @@ mod tests {
         }
     }
 
-    fn sample_file_patch(line_text: &str) -> FilePatch {
-        FilePatch {
-            path: "src/lib.rs".to_owned(),
-            hunks: vec![crate::model::Hunk {
-                commit_id: "abc1234".to_owned(),
-                commit_short: "abc1234".to_owned(),
-                commit_summary: "summary".to_owned(),
-                commit_timestamp: 123,
-                header: "@@ -1,1 +1,1 @@".to_owned(),
-                old_start: 1,
-                new_start: 1,
-                lines: vec![HunkLine {
-                    kind: DiffLineKind::Add,
-                    text: line_text.to_owned(),
-                    old_lineno: None,
-                    new_lineno: Some(1),
-                }],
-            }],
-        }
-    }
-
     #[test]
     fn truncate_short_strings_unchanged() {
         assert_eq!(truncate("abc", 4), "abc");
@@ -2845,27 +2753,61 @@ mod tests {
     }
 
     #[test]
-    fn file_patch_signature_changes_when_patch_content_changes() {
-        let sig_a = file_patch_signature(&sample_file_patch("+let a = 1;"));
-        let sig_b = file_patch_signature(&sample_file_patch("+let a = 2;"));
-        assert_ne!(sig_a, sig_b);
+    fn prune_diff_positions_removes_only_missing_paths() {
+        let mut positions = HashMap::from([
+            (
+                "a.rs".to_owned(),
+                DiffPosition {
+                    scroll: 10,
+                    cursor: 10,
+                },
+            ),
+            (
+                "b.rs".to_owned(),
+                DiffPosition {
+                    scroll: 20,
+                    cursor: 21,
+                },
+            ),
+            (
+                "c.rs".to_owned(),
+                DiffPosition {
+                    scroll: 30,
+                    cursor: 31,
+                },
+            ),
+        ]);
+        let existing = BTreeSet::from(["a.rs".to_owned(), "b.rs".to_owned()]);
+
+        prune_diff_positions_for_missing_paths(&mut positions, &existing);
+
+        assert_eq!(positions.len(), 2);
+        let pos_a = positions.get("a.rs").expect("a.rs");
+        assert_eq!(pos_a.scroll, 10);
+        assert_eq!(pos_a.cursor, 10);
+
+        let pos_b = positions.get("b.rs").expect("b.rs");
+        assert_eq!(pos_b.scroll, 20);
+        assert_eq!(pos_b.cursor, 21);
+        assert!(!positions.contains_key("c.rs"));
     }
 
     #[test]
-    fn changed_or_removed_paths_detects_updates_and_removals() {
-        let previous = HashMap::from([
-            ("a.rs".to_owned(), 10_u64),
-            ("b.rs".to_owned(), 20_u64),
-            ("c.rs".to_owned(), 30_u64),
-        ]);
-        let next = HashMap::from([("a.rs".to_owned(), 10_u64), ("b.rs".to_owned(), 99_u64)]);
+    fn prune_diff_positions_keeps_existing_paths_even_if_content_changed() {
+        let mut positions = HashMap::from([(
+            "src/lib.rs".to_owned(),
+            DiffPosition {
+                scroll: 42,
+                cursor: 45,
+            },
+        )]);
+        let existing = BTreeSet::from(["src/lib.rs".to_owned()]);
 
-        let changed = changed_or_removed_paths(&previous, &next);
+        prune_diff_positions_for_missing_paths(&mut positions, &existing);
 
-        assert_eq!(
-            changed,
-            BTreeSet::from(["b.rs".to_owned(), "c.rs".to_owned()])
-        );
+        let pos = positions.get("src/lib.rs").expect("src/lib.rs");
+        assert_eq!(pos.scroll, 42);
+        assert_eq!(pos.cursor, 45);
     }
 
     #[test]
