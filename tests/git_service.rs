@@ -4,14 +4,14 @@ use hunkr::git_data::GitService;
 use tempfile::tempdir;
 
 #[test]
-fn aggregate_hunks_follow_selected_commit_order() {
+fn aggregate_for_multiple_commits_returns_net_change_only() {
     let repo_dir = tempdir().expect("tempdir");
     init_repo(repo_dir.path());
     commit_file(repo_dir.path(), "src.txt", "let a = 1;\n", "first");
     commit_file(
         repo_dir.path(),
         "src.txt",
-        "let a = 1;\nlet b = 2;\n",
+        "let a = 2;\nlet b = 2;\n",
         "second",
     );
 
@@ -22,16 +22,31 @@ fn aggregate_hunks_follow_selected_commit_order() {
     let aggregated = service.aggregate_for_commits(&selected).expect("aggregate");
     let patch = aggregated.files.get("src.txt").expect("src patch");
 
-    let mut order = Vec::new();
-    for h in &patch.hunks {
-        if order.last() != Some(&h.commit_summary) {
-            order.push(h.commit_summary.clone());
-        }
-    }
+    let has_removed_intermediate = patch
+        .hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .any(|line| line.text == "let a = 1;");
+    assert!(
+        !has_removed_intermediate,
+        "net diff should not include intermediate line state"
+    );
 
-    assert!(order.len() >= 2);
-    assert_eq!(order[0], "first");
-    assert_eq!(order[1], "second");
+    let added_lines = patch
+        .hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>();
+    assert!(added_lines.contains(&"let a = 2;"));
+    assert!(added_lines.contains(&"let b = 2;"));
+
+    assert!(
+        patch
+            .hunks
+            .iter()
+            .all(|h| h.commit_summary.contains("net changes across 2 commits"))
+    );
 }
 
 #[test]

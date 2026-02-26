@@ -158,47 +158,69 @@ impl GitService {
         &self,
         ordered_commit_ids: &[String],
     ) -> anyhow::Result<AggregatedDiff> {
-        let mut files = BTreeMap::<String, FilePatch>::new();
-
-        for commit_id in ordered_commit_ids {
-            let oid = Oid::from_str(commit_id)
-                .with_context(|| format!("invalid commit id {commit_id}"))?;
-            let commit = self
-                .repo
-                .find_commit(oid)
-                .with_context(|| format!("failed to load commit {commit_id}"))?;
-            let current_tree = commit.tree().context("failed to load commit tree")?;
-            let parent_tree = if commit.parent_count() > 0 {
-                Some(
-                    commit
-                        .parent(0)
-                        .context("failed to load commit parent")?
-                        .tree()
-                        .context("failed to load parent tree")?,
-                )
-            } else {
-                None
-            };
-
-            let mut opts = DiffOptions::new();
-            opts.context_lines(3);
-            let diff = self
-                .repo
-                .diff_tree_to_tree(parent_tree.as_ref(), Some(&current_tree), Some(&mut opts))
-                .with_context(|| format!("failed to diff commit {commit_id}"))?;
-
-            let source = DiffSourceMeta {
-                commit_id: commit_id.clone(),
-                commit_short: short_id(commit_id),
-                commit_summary: commit
-                    .summary()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| "(no summary)".to_owned()),
-                commit_timestamp: commit.time().seconds(),
-            };
-            append_diff_files(&mut files, &diff, &source)
-                .with_context(|| format!("failed to iterate diff for commit {commit_id}"))?;
+        if ordered_commit_ids.is_empty() {
+            return Ok(AggregatedDiff::default());
         }
+
+        let oldest_id = ordered_commit_ids
+            .first()
+            .expect("checked non-empty commit selection");
+        let newest_id = ordered_commit_ids
+            .last()
+            .expect("checked non-empty commit selection");
+
+        let oldest_oid =
+            Oid::from_str(oldest_id).with_context(|| format!("invalid commit id {oldest_id}"))?;
+        let newest_oid =
+            Oid::from_str(newest_id).with_context(|| format!("invalid commit id {newest_id}"))?;
+
+        let oldest_commit = self
+            .repo
+            .find_commit(oldest_oid)
+            .with_context(|| format!("failed to load commit {oldest_id}"))?;
+        let newest_commit = self
+            .repo
+            .find_commit(newest_oid)
+            .with_context(|| format!("failed to load commit {newest_id}"))?;
+
+        let base_tree = if oldest_commit.parent_count() > 0 {
+            Some(
+                oldest_commit
+                    .parent(0)
+                    .context("failed to load oldest selected commit parent")?
+                    .tree()
+                    .context("failed to load oldest selected commit parent tree")?,
+            )
+        } else {
+            None
+        };
+        let head_tree = newest_commit
+            .tree()
+            .context("failed to load newest commit tree")?;
+
+        let mut opts = DiffOptions::new();
+        opts.context_lines(3);
+        let diff = self
+            .repo
+            .diff_tree_to_tree(base_tree.as_ref(), Some(&head_tree), Some(&mut opts))
+            .with_context(|| {
+                format!("failed to diff selected commit span {oldest_id}..{newest_id}")
+            })?;
+
+        let source = DiffSourceMeta {
+            commit_id: newest_id.clone(),
+            commit_short: short_id(newest_id),
+            commit_summary: aggregate_commit_summary(
+                &oldest_commit,
+                &newest_commit,
+                ordered_commit_ids.len(),
+            ),
+            commit_timestamp: newest_commit.time().seconds(),
+        };
+
+        let mut files = BTreeMap::<String, FilePatch>::new();
+        append_diff_files(&mut files, &diff, &source)
+            .context("failed to iterate selected commit span diff")?;
 
         Ok(AggregatedDiff { files })
     }
@@ -379,6 +401,23 @@ fn short_id(id: &str) -> String {
     id.chars().take(7).collect()
 }
 
+fn aggregate_commit_summary(
+    oldest_commit: &git2::Commit<'_>,
+    newest_commit: &git2::Commit<'_>,
+    commit_count: usize,
+) -> String {
+    if commit_count <= 1 {
+        return newest_commit
+            .summary()
+            .map(str::to_owned)
+            .unwrap_or_else(|| "(no summary)".to_owned());
+    }
+
+    let oldest = short_id(&oldest_commit.id().to_string());
+    let newest = short_id(&newest_commit.id().to_string());
+    format!("net changes across {commit_count} commits ({oldest}..{newest})")
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -444,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_contains_commit_metadata_per_hunk() {
+    fn aggregate_for_multiple_commits_returns_only_net_changes() {
         let repo_dir = tempdir().expect("tempdir");
         init_repo(repo_dir.path());
         commit_file(repo_dir.path(), "src.txt", "let a = 1;\n", "first");
@@ -465,11 +504,38 @@ mod tests {
         let aggregated = service.aggregate_for_commits(&selected).expect("aggregate");
 
         let patch = aggregated.files.get("src.txt").expect("src patch");
+        let has_removed_first_value = patch
+            .hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .any(|line| line.kind == DiffLineKind::Remove && line.text == "let a = 1;");
+        assert!(
+            !has_removed_first_value,
+            "net diff should not include intermediate churn"
+        );
+
+        let added_lines = patch
+            .hunks
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .filter(|line| line.kind == DiffLineKind::Add)
+            .map(|line| line.text.as_str())
+            .collect::<Vec<_>>();
+        assert!(added_lines.contains(&"let a = 2;"));
+        assert!(added_lines.contains(&"let b = 3;"));
+
+        let newest = &first_parent_history[0];
         assert!(
             patch
                 .hunks
                 .iter()
-                .any(|h| h.commit_summary == "first" || h.commit_summary == "second")
+                .all(|h| h.commit_id == newest.id && h.commit_short == newest.short_id)
+        );
+        assert!(
+            patch
+                .hunks
+                .iter()
+                .all(|h| h.commit_summary.contains("net changes across 2 commits"))
         );
     }
 

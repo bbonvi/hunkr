@@ -2,11 +2,11 @@
 
 `hunkr` is a local terminal diff reviewer for iterative AI-agent code review.
 
-It is optimized for reviewing **multiple commits together** with commit-aware hunks, file-tree navigation, and explicit per-commit status tracking.
+It is optimized for reviewing **multiple commits together** with net-change diffing, file-tree navigation, and explicit per-commit status tracking.
 
 ## Why it exists
 
-When agents produce several commits quickly, reviewing one commit at a time is slow. `hunkr` lets you select a commit range, inspect all changed files, and see hunk provenance (`short_sha + summary`) inline while scrolling one diff stream.
+When agents produce several commits quickly, reviewing one commit at a time is slow. `hunkr` lets you select a commit range and inspect the net file changes across that span while scrolling one diff stream.
 
 ## Core UX
 
