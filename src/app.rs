@@ -922,61 +922,13 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let title = Line::from(vec![
-            Span::styled(
-                " 2 FILES ",
-                Style::default()
-                    .fg(theme.panel_title_fg)
-                    .bg(theme.panel_title_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!("{} changed", self.aggregate.files.len()),
-                Style::default().fg(theme.muted),
-            ),
-        ]);
-        let border_style = if self.focused == FocusPane::Files {
-            Style::default().fg(theme.focus_border)
-        } else {
-            Style::default().fg(theme.border)
-        };
-
-        let width = list_content_width(rect.width);
-        let now_ts = Utc::now().timestamp();
-        let cursor_idx = self.file_list_state.selected();
-        let presenter = ListLinePresenter::new(width, now_ts, theme);
-
-        let items: Vec<ListItem<'static>> = self
-            .file_rows
-            .iter()
-            .enumerate()
-            .map(|(idx, row)| {
-                let line = presenter.file_row_line(row);
-
-                let is_cursor = cursor_idx == Some(idx);
-                ListItem::new(line).style(list_row_style(
-                    false,
-                    is_cursor,
-                    self.focused == FocusPane::Files,
-                    None,
-                    theme,
-                ))
-            })
-            .collect();
-
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(border_style),
-            )
-            .highlight_style(Style::default())
-            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
-
-        frame.render_stateful_widget(list, rect, &mut self.file_list_state);
+        ListPaneRenderer::new(theme, self.focused).render_files(
+            frame,
+            rect,
+            &self.file_rows,
+            self.aggregate.files.len(),
+            &mut self.file_list_state,
+        );
     }
 
     fn render_commits(
@@ -985,64 +937,13 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let selected = self.commits.iter().filter(|row| row.selected).count();
-        let (unreviewed, reviewed, issue_found, resolved) = self.status_counts();
-        let title = Line::from(vec![
-            Span::styled(
-                " 1 COMMITS ",
-                Style::default()
-                    .fg(theme.panel_title_fg)
-                    .bg(theme.panel_title_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!(
-                    "sel:{}  U:{} R:{} I:{} Z:{}",
-                    selected, unreviewed, reviewed, issue_found, resolved
-                ),
-                Style::default().fg(theme.muted),
-            ),
-        ]);
-        let border_style = if self.focused == FocusPane::Commits {
-            Style::default().fg(theme.focus_border)
-        } else {
-            Style::default().fg(theme.border)
-        };
-
-        let width = list_content_width(rect.width);
-        let now_ts = Utc::now().timestamp();
-        let cursor_idx = self.commit_list_state.selected();
-        let presenter = ListLinePresenter::new(width, now_ts, theme);
-        let items: Vec<ListItem<'static>> = self
-            .commits
-            .iter()
-            .enumerate()
-            .map(|(idx, row)| {
-                let line = presenter.commit_row_line(row);
-                let is_cursor = cursor_idx == Some(idx);
-                ListItem::new(line).style(list_row_style(
-                    row.selected,
-                    is_cursor,
-                    self.focused == FocusPane::Commits,
-                    Some(theme.cursor_bg),
-                    theme,
-                ))
-            })
-            .collect();
-
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(border_style),
-            )
-            .highlight_style(Style::default())
-            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
-
-        frame.render_stateful_widget(list, rect, &mut self.commit_list_state);
+        ListPaneRenderer::new(theme, self.focused).render_commits(
+            frame,
+            rect,
+            &self.commits,
+            self.status_counts(),
+            &mut self.commit_list_state,
+        );
     }
 
     fn render_diff(&mut self, frame: &mut Frame<'_>, rect: ratatui::layout::Rect, theme: &UiTheme) {
@@ -2684,6 +2585,151 @@ fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
             .fg(theme.issue)
             .add_modifier(Modifier::BOLD),
         ReviewStatus::Resolved => Style::default().fg(theme.resolved),
+    }
+}
+
+/// Renders commit/file list panes so App keeps high-level orchestration only.
+struct ListPaneRenderer<'a> {
+    theme: &'a UiTheme,
+    focused: FocusPane,
+    now_ts: i64,
+}
+
+impl<'a> ListPaneRenderer<'a> {
+    fn new(theme: &'a UiTheme, focused: FocusPane) -> Self {
+        Self {
+            theme,
+            focused,
+            now_ts: Utc::now().timestamp(),
+        }
+    }
+
+    fn render_files(
+        &self,
+        frame: &mut Frame<'_>,
+        rect: ratatui::layout::Rect,
+        file_rows: &[TreeRow],
+        changed_files: usize,
+        file_list_state: &mut ListState,
+    ) {
+        let title = Line::from(vec![
+            Span::styled(
+                " 2 FILES ",
+                Style::default()
+                    .fg(self.theme.panel_title_fg)
+                    .bg(self.theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("{} changed", changed_files),
+                Style::default().fg(self.theme.muted),
+            ),
+        ]);
+        let border_style = if self.focused == FocusPane::Files {
+            Style::default().fg(self.theme.focus_border)
+        } else {
+            Style::default().fg(self.theme.border)
+        };
+
+        let width = list_content_width(rect.width);
+        let cursor_idx = file_list_state.selected();
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme);
+
+        let items: Vec<ListItem<'static>> = file_rows
+            .iter()
+            .enumerate()
+            .map(|(idx, row)| {
+                let line = presenter.file_row_line(row);
+                let is_cursor = cursor_idx == Some(idx);
+                ListItem::new(line).style(list_row_style(
+                    false,
+                    is_cursor,
+                    self.focused == FocusPane::Files,
+                    None,
+                    self.theme,
+                ))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(border_style),
+            )
+            .highlight_style(Style::default())
+            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
+
+        frame.render_stateful_widget(list, rect, file_list_state);
+    }
+
+    fn render_commits(
+        &self,
+        frame: &mut Frame<'_>,
+        rect: ratatui::layout::Rect,
+        commits: &[CommitRow],
+        status_counts: (usize, usize, usize, usize),
+        commit_list_state: &mut ListState,
+    ) {
+        let selected = commits.iter().filter(|row| row.selected).count();
+        let (unreviewed, reviewed, issue_found, resolved) = status_counts;
+        let title = Line::from(vec![
+            Span::styled(
+                " 1 COMMITS ",
+                Style::default()
+                    .fg(self.theme.panel_title_fg)
+                    .bg(self.theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!(
+                    "sel:{}  U:{} R:{} I:{} Z:{}",
+                    selected, unreviewed, reviewed, issue_found, resolved
+                ),
+                Style::default().fg(self.theme.muted),
+            ),
+        ]);
+        let border_style = if self.focused == FocusPane::Commits {
+            Style::default().fg(self.theme.focus_border)
+        } else {
+            Style::default().fg(self.theme.border)
+        };
+
+        let width = list_content_width(rect.width);
+        let cursor_idx = commit_list_state.selected();
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme);
+        let items: Vec<ListItem<'static>> = commits
+            .iter()
+            .enumerate()
+            .map(|(idx, row)| {
+                let line = presenter.commit_row_line(row);
+                let is_cursor = cursor_idx == Some(idx);
+                ListItem::new(line).style(list_row_style(
+                    row.selected,
+                    is_cursor,
+                    self.focused == FocusPane::Commits,
+                    Some(self.theme.cursor_bg),
+                    self.theme,
+                ))
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(border_style),
+            )
+            .highlight_style(Style::default())
+            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
+
+        frame.render_stateful_widget(list, rect, commit_list_state);
     }
 }
 
