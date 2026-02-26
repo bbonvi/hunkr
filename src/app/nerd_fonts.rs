@@ -129,6 +129,10 @@ fn example_variant_icon(lower_name: &str) -> Option<&'static str> {
 }
 
 fn special_file_icon(lower_name: &str) -> Option<&'static str> {
+    if is_docker_compose_file_name(lower_name) {
+        return Some("");
+    }
+
     match lower_name {
         ".gitignore" | ".gitattributes" | ".gitmodules" => Some(""),
         ".dockerignore" => Some(""),
@@ -138,6 +142,11 @@ fn special_file_icon(lower_name: &str) -> Option<&'static str> {
         "license" | "copying" => Some(""),
         _ => None,
     }
+}
+
+fn is_docker_compose_file_name(lower_name: &str) -> bool {
+    matches!(lower_name, "compose.yml" | "compose.yaml")
+        || lower_name.starts_with("docker-compose.")
 }
 
 fn file_extension_icon(ext: &str) -> Option<&'static str> {
@@ -253,5 +262,18 @@ mod tests {
             format_path_with_icon("Dockerfile.example", true),
             " Dockerfile.example"
         );
+    }
+
+    #[test]
+    fn docker_compose_files_use_docker_icon() {
+        assert_eq!(
+            format_path_with_icon("docker-compose.yml", true),
+            " docker-compose.yml"
+        );
+        assert_eq!(
+            format_path_with_icon("docker-compose.override.yaml", true),
+            " docker-compose.override.yaml"
+        );
+        assert_eq!(format_path_with_icon("compose.yaml", true), " compose.yaml");
     }
 }
