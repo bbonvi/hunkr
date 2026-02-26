@@ -971,9 +971,11 @@ impl App {
                 };
 
                 let is_cursor = cursor_idx == Some(idx);
-                ListItem::new(line).style(cursor_row_style(
+                ListItem::new(line).style(list_row_style(
+                    false,
                     is_cursor,
                     self.focused == FocusPane::Files,
+                    None,
                     theme,
                 ))
             })
@@ -1034,10 +1036,11 @@ impl App {
             .map(|(idx, row)| {
                 let line = compose_commit_line(row, width, now_ts, theme);
                 let is_cursor = cursor_idx == Some(idx);
-                ListItem::new(line).style(commit_row_style(
+                ListItem::new(line).style(list_row_style(
                     row.selected,
                     is_cursor,
                     self.focused == FocusPane::Commits,
+                    Some(theme.cursor_bg),
                     theme,
                 ))
             })
@@ -2699,32 +2702,30 @@ fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
     }
 }
 
-fn cursor_row_style(cursor: bool, cursor_focused: bool, theme: &UiTheme) -> Style {
-    if !cursor {
-        return Style::default();
-    }
+fn list_row_style(
+    selected: bool,
+    cursor: bool,
+    cursor_focused: bool,
+    selected_bg: Option<Color>,
+    theme: &UiTheme,
+) -> Style {
+    let selected_bg = selected_bg.unwrap_or(theme.cursor_bg);
     let cursor_bg = if cursor_focused {
         theme.visual_bg
     } else {
         theme.cursor_bg
     };
-    Style::default().bg(cursor_bg).add_modifier(Modifier::BOLD)
-}
 
-fn commit_row_style(selected: bool, cursor: bool, cursor_focused: bool, theme: &UiTheme) -> Style {
     if cursor {
-        let cursor_style = cursor_row_style(true, cursor_focused, theme);
         if selected {
-            return cursor_style.patch(Style::default().bg(blend_colors(
-                theme.cursor_bg,
-                cursor_style.bg.unwrap_or(theme.visual_bg),
-                170,
-            )));
+            return Style::default()
+                .bg(blend_colors(selected_bg, cursor_bg, 170))
+                .add_modifier(Modifier::BOLD);
         }
-        return cursor_style;
+        return Style::default().bg(cursor_bg).add_modifier(Modifier::BOLD);
     }
     if selected {
-        return Style::default().bg(theme.cursor_bg);
+        return Style::default().bg(selected_bg);
     }
     Style::default()
 }
@@ -3531,11 +3532,11 @@ mod tests {
     }
 
     #[test]
-    fn commit_row_style_layers_cursor_over_selection() {
+    fn list_row_style_layers_cursor_over_selection() {
         let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let selected_only = commit_row_style(true, false, false, &theme);
-        let cursor_only = commit_row_style(false, true, true, &theme);
-        let selected_cursor = commit_row_style(true, true, true, &theme);
+        let selected_only = list_row_style(true, false, false, Some(theme.cursor_bg), &theme);
+        let cursor_only = list_row_style(false, true, true, Some(theme.cursor_bg), &theme);
+        let selected_cursor = list_row_style(true, true, true, Some(theme.cursor_bg), &theme);
 
         assert_eq!(selected_only.bg, Some(theme.cursor_bg));
         assert_eq!(cursor_only.bg, Some(theme.visual_bg));
@@ -3543,10 +3544,10 @@ mod tests {
     }
 
     #[test]
-    fn cursor_row_style_uses_focus_sensitive_colors() {
+    fn list_row_style_uses_focus_sensitive_cursor_colors() {
         let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let focused = cursor_row_style(true, true, &theme);
-        let unfocused = cursor_row_style(true, false, &theme);
+        let focused = list_row_style(false, true, true, None, &theme);
+        let unfocused = list_row_style(false, true, false, None, &theme);
 
         assert_eq!(focused.bg, Some(theme.visual_bg));
         assert_eq!(unfocused.bg, Some(theme.cursor_bg));
