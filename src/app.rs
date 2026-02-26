@@ -1417,6 +1417,14 @@ impl App {
     fn reload_commits(&mut self, preserve_manual_selection: bool) -> anyhow::Result<()> {
         let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
         let default_selected = self.git.default_unpushed_commit_ids()?;
+        let prior_cursor_idx = self.commit_list_state.selected();
+        let prior_cursor_commit_id = prior_cursor_idx
+            .and_then(|idx| self.commits.get(idx))
+            .map(|row| row.info.id.clone());
+        let prior_visual_anchor_commit_id = self
+            .commit_visual_anchor
+            .and_then(|idx| self.commits.get(idx))
+            .map(|row| row.info.id.clone());
 
         let mut old_selected = BTreeSet::new();
         if preserve_manual_selection {
@@ -1472,9 +1480,15 @@ impl App {
             },
         );
 
-        if self.commit_list_state.selected().is_none() && !self.commits.is_empty() {
-            self.commit_list_state.select(Some(0));
-        }
+        let restored_cursor = restore_list_index_by_commit_id(
+            &self.commits,
+            prior_cursor_commit_id.as_deref(),
+            prior_cursor_idx,
+        );
+        self.commit_list_state.select(restored_cursor);
+        self.commit_visual_anchor = prior_visual_anchor_commit_id
+            .as_deref()
+            .and_then(|commit_id| index_of_commit(&self.commits, commit_id));
 
         let new_commits = self
             .commits
@@ -3034,6 +3048,28 @@ fn selected_ids_oldest_first(rows: &[CommitRow]) -> Vec<String> {
         .collect()
 }
 
+fn index_of_commit(rows: &[CommitRow], commit_id: &str) -> Option<usize> {
+    rows.iter().position(|row| row.info.id == commit_id)
+}
+
+fn restore_list_index_by_commit_id(
+    rows: &[CommitRow],
+    previous_commit_id: Option<&str>,
+    fallback_index: Option<usize>,
+) -> Option<usize> {
+    if rows.is_empty() {
+        return None;
+    }
+    if let Some(commit_id) = previous_commit_id
+        && let Some(idx) = index_of_commit(rows, commit_id)
+    {
+        return Some(idx);
+    }
+    fallback_index
+        .map(|idx| idx.min(rows.len() - 1))
+        .or(Some(0))
+}
+
 fn merge_aggregate_diff(base: &mut AggregatedDiff, next: AggregatedDiff) {
     for (path, mut patch) in next.files {
         base.files
@@ -3321,6 +3357,41 @@ mod tests {
         assert_eq!(
             selected_ids_oldest_first(&rows),
             vec!["oldest".to_owned(), "newest".to_owned()]
+        );
+    }
+
+    #[test]
+    fn restore_list_index_prefers_previous_commit_id() {
+        let rows = vec![
+            commit_row("c1", false, ReviewStatus::Unreviewed),
+            commit_row("c2", false, ReviewStatus::Unreviewed),
+            commit_row("c3", false, ReviewStatus::Unreviewed),
+        ];
+
+        assert_eq!(
+            restore_list_index_by_commit_id(&rows, Some("c2"), Some(0)),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn restore_list_index_falls_back_and_clamps() {
+        let rows = vec![
+            commit_row("c1", false, ReviewStatus::Unreviewed),
+            commit_row("c2", false, ReviewStatus::Unreviewed),
+        ];
+
+        assert_eq!(
+            restore_list_index_by_commit_id(&rows, Some("missing"), Some(9)),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn restore_list_index_returns_none_for_empty_rows() {
+        assert_eq!(
+            restore_list_index_by_commit_id(&[], Some("c1"), Some(0)),
+            None
         );
     }
 
