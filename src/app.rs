@@ -42,7 +42,7 @@ use crate::{
 
 const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
-const DIFF_WHEEL_SCROLL_LINES: isize = 2;
+const DIFF_WHEEL_SCROLL_LINES: isize = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 const LIST_HIGHLIGHT_SYMBOL: &str = ">> ";
 const LIST_HIGHLIGHT_SYMBOL_WIDTH: u16 = 3;
