@@ -643,7 +643,7 @@ impl App {
 
     /// Copies the active review-task markdown path to clipboard for quick sharing.
     pub(super) fn copy_review_tasks_path(&mut self) {
-        let report_path = self.comments.report_path().display().to_string();
+        let report_path = format_path_with_home_tilde(self.comments.report_path());
         match crate::clipboard::copy_to_clipboard_with_fallbacks(&report_path) {
             Ok(backend) => {
                 self.status = format!("Copied review tasks path via {backend}: {report_path}");
@@ -660,5 +660,52 @@ impl App {
             self.store.commit_status(&self.review_state, commit_id)
         })?;
         Ok(())
+    }
+}
+
+fn format_path_with_home_tilde(path: &std::path::Path) -> String {
+    let Some(home) = std::env::var_os("HOME") else {
+        return path.display().to_string();
+    };
+    let home = std::path::PathBuf::from(home);
+    if let Ok(relative) = path.strip_prefix(&home) {
+        if relative.as_os_str().is_empty() {
+            return "~".to_owned();
+        }
+        return std::path::Path::new("~")
+            .join(relative)
+            .display()
+            .to_string();
+    }
+    path.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_path_with_home_tilde;
+
+    #[test]
+    fn home_path_is_rendered_with_tilde() {
+        let rendered = format_path_with_home_tilde(std::path::Path::new(
+            "/home/dev/projects/avd/.hunkr/comments/main-review-tasks.md",
+        ));
+        let expected = if std::env::var_os("HOME")
+            .as_ref()
+            .is_some_and(|home| home == "/home/dev")
+        {
+            "~/projects/avd/.hunkr/comments/main-review-tasks.md"
+        } else {
+            "/home/dev/projects/avd/.hunkr/comments/main-review-tasks.md"
+        };
+        assert_eq!(rendered, expected);
+    }
+
+    #[test]
+    fn non_home_path_stays_absolute() {
+        let path = std::path::Path::new("/opt/tools/review-tasks.md");
+        assert_eq!(
+            format_path_with_home_tilde(path),
+            "/opt/tools/review-tasks.md"
+        );
     }
 }
