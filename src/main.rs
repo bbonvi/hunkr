@@ -33,7 +33,7 @@ fn run_event_loop(
             break;
         }
 
-        if event::poll(Duration::from_millis(100)).context("event poll failed")? {
+        if event::poll(Duration::from_millis(800)).context("event poll failed")? {
             let evt = event::read().context("event read failed")?;
             app.handle_event(evt);
         } else {
