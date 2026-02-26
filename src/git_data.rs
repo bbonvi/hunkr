@@ -209,7 +209,11 @@ impl GitService {
 
         let source = DiffSourceMeta {
             commit_id: newest_id.clone(),
-            commit_short: short_id(newest_id),
+            commit_short: if ordered_commit_ids.len() > 1 {
+                String::new()
+            } else {
+                short_id(newest_id)
+            },
             commit_summary: aggregate_commit_summary(
                 &oldest_commit,
                 &newest_commit,
@@ -415,7 +419,7 @@ fn aggregate_commit_summary(
 
     let oldest = short_id(&oldest_commit.id().to_string());
     let newest = short_id(&newest_commit.id().to_string());
-    format!("net changes across {commit_count} commits ({oldest}..{newest})")
+    format!("selection net changes ({oldest}..{newest})")
 }
 
 #[cfg(test)]
@@ -529,13 +533,13 @@ mod tests {
             patch
                 .hunks
                 .iter()
-                .all(|h| h.commit_id == newest.id && h.commit_short == newest.short_id)
+                .all(|h| h.commit_id == newest.id && h.commit_short.is_empty())
         );
         assert!(
             patch
                 .hunks
                 .iter()
-                .all(|h| h.commit_summary.contains("net changes across 2 commits"))
+                .all(|h| h.commit_summary.contains("selection net changes ("))
         );
     }
 

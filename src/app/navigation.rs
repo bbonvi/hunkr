@@ -500,6 +500,10 @@ impl App {
             return None;
         }
 
+        let selected_commits = self
+            .selected_commit_ids_oldest_first()
+            .into_iter()
+            .collect::<BTreeSet<_>>();
         let (start_idx, end_idx) = self.diff_selected_range()?;
         let mut commit_anchors = Vec::new();
         let mut hunk_anchors = Vec::new();
@@ -538,11 +542,16 @@ impl App {
                 return None;
             }
             let anchor = commit_anchors.last()?.clone();
+            let commits = if selected_commits.is_empty() {
+                BTreeSet::from([anchor.commit_id.clone()])
+            } else {
+                selected_commits
+            };
             return Some(CommentTarget {
                 kind: CommentTargetKind::Commit,
                 start: anchor.clone(),
                 end: anchor.clone(),
-                commits: BTreeSet::from([anchor.commit_id.clone()]),
+                commits,
                 selected_lines: if commit_lines.is_empty() {
                     Vec::new()
                 } else {
@@ -557,10 +566,14 @@ impl App {
 
         let start = hunk_anchors.first()?.clone();
         let end = hunk_anchors.last()?.clone();
-        let commits = hunk_anchors
-            .iter()
-            .map(|anchor| anchor.commit_id.clone())
-            .collect::<BTreeSet<_>>();
+        let commits = if selected_commits.is_empty() {
+            hunk_anchors
+                .iter()
+                .map(|anchor| anchor.commit_id.clone())
+                .collect::<BTreeSet<_>>()
+        } else {
+            selected_commits
+        };
 
         Some(CommentTarget {
             kind: CommentTargetKind::Hunk,

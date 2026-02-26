@@ -308,25 +308,46 @@ impl App {
             };
             if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
                 let age = format_relative_time(hunk.commit_timestamp, now_ts);
-                let commit_line = format!(
-                    "---- commit {} {} ({})",
-                    hunk.commit_short, hunk.commit_summary, age
-                );
-                rendered.push(RenderedDiffLine {
-                    line: Line::from(vec![
-                        Span::styled("---- ", Style::default().fg(theme.dimmed)),
-                        Span::styled("commit ", Style::default().fg(theme.muted)),
-                        Span::styled(
-                            hunk.commit_short.clone(),
-                            Style::default()
-                                .fg(theme.focus_border)
-                                .add_modifier(Modifier::BOLD),
+                let (commit_line, line) = if hunk.commit_short.is_empty() {
+                    (
+                        format!("---- {} ({})", hunk.commit_summary, age),
+                        Line::from(vec![
+                            Span::styled("---- ", Style::default().fg(theme.dimmed)),
+                            Span::styled(
+                                hunk.commit_summary.clone(),
+                                Style::default().fg(theme.text),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
+                        ]),
+                    )
+                } else {
+                    (
+                        format!(
+                            "---- commit {} {} ({})",
+                            hunk.commit_short, hunk.commit_summary, age
                         ),
-                        Span::raw(" "),
-                        Span::styled(hunk.commit_summary.clone(), Style::default().fg(theme.text)),
-                        Span::raw(" "),
-                        Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
-                    ]),
+                        Line::from(vec![
+                            Span::styled("---- ", Style::default().fg(theme.dimmed)),
+                            Span::styled("commit ", Style::default().fg(theme.muted)),
+                            Span::styled(
+                                hunk.commit_short.clone(),
+                                Style::default()
+                                    .fg(theme.focus_border)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(
+                                hunk.commit_summary.clone(),
+                                Style::default().fg(theme.text),
+                            ),
+                            Span::raw(" "),
+                            Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
+                        ]),
+                    )
+                };
+                rendered.push(RenderedDiffLine {
+                    line,
                     raw_text: commit_line,
                     anchor: Some(commit_anchor.clone()),
                     comment_id: None,

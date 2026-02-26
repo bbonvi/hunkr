@@ -6,7 +6,7 @@ use std::{
 use anyhow::Context;
 use chrono::Utc;
 
-use crate::model::{CommentTarget, CommentTargetKind, ReviewComment, ReviewStatus};
+use crate::model::{CommentTarget, ReviewComment, ReviewStatus};
 
 const COMMENTS_DIR: &str = "comments";
 const COMMENTS_INDEX_FILE: &str = "index.json";
@@ -226,10 +226,15 @@ where
             comment.target.end.hunk_header,
             format_anchor_lines(comment.target.end.old_lineno, comment.target.end.new_lineno)
         ));
-        if comment.target.kind == CommentTargetKind::Commit {
+        if comment.target.start.commit_summary == comment.target.end.commit_summary {
             report.push_str(&format!(
-                "- Commit Summary: {}\n",
+                "- Commit Context: {}\n",
                 comment.target.start.commit_summary
+            ));
+        } else {
+            report.push_str(&format!(
+                "- Commit Context: {} -> {}\n",
+                comment.target.start.commit_summary, comment.target.end.commit_summary
             ));
         }
         report.push_str(&format!("- Updated: {}\n", comment.updated_at));
@@ -346,6 +351,8 @@ mod tests {
             .sync_review_tasks_report(|_| ReviewStatus::IssueFound)
             .expect("sync");
         assert!(store.report_path().exists());
+        let report = fs::read_to_string(store.report_path()).expect("read report");
+        assert!(report.contains("- Commit Context: add parser"));
         assert_eq!(store.comments().len(), 1);
 
         let updated = store.update_comment(id, "Renamed now").expect("update");

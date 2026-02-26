@@ -45,7 +45,7 @@ fn aggregate_for_multiple_commits_returns_net_change_only() {
         patch
             .hunks
             .iter()
-            .all(|h| h.commit_summary.contains("net changes across 2 commits"))
+            .all(|h| h.commit_summary.contains("selection net changes ("))
     );
 }
 
