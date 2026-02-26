@@ -83,7 +83,6 @@ struct UiTheme {
     text: Color,
     muted: Color,
     dimmed: Color,
-    highlight_bg: Color,
     cursor_bg: Color,
     visual_bg: Color,
     reviewed: Color,
@@ -112,7 +111,6 @@ impl UiTheme {
                 text: Color::Rgb(228, 228, 228),
                 muted: Color::Rgb(170, 170, 170),
                 dimmed: Color::Rgb(115, 115, 115),
-                highlight_bg: Color::Rgb(36, 36, 42),
                 cursor_bg: Color::Rgb(52, 52, 62),
                 visual_bg: Color::Rgb(57, 67, 93),
                 reviewed: Color::Rgb(85, 190, 120),
@@ -137,7 +135,6 @@ impl UiTheme {
                 text: Color::Rgb(40, 40, 40),
                 muted: Color::Rgb(90, 90, 90),
                 dimmed: Color::Rgb(140, 140, 140),
-                highlight_bg: Color::Rgb(236, 236, 236),
                 cursor_bg: Color::Rgb(226, 226, 226),
                 visual_bg: Color::Rgb(215, 225, 241),
                 reviewed: Color::Rgb(36, 141, 74),
@@ -947,29 +944,38 @@ impl App {
 
         let width = list_content_width(rect.width);
         let now_ts = Utc::now().timestamp();
+        let cursor_idx = self.file_list_state.selected();
 
         let items: Vec<ListItem<'static>> = self
             .file_rows
             .iter()
-            .map(|row| {
-                if row.selectable {
+            .enumerate()
+            .map(|(idx, row)| {
+                let line = if row.selectable {
                     let right = row
                         .modified_ts
                         .map(|ts| format_relative_time(ts, now_ts))
                         .unwrap_or_default();
-                    ListItem::new(line_with_right(
+                    line_with_right(
                         row.label.clone(),
                         Style::default().fg(theme.text),
                         right,
                         Style::default().fg(theme.dimmed),
                         width,
-                    ))
+                    )
                 } else {
-                    ListItem::new(Line::from(Span::styled(
+                    Line::from(Span::styled(
                         row.label.clone(),
                         Style::default().fg(theme.dir).add_modifier(Modifier::BOLD),
-                    )))
-                }
+                    ))
+                };
+
+                let is_cursor = cursor_idx == Some(idx);
+                ListItem::new(line).style(cursor_row_style(
+                    is_cursor,
+                    self.focused == FocusPane::Files,
+                    theme,
+                ))
             })
             .collect();
 
@@ -981,7 +987,7 @@ impl App {
                     .border_type(BorderType::Rounded)
                     .border_style(border_style),
             )
-            .highlight_style(Style::default().bg(theme.highlight_bg))
+            .highlight_style(Style::default())
             .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
 
         frame.render_stateful_widget(list, rect, &mut self.file_list_state);
@@ -2693,19 +2699,32 @@ fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
     }
 }
 
+fn cursor_row_style(cursor: bool, cursor_focused: bool, theme: &UiTheme) -> Style {
+    if !cursor {
+        return Style::default();
+    }
+    let cursor_bg = if cursor_focused {
+        theme.visual_bg
+    } else {
+        theme.cursor_bg
+    };
+    Style::default().bg(cursor_bg).add_modifier(Modifier::BOLD)
+}
+
 fn commit_row_style(selected: bool, cursor: bool, cursor_focused: bool, theme: &UiTheme) -> Style {
     if cursor {
-        let cursor_bg = if selected {
-            blend_colors(theme.visual_bg, theme.cursor_bg, 170)
-        } else if cursor_focused {
-            theme.cursor_bg
-        } else {
-            theme.highlight_bg
-        };
-        return Style::default().bg(cursor_bg).add_modifier(Modifier::BOLD);
+        let cursor_style = cursor_row_style(true, cursor_focused, theme);
+        if selected {
+            return cursor_style.patch(Style::default().bg(blend_colors(
+                theme.cursor_bg,
+                cursor_style.bg.unwrap_or(theme.visual_bg),
+                170,
+            )));
+        }
+        return cursor_style;
     }
     if selected {
-        return Style::default().bg(theme.visual_bg);
+        return Style::default().bg(theme.cursor_bg);
     }
     Style::default()
 }
@@ -3518,9 +3537,19 @@ mod tests {
         let cursor_only = commit_row_style(false, true, true, &theme);
         let selected_cursor = commit_row_style(true, true, true, &theme);
 
-        assert_eq!(selected_only.bg, Some(theme.visual_bg));
-        assert_eq!(cursor_only.bg, Some(theme.cursor_bg));
-        assert!(selected_cursor.bg.is_some_and(|bg| bg != theme.visual_bg));
+        assert_eq!(selected_only.bg, Some(theme.cursor_bg));
+        assert_eq!(cursor_only.bg, Some(theme.visual_bg));
+        assert!(selected_cursor.bg.is_some_and(|bg| bg != theme.cursor_bg));
+    }
+
+    #[test]
+    fn cursor_row_style_uses_focus_sensitive_colors() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let focused = cursor_row_style(true, true, &theme);
+        let unfocused = cursor_row_style(true, false, &theme);
+
+        assert_eq!(focused.bg, Some(theme.visual_bg));
+        assert_eq!(unfocused.bg, Some(theme.cursor_bg));
     }
 
     #[test]
