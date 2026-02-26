@@ -823,6 +823,42 @@ fn range_selection_handles_reverse_bounds() {
 }
 
 #[test]
+fn toggle_range_from_baseline_inverts_only_rows_inside_range() {
+    let baseline = vec![true, false, true, false];
+    let mut rows = vec![
+        commit_row("a", baseline[0], ReviewStatus::Unreviewed),
+        commit_row("b", baseline[1], ReviewStatus::Unreviewed),
+        commit_row("c", baseline[2], ReviewStatus::Unreviewed),
+        commit_row("d", baseline[3], ReviewStatus::Unreviewed),
+    ];
+
+    apply_toggle_range_from_baseline(&mut rows, &baseline, 1, 2);
+
+    assert!(rows[0].selected);
+    assert!(rows[1].selected);
+    assert!(!rows[2].selected);
+    assert!(!rows[3].selected);
+}
+
+#[test]
+fn toggle_range_from_baseline_handles_reverse_bounds() {
+    let baseline = vec![false, false, true, true];
+    let mut rows = vec![
+        commit_row("a", baseline[0], ReviewStatus::Unreviewed),
+        commit_row("b", baseline[1], ReviewStatus::Unreviewed),
+        commit_row("c", baseline[2], ReviewStatus::Unreviewed),
+        commit_row("d", baseline[3], ReviewStatus::Unreviewed),
+    ];
+
+    apply_toggle_range_from_baseline(&mut rows, &baseline, 3, 1);
+
+    assert!(!rows[0].selected);
+    assert!(rows[1].selected);
+    assert!(!rows[2].selected);
+    assert!(!rows[3].selected);
+}
+
+#[test]
 fn select_only_index_keeps_only_target_selected() {
     let mut rows = vec![
         commit_row("a", true, ReviewStatus::Unreviewed),

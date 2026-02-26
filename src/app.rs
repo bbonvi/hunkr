@@ -329,6 +329,8 @@ pub struct App {
     commit_selection_anchor: Option<usize>,
     commit_mouse_anchor: Option<usize>,
     commit_mouse_dragging: bool,
+    commit_mouse_drag_mode: Option<CommitMouseSelectionMode>,
+    commit_mouse_drag_baseline: Option<Vec<bool>>,
     last_list_wheel_event: Option<(FocusPane, isize, Instant)>,
     diff_visual: Option<DiffVisualSelection>,
     diff_mouse_anchor: Option<usize>,
@@ -615,6 +617,25 @@ fn commit_mouse_selection_mode(modifiers: KeyModifiers) -> CommitMouseSelectionM
         return CommitMouseSelectionMode::Toggle;
     }
     CommitMouseSelectionMode::Replace
+}
+
+fn apply_toggle_range_from_baseline(
+    rows: &mut [CommitRow],
+    baseline: &[bool],
+    start: usize,
+    end: usize,
+) {
+    if rows.len() != baseline.len() {
+        return;
+    }
+    let (start, end) = (min(start, end), max(start, end));
+    for (idx, row) in rows.iter_mut().enumerate() {
+        row.selected = if idx >= start && idx <= end {
+            !baseline[idx]
+        } else {
+            baseline[idx]
+        };
+    }
 }
 
 fn compose_sticky_banner_indexes(

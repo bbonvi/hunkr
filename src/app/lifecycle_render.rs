@@ -29,6 +29,8 @@ impl App {
             commit_selection_anchor: None,
             commit_mouse_anchor: None,
             commit_mouse_dragging: false,
+            commit_mouse_drag_mode: None,
+            commit_mouse_drag_baseline: None,
             last_list_wheel_event: None,
             diff_visual: None,
             diff_mouse_anchor: None,
@@ -1136,6 +1138,8 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.commit_mouse_anchor = None;
                 self.commit_mouse_dragging = false;
+                self.commit_mouse_drag_mode = None;
+                self.commit_mouse_drag_baseline = None;
                 if in_files {
                     self.set_focus(FocusPane::Files);
                     self.diff_mouse_anchor = None;
@@ -1149,12 +1153,19 @@ impl App {
                     self.diff_mouse_anchor = None;
                     self.commit_visual_anchor = None;
                     if let Some(idx) = resolve_commit_visible_idx(self, y) {
+                        let drag_mode = commit_mouse_selection_mode(mouse.modifiers);
+                        let baseline = self.commits.iter().map(|row| row.selected).collect();
                         let clicked_full_idx =
                             self.select_commit_row_with_mouse(idx, mouse.modifiers);
-                        if commit_mouse_selection_mode(mouse.modifiers)
-                            == CommitMouseSelectionMode::Replace
-                        {
+                        if matches!(
+                            drag_mode,
+                            CommitMouseSelectionMode::Replace | CommitMouseSelectionMode::Toggle
+                        ) {
                             self.commit_mouse_anchor = clicked_full_idx;
+                            self.commit_mouse_drag_mode = Some(drag_mode);
+                            if drag_mode == CommitMouseSelectionMode::Toggle {
+                                self.commit_mouse_drag_baseline = Some(baseline);
+                            }
                         } else {
                             self.commit_mouse_anchor = None;
                         }
@@ -1186,7 +1197,21 @@ impl App {
                     if let Some(full_idx) = visible_indices.get(visible_idx).copied() {
                         self.commit_list_state.select(Some(visible_idx));
                         let anchor = self.commit_mouse_anchor.expect("checked above");
-                        apply_range_selection(&mut self.commits, anchor, full_idx);
+                        match self.commit_mouse_drag_mode {
+                            Some(CommitMouseSelectionMode::Toggle) => {
+                                if let Some(baseline) = self.commit_mouse_drag_baseline.as_deref() {
+                                    apply_toggle_range_from_baseline(
+                                        &mut self.commits,
+                                        baseline,
+                                        anchor,
+                                        full_idx,
+                                    );
+                                } else {
+                                    apply_range_selection(&mut self.commits, anchor, full_idx);
+                                }
+                            }
+                            _ => apply_range_selection(&mut self.commits, anchor, full_idx),
+                        }
                         if anchor != full_idx {
                             self.commit_mouse_dragging = true;
                         }
@@ -1209,6 +1234,8 @@ impl App {
                 let commit_dragging = self.commit_mouse_dragging;
                 self.commit_mouse_anchor = None;
                 self.commit_mouse_dragging = false;
+                self.commit_mouse_drag_mode = None;
+                self.commit_mouse_drag_baseline = None;
 
                 if in_diff {
                     if let Some(row) = resolve_diff_row(self, y) {

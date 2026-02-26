@@ -565,6 +565,8 @@ impl App {
         self.commit_visual_anchor = None;
         self.commit_mouse_anchor = None;
         self.commit_mouse_dragging = false;
+        self.commit_mouse_drag_mode = None;
+        self.commit_mouse_drag_baseline = None;
         self.clear_diff_visual_selection();
         self.diff_pending_op = None;
     }
