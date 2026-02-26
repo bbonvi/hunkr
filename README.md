@@ -62,7 +62,6 @@ Supported keys:
 - `startup_theme`: `dark` or `light` (`dark` default)
 - `diff_wheel_scroll_lines`: positive integer (`1` default)
 - `nerd_fonts`: enable Nerd Font icons/symbols in file tree, diff banners, and commit markers (`true` default)
-- `nerd_font_icons`: optional icon override map (`special_files` and `extensions`) for custom Nerd Font themes without code edits
 
 ## Keybindings
 

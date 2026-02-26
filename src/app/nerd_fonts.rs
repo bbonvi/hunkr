@@ -2,8 +2,6 @@ use std::{collections::HashMap, path::Path};
 
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::NerdFontIconConfig;
-
 const DEFAULT_DIRECTORY_ICON: &str = "";
 const DEFAULT_FILE_ICON: &str = "󰈔";
 const DEFAULT_ENV_ICON: &str = "";
@@ -29,33 +27,6 @@ impl Default for NerdFontTheme {
             special_files: default_special_file_icons(),
             extensions: default_extension_icons(),
         }
-    }
-}
-
-impl NerdFontTheme {
-    pub(super) fn from_config(config: &NerdFontIconConfig) -> Self {
-        let mut theme = Self::default();
-        apply_string_override(&mut theme.directory_icon, &config.directory_icon);
-        apply_string_override(&mut theme.default_file_icon, &config.default_file_icon);
-        apply_string_override(&mut theme.env_icon, &config.env_icon);
-        apply_string_override(&mut theme.docker_icon, &config.docker_icon);
-
-        for (name, icon) in &config.special_files {
-            if let Some(icon) = normalized_non_empty(icon) {
-                theme
-                    .special_files
-                    .insert(normalize_name_key(name), icon.to_owned());
-            }
-        }
-        for (extension, icon) in &config.extensions {
-            if let Some(icon) = normalized_non_empty(icon) {
-                theme
-                    .extensions
-                    .insert(normalize_extension_key(extension), icon.to_owned());
-            }
-        }
-
-        theme
     }
 }
 
@@ -215,23 +186,8 @@ fn is_docker_compose_file_name(lower_name: &str) -> bool {
         || lower_name.starts_with("docker-compose.")
 }
 
-fn normalize_name_key(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
-}
-
 fn normalize_extension_key(value: &str) -> String {
     value.trim().trim_start_matches('.').to_ascii_lowercase()
-}
-
-fn normalized_non_empty(value: &str) -> Option<&str> {
-    let trimmed = value.trim();
-    (!trimmed.is_empty()).then_some(trimmed)
-}
-
-fn apply_string_override(target: &mut String, source: &Option<String>) {
-    if let Some(source) = source.as_deref().and_then(normalized_non_empty) {
-        *target = source.to_owned();
-    }
 }
 
 fn default_special_file_icons() -> HashMap<String, String> {
@@ -446,18 +402,5 @@ mod tests {
         let compose = icon_prefix(&compose_path);
         let dockerfile = icon_prefix(&dockerfile_path);
         assert_eq!(compose, dockerfile);
-    }
-
-    #[test]
-    fn config_overrides_apply_without_code_changes() {
-        let config = NerdFontIconConfig {
-            env_icon: Some("ENV".to_owned()),
-            extensions: [("rs".to_owned(), "RUST".to_owned())].into_iter().collect(),
-            ..NerdFontIconConfig::default()
-        };
-        let theme = NerdFontTheme::from_config(&config);
-
-        assert!(format_path_with_icon(".env", true, &theme).starts_with("ENV "));
-        assert!(format_path_with_icon("src/lib.rs", true, &theme).starts_with("RUST "));
     }
 }

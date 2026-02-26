@@ -5,13 +5,3 @@ startup_theme: dark
 diff_wheel_scroll_lines: 1
 # nerd_fonts: enable Nerd Font icons/symbols in list and diff UI.
 nerd_fonts: true
-# nerd_font_icons: optional icon overrides. Any omitted key uses built-in defaults.
-# nerd_font_icons:
-#   env_icon: ""
-#   docker_icon: ""
-#   directory_icon: ""
-#   default_file_icon: "󰈔"
-#   special_files:
-#     "readme.md": ""
-#   extensions:
-#     rs: ""

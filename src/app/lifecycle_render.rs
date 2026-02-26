@@ -23,7 +23,7 @@ impl App {
             theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
             diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
             nerd_fonts: config.nerd_fonts,
-            nerd_font_theme: NerdFontTheme::from_config(&config.nerd_font_icons),
+            nerd_font_theme: NerdFontTheme::default(),
             commit_visual_anchor: None,
             diff_visual: None,
             aggregate: AggregatedDiff::default(),
