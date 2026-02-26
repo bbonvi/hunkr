@@ -83,7 +83,7 @@ fn nerd_file_icon_for_path(path: &str) -> &'static str {
     let lower_name = file_name.to_ascii_lowercase();
 
     if is_env_file_name(&lower_name) {
-        return "";
+        return "";
     }
 
     if let Some(icon) = example_variant_icon(&lower_name) {
@@ -116,7 +116,7 @@ fn example_variant_icon(lower_name: &str) -> Option<&'static str> {
     }
 
     if is_env_file_name(base_name) {
-        return Some("");
+        return Some("");
     }
     if let Some(icon) = special_file_icon(base_name) {
         return Some(icon);
@@ -252,11 +252,11 @@ mod tests {
 
     #[test]
     fn env_variants_map_to_env_icon() {
-        assert_eq!(format_path_with_icon(".env", true), " .env");
-        assert_eq!(format_path_with_icon(".env.dev", true), " .env.dev");
+        assert_eq!(format_path_with_icon(".env", true), " .env");
+        assert_eq!(format_path_with_icon(".env.dev", true), " .env.dev");
         assert_eq!(
             format_path_with_icon(".env.example", true),
-            " .env.example"
+            " .env.example"
         );
     }
 
