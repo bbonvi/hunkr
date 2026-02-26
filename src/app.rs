@@ -28,7 +28,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod comment_helpers;
 mod core_helpers;
+mod lifecycle_input;
+mod lifecycle_mouse;
 mod lifecycle_render;
+mod lifecycle_view;
 mod navigation;
 mod nerd_fonts;
 mod selection_helpers;
