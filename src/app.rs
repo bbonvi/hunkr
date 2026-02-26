@@ -122,6 +122,10 @@ struct UiTheme {
     diff_meta: Color,
     diff_header: Color,
     dir: Color,
+    modal_bg: Color,
+    modal_editor_bg: Color,
+    modal_cursor_fg: Color,
+    modal_cursor_bg: Color,
 }
 
 impl UiTheme {
@@ -150,6 +154,10 @@ impl UiTheme {
                 diff_meta: Color::Rgb(235, 199, 86),
                 diff_header: Color::Rgb(101, 188, 227),
                 dir: Color::Rgb(150, 170, 230),
+                modal_bg: Color::Rgb(18, 19, 26),
+                modal_editor_bg: Color::Rgb(28, 30, 40),
+                modal_cursor_fg: Color::Rgb(245, 245, 245),
+                modal_cursor_bg: Color::Rgb(95, 128, 255),
             },
             ThemeMode::Light => Self {
                 border: Color::Rgb(195, 195, 195),
@@ -174,6 +182,10 @@ impl UiTheme {
                 diff_meta: Color::Rgb(145, 94, 0),
                 diff_header: Color::Rgb(0, 111, 151),
                 dir: Color::Rgb(80, 99, 172),
+                modal_bg: Color::Rgb(248, 249, 253),
+                modal_editor_bg: Color::Rgb(238, 241, 248),
+                modal_cursor_fg: Color::Rgb(255, 255, 255),
+                modal_cursor_bg: Color::Rgb(41, 94, 214),
             },
         }
     }
@@ -265,6 +277,7 @@ pub struct App {
     pane_rects: PaneRects,
     status: String,
     comment_buffer: String,
+    comment_cursor: usize,
     diff_search_buffer: String,
     diff_search_query: Option<String>,
     diff_pending_op: Option<DiffPendingOp>,
@@ -512,6 +525,328 @@ fn truncate(text: &str, max_chars: usize) -> String {
 
 fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WordClass {
+    Whitespace,
+    Word,
+    Symbol,
+}
+
+fn classify_char(ch: char) -> WordClass {
+    if ch.is_whitespace() {
+        WordClass::Whitespace
+    } else if ch.is_alphanumeric() || ch == '_' {
+        WordClass::Word
+    } else {
+        WordClass::Symbol
+    }
+}
+
+fn clamp_char_boundary(text: &str, cursor: usize) -> usize {
+    let mut idx = cursor.min(text.len());
+    while idx > 0 && !text.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+fn prev_char_boundary(text: &str, cursor: usize) -> usize {
+    if cursor == 0 {
+        return 0;
+    }
+    text[..cursor]
+        .char_indices()
+        .next_back()
+        .map(|(idx, _)| idx)
+        .unwrap_or(0)
+}
+
+fn next_char_boundary(text: &str, cursor: usize) -> usize {
+    if cursor >= text.len() {
+        return text.len();
+    }
+    let Some(ch) = text[cursor..].chars().next() else {
+        return text.len();
+    };
+    cursor + ch.len_utf8()
+}
+
+fn prev_word_boundary(text: &str, cursor: usize) -> usize {
+    let mut idx = clamp_char_boundary(text, cursor);
+    while idx > 0 {
+        let prev = prev_char_boundary(text, idx);
+        let ch = text[prev..idx].chars().next().expect("char at boundary");
+        if classify_char(ch) == WordClass::Whitespace {
+            idx = prev;
+        } else {
+            break;
+        }
+    }
+    if idx == 0 {
+        return 0;
+    }
+    let prev = prev_char_boundary(text, idx);
+    let cls = classify_char(text[prev..idx].chars().next().expect("char at boundary"));
+    while idx > 0 {
+        let next = prev_char_boundary(text, idx);
+        let ch_cls = classify_char(text[next..idx].chars().next().expect("char at boundary"));
+        if ch_cls == cls {
+            idx = next;
+        } else {
+            break;
+        }
+    }
+    idx
+}
+
+fn next_word_boundary(text: &str, cursor: usize) -> usize {
+    let mut idx = clamp_char_boundary(text, cursor);
+    while idx < text.len() {
+        let next = next_char_boundary(text, idx);
+        let ch = text[idx..next].chars().next().expect("char at boundary");
+        if classify_char(ch) == WordClass::Whitespace {
+            idx = next;
+        } else {
+            break;
+        }
+    }
+    if idx >= text.len() {
+        return text.len();
+    }
+    let next = next_char_boundary(text, idx);
+    let cls = classify_char(text[idx..next].chars().next().expect("char at boundary"));
+    while idx < text.len() {
+        let tail = next_char_boundary(text, idx);
+        let ch_cls = classify_char(text[idx..tail].chars().next().expect("char at boundary"));
+        if ch_cls == cls {
+            idx = tail;
+        } else {
+            break;
+        }
+    }
+    idx
+}
+
+fn insert_char_at_cursor(text: &mut String, cursor: &mut usize, ch: char) {
+    let idx = clamp_char_boundary(text, *cursor);
+    text.insert(idx, ch);
+    *cursor = idx + ch.len_utf8();
+}
+
+fn delete_prev_char(text: &mut String, cursor: &mut usize) {
+    let idx = clamp_char_boundary(text, *cursor);
+    if idx == 0 {
+        *cursor = 0;
+        return;
+    }
+    let start = prev_char_boundary(text, idx);
+    text.replace_range(start..idx, "");
+    *cursor = start;
+}
+
+fn delete_next_char(text: &mut String, cursor: &mut usize) {
+    let idx = clamp_char_boundary(text, *cursor);
+    if idx >= text.len() {
+        *cursor = text.len();
+        return;
+    }
+    let end = next_char_boundary(text, idx);
+    text.replace_range(idx..end, "");
+    *cursor = idx;
+}
+
+fn delete_prev_word(text: &mut String, cursor: &mut usize) {
+    let idx = clamp_char_boundary(text, *cursor);
+    let start = prev_word_boundary(text, idx);
+    if start == idx {
+        *cursor = idx;
+        return;
+    }
+    text.replace_range(start..idx, "");
+    *cursor = start;
+}
+
+fn delete_next_word(text: &mut String, cursor: &mut usize) {
+    let idx = clamp_char_boundary(text, *cursor);
+    let end = next_word_boundary(text, idx);
+    if end == idx {
+        *cursor = idx;
+        return;
+    }
+    text.replace_range(idx..end, "");
+    *cursor = idx;
+}
+
+fn line_start_boundary(text: &str, cursor: usize) -> usize {
+    let idx = clamp_char_boundary(text, cursor);
+    text[..idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0)
+}
+
+fn line_end_boundary(text: &str, cursor: usize) -> usize {
+    let idx = clamp_char_boundary(text, cursor);
+    text[idx..]
+        .find('\n')
+        .map(|pos| idx + pos)
+        .unwrap_or(text.len())
+}
+
+fn line_char_count(text: &str, line_start: usize, line_end: usize) -> usize {
+    text[line_start..line_end].chars().count()
+}
+
+fn line_cursor_with_column(text: &str, line_start: usize, line_end: usize, column: usize) -> usize {
+    let mut idx = line_start;
+    let mut col = 0usize;
+    while idx < line_end && col < column {
+        let next = next_char_boundary(text, idx);
+        if next <= idx || next > line_end {
+            break;
+        }
+        idx = next;
+        col += 1;
+    }
+    idx
+}
+
+fn move_cursor_up(text: &str, cursor: usize) -> usize {
+    let idx = clamp_char_boundary(text, cursor);
+    let current_start = line_start_boundary(text, idx);
+    if current_start == 0 {
+        return idx;
+    }
+    let current_col = line_char_count(text, current_start, idx);
+    let prev_end = current_start.saturating_sub(1);
+    let prev_start = line_start_boundary(text, prev_end);
+    let prev_len = line_char_count(text, prev_start, prev_end);
+    line_cursor_with_column(text, prev_start, prev_end, current_col.min(prev_len))
+}
+
+fn move_cursor_down(text: &str, cursor: usize) -> usize {
+    let idx = clamp_char_boundary(text, cursor);
+    let current_start = line_start_boundary(text, idx);
+    let current_end = line_end_boundary(text, idx);
+    if current_end >= text.len() {
+        return idx;
+    }
+    let current_col = line_char_count(text, current_start, idx);
+    let next_start = current_end + 1;
+    let next_end = line_end_boundary(text, next_start);
+    let next_len = line_char_count(text, next_start, next_end);
+    line_cursor_with_column(text, next_start, next_end, current_col.min(next_len))
+}
+
+fn delete_to_line_start(text: &mut String, cursor: &mut usize) {
+    let idx = clamp_char_boundary(text, *cursor);
+    let start = line_start_boundary(text, idx);
+    if start == idx {
+        *cursor = idx;
+        return;
+    }
+    text.replace_range(start..idx, "");
+    *cursor = start;
+}
+
+fn delete_to_line_end(text: &mut String, cursor: &mut usize) {
+    let idx = clamp_char_boundary(text, *cursor);
+    let end = line_end_boundary(text, idx);
+    if idx >= end {
+        *cursor = idx;
+        return;
+    }
+    text.replace_range(idx..end, "");
+    *cursor = idx;
+}
+
+fn comment_cursor_line_col(text: &str, cursor: usize) -> (usize, usize) {
+    let idx = clamp_char_boundary(text, cursor);
+    let line = text[..idx].chars().filter(|ch| *ch == '\n').count() + 1;
+    let line_start = text[..idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+    let col = text[line_start..idx].chars().count() + 1;
+    (line, col)
+}
+
+fn comment_modal_lines(
+    text: &str,
+    cursor: usize,
+    viewport_rows: usize,
+    theme: &UiTheme,
+) -> Vec<Line<'static>> {
+    let mut ranges = Vec::<(usize, usize)>::new();
+    let mut start = 0usize;
+    for (idx, ch) in text.char_indices() {
+        if ch == '\n' {
+            ranges.push((start, idx));
+            start = idx + ch.len_utf8();
+        }
+    }
+    ranges.push((start, text.len()));
+
+    let clamped_cursor = clamp_char_boundary(text, cursor);
+    let cursor_line_idx = text[..clamped_cursor]
+        .chars()
+        .filter(|ch| *ch == '\n')
+        .count();
+    let rows = viewport_rows.max(1);
+    let max_start = ranges.len().saturating_sub(rows);
+    let mut view_start = cursor_line_idx.saturating_sub(rows / 2);
+    view_start = view_start.min(max_start);
+    let view_end = (view_start + rows).min(ranges.len());
+
+    let mut lines = Vec::new();
+    for (line_idx, (line_start, line_end)) in ranges
+        .iter()
+        .enumerate()
+        .skip(view_start)
+        .take(view_end.saturating_sub(view_start))
+    {
+        let source = &text[*line_start..*line_end];
+        let gutter = Span::styled(
+            format!("{:>2} ", line_idx + 1),
+            Style::default().fg(theme.dimmed),
+        );
+        if line_idx == cursor_line_idx {
+            let line_cursor = clamped_cursor.saturating_sub(*line_start).min(source.len());
+            let before = source[..line_cursor].to_owned();
+            let after = source[line_cursor..].to_owned();
+            lines.push(Line::from(vec![
+                gutter,
+                Span::styled("│ ", Style::default().fg(theme.border)),
+                Span::raw(before),
+                Span::styled(
+                    "▏",
+                    Style::default()
+                        .fg(theme.modal_cursor_fg)
+                        .bg(theme.modal_cursor_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(after),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                gutter,
+                Span::styled("│ ", Style::default().fg(theme.border)),
+                Span::raw(source.to_owned()),
+            ]));
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(" 1 ", Style::default().fg(theme.dimmed)),
+            Span::styled("│ ", Style::default().fg(theme.border)),
+            Span::styled(
+                "▏",
+                Style::default()
+                    .fg(theme.modal_cursor_fg)
+                    .bg(theme.modal_cursor_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
+
+    lines
 }
 
 fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {

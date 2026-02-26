@@ -106,7 +106,16 @@ Diff pane:
 
 Comment mode:
 
-- type text, `Enter` to save, `Esc` to cancel
+- centered modal editor for create/edit with cursor-aware typing
+- `Enter` / `Ctrl-s`: save
+- `Alt-Enter`: newline
+- `Esc`: cancel
+- arrows / `Home` / `End`: move cursor
+- `Ctrl-a` / `Ctrl-e`: jump to start/end
+- `Ctrl-w` or `Ctrl-Backspace`: delete previous word
+- `Ctrl-Delete` or `Alt-d`: delete next word
+- `Alt-b` / `Alt-f`: move cursor by word
+- `Ctrl-u` / `Ctrl-k`: delete to start/end
 
 ## Build and run
 

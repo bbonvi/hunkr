@@ -40,6 +40,7 @@ impl App {
             pane_rects: PaneRects::default(),
             status: String::new(),
             comment_buffer: String::new(),
+            comment_cursor: 0,
             diff_search_buffer: String::new(),
             diff_search_query: None,
             diff_pending_op: None,
@@ -119,6 +120,12 @@ impl App {
         self.render_footer(frame, root_chunks[2], &theme);
         if self.show_help {
             self.render_help_overlay(frame, &theme);
+        }
+        if matches!(
+            self.input_mode,
+            InputMode::CommentCreate | InputMode::CommentEdit(_)
+        ) {
+            self.render_comment_modal(frame, &theme);
         }
     }
 
@@ -289,100 +296,213 @@ impl App {
     }
 
     pub(super) fn handle_comment_input(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S'))
+        {
+            self.submit_comment_input();
+            return;
+        }
+
         match key.code {
-            KeyCode::Esc => {
-                self.input_mode = InputMode::Normal;
-                self.comment_buffer.clear();
-                self.status = "Comment canceled".to_owned();
+            KeyCode::Esc => self.cancel_comment_input(),
+            KeyCode::Enter
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+            {
+                insert_char_at_cursor(&mut self.comment_buffer, &mut self.comment_cursor, '\n');
             }
-            KeyCode::Enter => {
-                if self.comment_buffer.trim().is_empty() {
-                    self.status = "Comment is empty".to_owned();
-                    self.input_mode = InputMode::Normal;
-                    self.comment_buffer.clear();
-                    return;
-                }
-
-                match self.input_mode {
-                    InputMode::CommentCreate => match self.comment_target_from_selection() {
-                        Ok(Some(target)) => {
-                            let result = self.comments.add_comment(&target, &self.comment_buffer);
-                            match result {
-                                Ok(id) => {
-                                    self.set_status_for_ids(
-                                        &target.commits,
-                                        ReviewStatus::IssueFound,
-                                    );
-                                    self.invalidate_diff_cache();
-                                    if let Err(err) = self.sync_comment_report() {
-                                        self.status = format!(
-                                            "Comment #{} added, but review tasks sync failed: {err:#}",
-                                            id
-                                        );
-                                        return;
-                                    }
-                                    self.status = format!(
-                                        "Comment #{} added -> {} ({} commit(s) marked ISSUE_FOUND)",
-                                        id,
-                                        self.comments.report_path().display(),
-                                        target.commits.len()
-                                    );
-                                }
-                                Err(err) => {
-                                    self.status = format!("Failed to save comment: {err:#}");
-                                }
-                            }
-                        }
-                        Ok(None) => {
-                            self.status = if self.diff_selection_spans_multiple_files() {
-                                "Comment range must stay within a single file".to_owned()
-                            } else {
-                                "No hunk/line anchor at cursor or selected range".to_owned()
-                            };
-                        }
-                        Err(err) => {
-                            self.status =
-                                format!("Failed to resolve affected commits for comment: {err:#}");
-                        }
-                    },
-                    InputMode::CommentEdit(id) => {
-                        match self.comments.update_comment(id, &self.comment_buffer) {
-                            Ok(true) => {
-                                self.invalidate_diff_cache();
-                                if let Err(err) = self.sync_comment_report() {
-                                    self.status = format!(
-                                        "Comment #{} updated, but review tasks sync failed: {err:#}",
-                                        id
-                                    );
-                                    return;
-                                }
-                                self.status = format!("Comment #{} updated", id);
-                            }
-                            Ok(false) => {
-                                self.status = format!("Comment #{} not found", id);
-                            }
-                            Err(err) => {
-                                self.status = format!("Failed to update comment #{}: {err:#}", id);
-                            }
-                        }
-                    }
-                    InputMode::DiffSearch => {}
-                    InputMode::Normal => {}
-                }
-
-                self.input_mode = InputMode::Normal;
-                self.comment_buffer.clear();
+            KeyCode::Enter => self.submit_comment_input(),
+            KeyCode::Backspace
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                delete_prev_word(&mut self.comment_buffer, &mut self.comment_cursor);
             }
             KeyCode::Backspace => {
-                self.comment_buffer.pop();
+                delete_prev_char(&mut self.comment_buffer, &mut self.comment_cursor);
             }
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    return;
-                }
-                self.comment_buffer.push(c);
+            KeyCode::Delete
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                delete_next_word(&mut self.comment_buffer, &mut self.comment_cursor);
+            }
+            KeyCode::Delete => {
+                delete_next_char(&mut self.comment_buffer, &mut self.comment_cursor);
+            }
+            KeyCode::Left
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.comment_cursor = prev_word_boundary(&self.comment_buffer, self.comment_cursor);
+            }
+            KeyCode::Left => {
+                self.comment_cursor = prev_char_boundary(
+                    &self.comment_buffer,
+                    clamp_char_boundary(&self.comment_buffer, self.comment_cursor),
+                );
+            }
+            KeyCode::Right
+                if key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.comment_cursor = next_word_boundary(&self.comment_buffer, self.comment_cursor);
+            }
+            KeyCode::Right => {
+                self.comment_cursor = next_char_boundary(
+                    &self.comment_buffer,
+                    clamp_char_boundary(&self.comment_buffer, self.comment_cursor),
+                );
+            }
+            KeyCode::Up => {
+                self.comment_cursor = move_cursor_up(&self.comment_buffer, self.comment_cursor);
+            }
+            KeyCode::Down => {
+                self.comment_cursor = move_cursor_down(&self.comment_buffer, self.comment_cursor);
+            }
+            KeyCode::Home => self.comment_cursor = 0,
+            KeyCode::End => self.comment_cursor = self.comment_buffer.len(),
+            KeyCode::Char('a') | KeyCode::Char('A')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.comment_cursor = 0;
+            }
+            KeyCode::Char('e') | KeyCode::Char('E')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.comment_cursor = self.comment_buffer.len();
+            }
+            KeyCode::Char('w') | KeyCode::Char('W')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                delete_prev_word(&mut self.comment_buffer, &mut self.comment_cursor);
+            }
+            KeyCode::Char('u') | KeyCode::Char('U')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                delete_to_line_start(&mut self.comment_buffer, &mut self.comment_cursor);
+            }
+            KeyCode::Char('k') | KeyCode::Char('K')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                delete_to_line_end(&mut self.comment_buffer, &mut self.comment_cursor);
+            }
+            KeyCode::Char('b') | KeyCode::Char('B')
+                if key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.comment_cursor = prev_word_boundary(&self.comment_buffer, self.comment_cursor);
+            }
+            KeyCode::Char('f') | KeyCode::Char('F')
+                if key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.comment_cursor = next_word_boundary(&self.comment_buffer, self.comment_cursor);
+            }
+            KeyCode::Char('d') | KeyCode::Char('D')
+                if key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                delete_next_word(&mut self.comment_buffer, &mut self.comment_cursor);
+            }
+            KeyCode::Char(c)
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                insert_char_at_cursor(&mut self.comment_buffer, &mut self.comment_cursor, c);
             }
             _ => {}
+        }
+    }
+
+    fn cancel_comment_input(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.comment_buffer.clear();
+        self.comment_cursor = 0;
+        self.status = "Comment canceled".to_owned();
+    }
+
+    fn submit_comment_input(&mut self) {
+        if self.comment_buffer.trim().is_empty() {
+            self.status = "Comment is empty".to_owned();
+            return;
+        }
+
+        let mut close_editor = false;
+        match self.input_mode {
+            InputMode::CommentCreate => match self.comment_target_from_selection() {
+                Ok(Some(target)) => {
+                    let result = self.comments.add_comment(&target, &self.comment_buffer);
+                    match result {
+                        Ok(id) => {
+                            self.set_status_for_ids(&target.commits, ReviewStatus::IssueFound);
+                            self.invalidate_diff_cache();
+                            if let Err(err) = self.sync_comment_report() {
+                                self.status = format!(
+                                    "Comment #{} added, but review tasks sync failed: {err:#}",
+                                    id
+                                );
+                                close_editor = true;
+                            } else {
+                                self.status = format!(
+                                    "Comment #{} added -> {} ({} commit(s) marked ISSUE_FOUND)",
+                                    id,
+                                    self.comments.report_path().display(),
+                                    target.commits.len()
+                                );
+                                close_editor = true;
+                            }
+                        }
+                        Err(err) => {
+                            self.status = format!("Failed to save comment: {err:#}");
+                        }
+                    }
+                }
+                Ok(None) => {
+                    self.status = if self.diff_selection_spans_multiple_files() {
+                        "Comment range must stay within a single file".to_owned()
+                    } else {
+                        "No hunk/line anchor at cursor or selected range".to_owned()
+                    };
+                    close_editor = true;
+                }
+                Err(err) => {
+                    self.status =
+                        format!("Failed to resolve affected commits for comment: {err:#}");
+                    close_editor = true;
+                }
+            },
+            InputMode::CommentEdit(id) => {
+                match self.comments.update_comment(id, &self.comment_buffer) {
+                    Ok(true) => {
+                        self.invalidate_diff_cache();
+                        if let Err(err) = self.sync_comment_report() {
+                            self.status = format!(
+                                "Comment #{} updated, but review tasks sync failed: {err:#}",
+                                id
+                            );
+                        } else {
+                            self.status = format!("Comment #{} updated", id);
+                        }
+                        close_editor = true;
+                    }
+                    Ok(false) => {
+                        self.status = format!("Comment #{} not found", id);
+                        close_editor = true;
+                    }
+                    Err(err) => {
+                        self.status = format!("Failed to update comment #{}: {err:#}", id);
+                    }
+                }
+            }
+            InputMode::DiffSearch | InputMode::Normal => {}
+        }
+
+        if close_editor {
+            self.input_mode = InputMode::Normal;
+            self.comment_buffer.clear();
+            self.comment_cursor = 0;
         }
     }
 
@@ -458,7 +578,11 @@ impl App {
         };
         self.input_mode = InputMode::CommentEdit(id);
         self.comment_buffer = comment.text.clone();
-        self.status = format!("Editing comment #{}: Enter save, Esc cancel", id);
+        self.comment_cursor = self.comment_buffer.len();
+        self.status = format!(
+            "Editing comment #{}: Enter save, Ctrl-s save, Esc cancel",
+            id
+        );
     }
 
     pub(super) fn delete_current_comment(&mut self) {
@@ -666,10 +790,10 @@ impl App {
                 }
                 self.input_mode = InputMode::CommentCreate;
                 self.comment_buffer.clear();
+                self.comment_cursor = 0;
                 self.diff_pending_op = None;
                 self.status =
-                    "Comment mode: type comment, Enter save, Esc cancel (commit/hunk/range)"
-                        .to_owned();
+                    "Comment mode: Enter save, Alt+Enter newline, Ctrl-w delete word".to_owned();
             }
             KeyCode::Char('e') => {
                 if self.uncommitted_selected() {
@@ -690,6 +814,12 @@ impl App {
     }
 
     pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        if matches!(
+            self.input_mode,
+            InputMode::CommentCreate | InputMode::CommentEdit(_)
+        ) {
+            return;
+        }
         let x = mouse.column;
         let y = mouse.row;
 
@@ -832,6 +962,12 @@ impl App {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" save ", Style::default().fg(theme.muted)),
+                key_chip("Alt+Enter", theme),
+                Span::styled(" newline ", Style::default().fg(theme.muted)),
+                key_chip("Arrows", theme),
+                Span::styled(" move ", Style::default().fg(theme.muted)),
+                key_chip("Ctrl-w", theme),
+                Span::styled(" delete word ", Style::default().fg(theme.muted)),
                 key_chip("Esc", theme),
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
             ]),
@@ -893,14 +1029,21 @@ impl App {
         ]);
 
         let status = match self.input_mode {
-            InputMode::CommentCreate | InputMode::CommentEdit(_) => format!(
-                "{} | mode={} focus={} theme={} > {}",
-                self.status,
-                mode,
-                focus,
-                self.theme_mode.label(),
-                self.comment_buffer
-            ),
+            InputMode::CommentCreate | InputMode::CommentEdit(_) => {
+                let line_count = self.comment_buffer.matches('\n').count() + 1;
+                let (line, col) =
+                    comment_cursor_line_col(&self.comment_buffer, self.comment_cursor);
+                format!(
+                    "{} | mode={} focus={} theme={} comment:{} chars line:{} col:{} ({line_count} lines)",
+                    self.status,
+                    mode,
+                    focus,
+                    self.theme_mode.label(),
+                    self.comment_buffer.chars().count(),
+                    line,
+                    col
+                )
+            }
             InputMode::DiffSearch => format!(
                 "{} | mode={} focus={} theme={} /{}",
                 self.status,
@@ -937,6 +1080,117 @@ impl App {
 
         frame.render_widget(status_widget, chunks[0]);
         frame.render_widget(hint_widget, chunks[1]);
+    }
+
+    pub(super) fn render_comment_modal(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
+        let area = centered_rect(78, 70, frame.area());
+        frame.render_widget(Clear, area);
+
+        let title = match self.input_mode {
+            InputMode::CommentCreate => " NEW COMMENT ",
+            InputMode::CommentEdit(_) => " EDIT COMMENT ",
+            InputMode::Normal | InputMode::DiffSearch => " COMMENT ",
+        };
+        let shell = Block::default()
+            .title(Span::styled(
+                title,
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .title_alignment(ratatui::layout::Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .style(Style::default().bg(theme.modal_bg))
+            .border_style(Style::default().fg(theme.focus_border));
+        frame.render_widget(shell.clone(), area);
+        let inner = shell.inner(area);
+
+        let sections = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Length(2),
+                ratatui::layout::Constraint::Min(6),
+                ratatui::layout::Constraint::Length(3),
+            ])
+            .split(inner);
+
+        let mode_badge = match self.input_mode {
+            InputMode::CommentCreate => "create",
+            InputMode::CommentEdit(_) => "edit",
+            InputMode::Normal | InputMode::DiffSearch => "idle",
+        };
+        let prompt = if self.comment_buffer.trim().is_empty() {
+            "Describe issue, impact, and expected fix."
+        } else {
+            "Add context rich notes; this syncs into review tasks markdown."
+        };
+        let header = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("mode:", Style::default().fg(theme.dimmed)),
+                Span::styled(
+                    format!(" {mode_badge} "),
+                    Style::default()
+                        .fg(theme.panel_title_fg)
+                        .bg(theme.panel_title_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(prompt, Style::default().fg(theme.muted)),
+            ]),
+            Line::from(vec![
+                Span::styled("save:", Style::default().fg(theme.dimmed)),
+                Span::styled(" Enter / Ctrl-s ", Style::default().fg(theme.accent)),
+                Span::raw("  "),
+                Span::styled("newline:", Style::default().fg(theme.dimmed)),
+                Span::styled(" Alt+Enter ", Style::default().fg(theme.accent)),
+            ]),
+        ])
+        .style(Style::default().bg(theme.modal_bg));
+        frame.render_widget(header, sections[0]);
+
+        let editor_block = Block::default()
+            .title(" Draft ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(theme.modal_editor_bg))
+            .border_style(Style::default().fg(theme.border));
+        let editor_inner = editor_block.inner(sections[1]);
+        let editor_lines = comment_modal_lines(
+            &self.comment_buffer,
+            self.comment_cursor,
+            editor_inner.height.saturating_sub(1) as usize,
+            theme,
+        );
+        frame.render_widget(editor_block, sections[1]);
+        frame.render_widget(
+            Paragraph::new(editor_lines).style(Style::default().fg(theme.text)),
+            editor_inner,
+        );
+
+        let footer = Paragraph::new(vec![
+            Line::from(vec![
+                key_chip("Ctrl-w", theme),
+                Span::styled(" back-word ", Style::default().fg(theme.muted)),
+                key_chip("Ctrl-Backspace", theme),
+                Span::styled(" back-word ", Style::default().fg(theme.muted)),
+                key_chip("Ctrl-Delete", theme),
+                Span::styled(" next-word ", Style::default().fg(theme.muted)),
+            ]),
+            Line::from(vec![
+                key_chip("Ctrl-a/e", theme),
+                Span::styled(" start/end ", Style::default().fg(theme.muted)),
+                key_chip("↑/↓", theme),
+                Span::styled(" line move ", Style::default().fg(theme.muted)),
+                key_chip("Alt-b/f", theme),
+                Span::styled(" word move ", Style::default().fg(theme.muted)),
+                key_chip("Ctrl-u/k", theme),
+                Span::styled(" trim line ", Style::default().fg(theme.muted)),
+            ]),
+        ])
+        .style(Style::default().bg(theme.modal_bg));
+        frame.render_widget(footer, sections[2]);
     }
 
     pub(super) fn render_help_overlay(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
@@ -996,6 +1250,14 @@ impl App {
             Line::from(vec![
                 key_chip("D", theme),
                 Span::raw(" delete comment under cursor"),
+            ]),
+            Line::from(vec![
+                key_chip("Ctrl-w/Ctrl-Backspace", theme),
+                Span::raw(" comment modal delete previous word"),
+            ]),
+            Line::from(vec![
+                key_chip("Ctrl-Delete/Alt-d", theme),
+                Span::raw(" comment modal delete next word"),
             ]),
             Line::from(vec![key_chip("t", theme), Span::raw(" toggle theme")]),
             Line::from(vec![

@@ -67,6 +67,99 @@ fn truncate_uses_terminal_cell_width_for_wide_glyphs() {
 }
 
 #[test]
+fn word_boundaries_skip_whitespace_and_symbols() {
+    let text = "alpha  + beta";
+    let cursor = text.len();
+    assert_eq!(prev_word_boundary(text, cursor), 9);
+    assert_eq!(prev_word_boundary(text, 10), 9);
+    assert_eq!(next_word_boundary(text, 0), 5);
+    assert_eq!(next_word_boundary(text, 5), 8);
+}
+
+#[test]
+fn delete_word_operations_respect_cursor() {
+    let mut text = "alpha beta gamma".to_owned();
+    let mut cursor = text.len();
+
+    delete_prev_word(&mut text, &mut cursor);
+    assert_eq!(text, "alpha beta ");
+    assert_eq!(cursor, 11);
+
+    delete_prev_word(&mut text, &mut cursor);
+    assert_eq!(text, "alpha ");
+    assert_eq!(cursor, 6);
+
+    delete_next_word(&mut text, &mut cursor);
+    assert_eq!(text, "alpha ");
+    assert_eq!(cursor, 6);
+}
+
+#[test]
+fn char_delete_handles_unicode_scalars() {
+    let mut text = "A你B".to_owned();
+    let mut cursor = text.len();
+
+    delete_prev_char(&mut text, &mut cursor);
+    assert_eq!(text, "A你");
+    assert_eq!(cursor, "A你".len());
+
+    delete_prev_char(&mut text, &mut cursor);
+    assert_eq!(text, "A");
+    assert_eq!(cursor, 1);
+}
+
+#[test]
+fn comment_cursor_line_and_col_track_multiline_positions() {
+    let text = "one\ntwo\nthree";
+    let cursor = text.find("three").expect("three start");
+    assert_eq!(comment_cursor_line_col(text, cursor), (3, 1));
+}
+
+#[test]
+fn comment_modal_lines_includes_cursor_marker() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let rendered = comment_modal_lines("abc", 2, 4, &theme);
+    let flattened = rendered[0]
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("▏"));
+    assert!(flattened.contains("ab"));
+    assert!(flattened.contains("c"));
+}
+
+#[test]
+fn ctrl_u_and_ctrl_k_style_deletes_stay_within_current_line() {
+    let mut text = "one\ntwo words\nthree".to_owned();
+    let mut cursor = text.find("words").expect("cursor on words");
+
+    delete_to_line_start(&mut text, &mut cursor);
+    assert_eq!(text, "one\nwords\nthree");
+    assert_eq!(cursor, "one\n".len());
+
+    cursor = text.find("rds").expect("cursor in words");
+    delete_to_line_end(&mut text, &mut cursor);
+    assert_eq!(text, "one\nwo\nthree");
+}
+
+#[test]
+fn vertical_cursor_movement_keeps_column_when_possible() {
+    let text = "abcd\nxy\npqrst";
+    let base = text.find("cd").expect("cd start") + 2;
+    let up = move_cursor_up(text, base);
+    let down = move_cursor_down(text, up);
+
+    assert_eq!(up, base);
+    assert_eq!(down, text.find("xy").expect("xy start") + 2);
+    assert_eq!(
+        move_cursor_down(text, down),
+        text.find("pq").expect("pq start") + 2
+    );
+}
+
+#[test]
 fn file_tree_builds_directories_and_files() {
     let mut tree = FileTree::default();
     tree.insert("src/app.rs", 100);
