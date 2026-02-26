@@ -1208,6 +1208,15 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
+        let files_search_mode = matches!(self.input_mode, InputMode::ListSearch(FocusPane::Files));
+        let file_query = self.file_search_query.trim();
+        let files_search_display = if !file_query.is_empty() {
+            format!("/{file_query}")
+        } else if files_search_mode {
+            "/".to_owned()
+        } else {
+            "off".to_owned()
+        };
         let visible_indices = self.visible_file_indices();
         let visible_rows: Vec<TreeRow> = visible_indices
             .iter()
@@ -1220,7 +1229,8 @@ impl App {
                 file_rows: &visible_rows,
                 changed_files: self.aggregate.files.len(),
                 shown_files: visible_rows.iter().filter(|row| row.selectable).count(),
-                search_query: &self.file_search_query,
+                search_display: &files_search_display,
+                search_enabled: files_search_mode || !file_query.is_empty(),
                 file_list_state: &mut self.file_list_state,
             },
         );
@@ -1232,6 +1242,16 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
+        let commits_search_mode =
+            matches!(self.input_mode, InputMode::ListSearch(FocusPane::Commits));
+        let commit_query = self.commit_search_query.trim();
+        let commits_search_display = if !commit_query.is_empty() {
+            format!("/{commit_query}")
+        } else if commits_search_mode {
+            "/".to_owned()
+        } else {
+            "off".to_owned()
+        };
         let visible_indices = self.visible_commit_indices();
         let visible_rows: Vec<CommitRow> = visible_indices
             .iter()
@@ -1248,7 +1268,8 @@ impl App {
                 shown_commits: visible_rows.len(),
                 total_commits: self.commits.len(),
                 status_filter: self.commit_status_filter.label(),
-                search_query: &self.commit_search_query,
+                search_display: &commits_search_display,
+                search_enabled: commits_search_mode || !commit_query.is_empty(),
                 commit_list_state: &mut self.commit_list_state,
             },
         );

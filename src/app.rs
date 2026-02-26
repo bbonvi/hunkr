@@ -243,6 +243,7 @@ struct CommitRow {
 struct TreeRow {
     label: String,
     path: Option<String>,
+    depth: usize,
     selectable: bool,
     modified_ts: Option<i64>,
 }
@@ -388,6 +389,7 @@ impl FileTree {
             rows.push(TreeRow {
                 label: format_tree_dir_label(depth, dir, nerd_fonts, nerd_font_theme),
                 path: None,
+                depth,
                 selectable: false,
                 modified_ts: None,
             });
@@ -403,6 +405,7 @@ impl FileTree {
             rows.push(TreeRow {
                 label: format_tree_file_label(depth, file, &full, nerd_fonts, nerd_font_theme),
                 path: Some(full),
+                depth,
                 selectable: true,
                 modified_ts: Some(*modified_ts),
             });
@@ -600,6 +603,46 @@ fn commit_row_matches_query(row: &CommitRow, query: &str) -> bool {
 
 fn commit_row_matches_filter_query(row: &CommitRow, query: &str) -> bool {
     row.is_uncommitted || query.is_empty() || commit_row_matches_query(row, query)
+}
+
+fn matching_file_indices_with_parent_dirs(rows: &[TreeRow], query: &str) -> Vec<usize> {
+    if query.is_empty() {
+        return rows.iter().enumerate().map(|(idx, _)| idx).collect();
+    }
+
+    let mut include = BTreeSet::new();
+    let mut ancestor_dirs: Vec<(usize, usize)> = Vec::new();
+    for (idx, row) in rows.iter().enumerate() {
+        if row.selectable {
+            while ancestor_dirs
+                .last()
+                .is_some_and(|(depth, _)| *depth >= row.depth)
+            {
+                ancestor_dirs.pop();
+            }
+            if row
+                .path
+                .as_ref()
+                .is_some_and(|path| contains_case_insensitive(path, query))
+            {
+                include.insert(idx);
+                for (_, ancestor_idx) in &ancestor_dirs {
+                    include.insert(*ancestor_idx);
+                }
+            }
+            continue;
+        }
+
+        while ancestor_dirs
+            .last()
+            .is_some_and(|(depth, _)| *depth >= row.depth)
+        {
+            ancestor_dirs.pop();
+        }
+        ancestor_dirs.push((row.depth, idx));
+    }
+
+    include.into_iter().collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -26,7 +26,8 @@ pub(in crate::app) struct FilePaneModel<'a> {
     pub file_rows: &'a [TreeRow],
     pub changed_files: usize,
     pub shown_files: usize,
-    pub search_query: &'a str,
+    pub search_display: &'a str,
+    pub search_enabled: bool,
     pub file_list_state: &'a mut ListState,
 }
 
@@ -38,7 +39,8 @@ pub(in crate::app) struct CommitPaneModel<'a> {
     pub shown_commits: usize,
     pub total_commits: usize,
     pub status_filter: &'a str,
-    pub search_query: &'a str,
+    pub search_display: &'a str,
+    pub search_enabled: bool,
     pub commit_list_state: &'a mut ListState,
 }
 
@@ -62,13 +64,16 @@ impl<'a> ListPaneRenderer<'a> {
             file_rows,
             changed_files,
             shown_files,
-            search_query,
+            search_display,
+            search_enabled,
             file_list_state,
         } = model;
-        let search_badge = if search_query.trim().is_empty() {
-            String::new()
+        let filter_style = if search_enabled {
+            Style::default()
+                .fg(self.theme.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
-            format!("  /{}", search_query.trim())
+            Style::default().fg(self.theme.dimmed)
         };
         let title = Line::from(vec![
             Span::styled(
@@ -80,9 +85,11 @@ impl<'a> ListPaneRenderer<'a> {
             ),
             Span::raw(" "),
             Span::styled(
-                format!("{shown_files}/{changed_files} shown{search_badge}"),
+                format!("{shown_files}/{changed_files} shown "),
                 Style::default().fg(self.theme.muted),
             ),
+            Span::styled("filter:", Style::default().fg(self.theme.muted)),
+            Span::styled(search_display.to_owned(), filter_style),
         ]);
         let border_style = if self.focused == FocusPane::Files {
             Style::default().fg(self.theme.focus_border)
@@ -138,14 +145,17 @@ impl<'a> ListPaneRenderer<'a> {
             shown_commits,
             total_commits,
             status_filter,
-            search_query,
+            search_display,
+            search_enabled,
             commit_list_state,
         } = model;
         let (unreviewed, reviewed, issue_found, resolved) = status_counts;
-        let search_badge = if search_query.trim().is_empty() {
-            String::new()
+        let filter_style = if search_enabled {
+            Style::default()
+                .fg(self.theme.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
-            format!(" /{}", search_query.trim())
+            Style::default().fg(self.theme.dimmed)
         };
         let title = Line::from(vec![
             Span::styled(
@@ -158,10 +168,12 @@ impl<'a> ListPaneRenderer<'a> {
             Span::raw(" "),
             Span::styled(
                 format!(
-                    "sel:{selected_total}  U:{unreviewed} R:{reviewed} I:{issue_found} Z:{resolved}  {shown_commits}/{total_commits}  [{status_filter}]{search_badge}",
+                    "sel:{selected_total} U:{unreviewed} R:{reviewed} I:{issue_found} Z:{resolved} {shown_commits}/{total_commits} sf:{status_filter} ",
                 ),
                 Style::default().fg(self.theme.muted),
             ),
+            Span::styled("filter:", Style::default().fg(self.theme.muted)),
+            Span::styled(search_display.to_owned(), filter_style),
         ]);
         let border_style = if self.focused == FocusPane::Commits {
             Style::default().fg(self.theme.focus_border)

@@ -210,6 +210,37 @@ fn file_tree_uses_file_icons_when_nerd_fonts_enabled() {
 }
 
 #[test]
+fn file_filter_keeps_parent_directories_for_matching_files() {
+    let mut tree = FileTree::default();
+    tree.insert("src/app/main.rs", 100);
+    tree.insert("src/lib.rs", 110);
+    tree.insert("tests/main_test.rs", 120);
+    let nerd_theme = NerdFontTheme::default();
+    let rows = tree.flattened_rows(false, &nerd_theme);
+
+    let visible = matching_file_indices_with_parent_dirs(&rows, "main");
+    let visible_labels = visible
+        .iter()
+        .map(|idx| rows[*idx].label.clone())
+        .collect::<Vec<_>>();
+
+    assert!(visible_labels.iter().any(|label| label.contains("[D] src")));
+    assert!(visible_labels.iter().any(|label| label.contains("[D] app")));
+    assert!(visible_labels.iter().any(|label| label.contains("[F] main.rs")));
+    assert!(visible_labels.iter().any(|label| label.contains("[D] tests")));
+    assert!(
+        visible_labels
+            .iter()
+            .any(|label| label.contains("[F] main_test.rs"))
+    );
+    assert!(
+        !visible_labels
+            .iter()
+            .any(|label| label.contains("[F] lib.rs"))
+    );
+}
+
+#[test]
 fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let nerd_theme = NerdFontTheme::default();

@@ -97,6 +97,7 @@ Commit pane:
 Files pane:
 
 - `/`: live file-tree filter as you type (`Esc` clears, `Enter` defocuses search input)
+- filtering keeps matching files and their parent directories visible
 
 Diff pane:
 

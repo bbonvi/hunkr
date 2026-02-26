@@ -565,26 +565,7 @@ impl App {
     }
 
     pub(super) fn visible_file_indices(&self) -> Vec<usize> {
-        if self.file_search_query.is_empty() {
-            return self
-                .file_rows
-                .iter()
-                .enumerate()
-                .map(|(idx, _)| idx)
-                .collect();
-        }
-
-        self.file_rows
-            .iter()
-            .enumerate()
-            .filter(|(_, row)| row.selectable)
-            .filter(|(_, row)| {
-                row.path
-                    .as_ref()
-                    .is_some_and(|path| contains_case_insensitive(path, &self.file_search_query))
-            })
-            .map(|(idx, _)| idx)
-            .collect()
+        matching_file_indices_with_parent_dirs(&self.file_rows, &self.file_search_query)
     }
 
     pub(super) fn selected_commit_full_index(&self) -> Option<usize> {
