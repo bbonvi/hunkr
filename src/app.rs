@@ -57,7 +57,6 @@ const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
-const LIST_WHEEL_EVENT_MIN_INTERVAL: Duration = Duration::from_millis(28);
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +308,7 @@ pub struct App {
     input_mode: InputMode,
     theme_mode: ThemeMode,
     diff_wheel_scroll_lines: isize,
+    list_wheel_coalesce: Duration,
     nerd_fonts: bool,
     nerd_font_theme: NerdFontTheme,
     commit_visual_anchor: Option<usize>,

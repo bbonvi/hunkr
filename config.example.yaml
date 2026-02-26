@@ -3,5 +3,7 @@
 startup_theme: dark
 # diff_wheel_scroll_lines: number of diff lines moved per mouse wheel tick (must be >= 1).
 diff_wheel_scroll_lines: 1
+# list_wheel_coalesce_ms: collapse duplicate list wheel events within this window (must be >= 1).
+list_wheel_coalesce_ms: 28
 # nerd_fonts: enable Nerd Font icons/symbols in list and diff UI.
 nerd_fonts: true

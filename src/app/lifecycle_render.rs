@@ -22,6 +22,7 @@ impl App {
             input_mode: InputMode::Normal,
             theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
             diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
+            list_wheel_coalesce: Duration::from_millis(config.list_wheel_coalesce_ms),
             nerd_fonts: config.nerd_fonts,
             nerd_font_theme: NerdFontTheme::default(),
             commit_visual_anchor: None,
@@ -1215,7 +1216,7 @@ impl App {
             pane,
             delta,
             now,
-            LIST_WHEEL_EVENT_MIN_INTERVAL,
+            self.list_wheel_coalesce,
         ) {
             return false;
         }

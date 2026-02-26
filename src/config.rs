@@ -9,6 +9,7 @@ use anyhow::Context;
 use serde::Deserialize;
 
 const DEFAULT_DIFF_WHEEL_SCROLL_LINES: isize = 1;
+const DEFAULT_LIST_WHEEL_COALESCE_MS: u64 = 28;
 
 /// Startup UI theme name from config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -25,6 +26,7 @@ pub enum StartupTheme {
 pub struct AppConfig {
     pub startup_theme: StartupTheme,
     pub diff_wheel_scroll_lines: isize,
+    pub list_wheel_coalesce_ms: u64,
     pub nerd_fonts: bool,
 }
 
@@ -33,6 +35,7 @@ impl Default for AppConfig {
         Self {
             startup_theme: StartupTheme::Dark,
             diff_wheel_scroll_lines: DEFAULT_DIFF_WHEEL_SCROLL_LINES,
+            list_wheel_coalesce_ms: DEFAULT_LIST_WHEEL_COALESCE_MS,
             nerd_fonts: true,
         }
     }
@@ -62,6 +65,9 @@ impl AppConfig {
     fn validate(&mut self) {
         if self.diff_wheel_scroll_lines < 1 {
             self.diff_wheel_scroll_lines = DEFAULT_DIFF_WHEEL_SCROLL_LINES;
+        }
+        if self.list_wheel_coalesce_ms == 0 {
+            self.list_wheel_coalesce_ms = DEFAULT_LIST_WHEEL_COALESCE_MS;
         }
     }
 }
@@ -99,6 +105,7 @@ mod tests {
 
         assert_eq!(loaded.startup_theme, StartupTheme::Dark);
         assert_eq!(loaded.diff_wheel_scroll_lines, 1);
+        assert_eq!(loaded.list_wheel_coalesce_ms, 28);
         assert!(loaded.nerd_fonts);
     }
 
@@ -108,13 +115,14 @@ mod tests {
         let path = temp.path().join("config.yaml");
         fs::write(
             &path,
-            "startup_theme: light\ndiff_wheel_scroll_lines: 3\nnerd_fonts: false\n",
+            "startup_theme: light\ndiff_wheel_scroll_lines: 3\nlist_wheel_coalesce_ms: 12\nnerd_fonts: false\n",
         )
         .expect("write");
 
         let loaded = AppConfig::load_from_path(&path).expect("load");
         assert_eq!(loaded.startup_theme, StartupTheme::Light);
         assert_eq!(loaded.diff_wheel_scroll_lines, 3);
+        assert_eq!(loaded.list_wheel_coalesce_ms, 12);
         assert!(!loaded.nerd_fonts);
     }
 
@@ -127,5 +135,15 @@ mod tests {
         let loaded = AppConfig::load_from_path(&path).expect("load");
         assert_eq!(loaded.diff_wheel_scroll_lines, 1);
         assert!(loaded.nerd_fonts);
+    }
+
+    #[test]
+    fn config_clamps_zero_list_wheel_coalesce() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("config.yaml");
+        fs::write(&path, "list_wheel_coalesce_ms: 0\n").expect("write");
+
+        let loaded = AppConfig::load_from_path(&path).expect("load");
+        assert_eq!(loaded.list_wheel_coalesce_ms, 28);
     }
 }
