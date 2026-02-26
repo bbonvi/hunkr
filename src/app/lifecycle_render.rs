@@ -38,6 +38,8 @@ impl App {
             diff_pending_op: None,
             show_help: false,
             last_refresh: Instant::now(),
+            last_relative_time_redraw: Instant::now(),
+            needs_redraw: true,
             should_quit: false,
         };
 
@@ -51,6 +53,21 @@ impl App {
 
     pub fn should_quit(&self) -> bool {
         self.should_quit
+    }
+
+    pub fn needs_redraw(&self) -> bool {
+        self.needs_redraw
+    }
+
+    pub fn mark_drawn(&mut self) {
+        self.needs_redraw = false;
+    }
+
+    pub fn poll_timeout(&self) -> Duration {
+        next_poll_timeout(
+            self.last_refresh.elapsed(),
+            self.last_relative_time_redraw.elapsed(),
+        )
     }
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
@@ -154,20 +171,43 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        let mut refreshed = false;
         if self.last_refresh.elapsed() >= AUTO_REFRESH_EVERY {
             if let Err(err) = self.reload_commits(true) {
                 self.status = format!("refresh failed: {err:#}");
             }
             self.last_refresh = Instant::now();
+            refreshed = true;
+            self.needs_redraw = true;
+        }
+
+        if refreshed {
+            self.last_relative_time_redraw = Instant::now();
+        } else if self.last_relative_time_redraw.elapsed() >= RELATIVE_TIME_REDRAW_EVERY {
+            self.last_relative_time_redraw = Instant::now();
+            self.needs_redraw = true;
         }
     }
 
     pub fn handle_event(&mut self, event: Event) {
+        let mut should_redraw = false;
         match event {
-            Event::Key(key) if key.kind == KeyEventKind::Press => self.handle_key(key),
-            Event::Mouse(mouse) => self.handle_mouse(mouse),
-            Event::Resize(_, _) => self.ensure_cursor_visible(),
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                self.handle_key(key);
+                should_redraw = true;
+            }
+            Event::Mouse(mouse) => {
+                self.handle_mouse(mouse);
+                should_redraw = true;
+            }
+            Event::Resize(_, _) => {
+                self.ensure_cursor_visible();
+                should_redraw = true;
+            }
             _ => {}
+        }
+        if should_redraw {
+            self.needs_redraw = true;
         }
     }
 
@@ -218,6 +258,9 @@ impl App {
         if let Err(err) = self.reload_commits(true) {
             self.status = format!("reload failed: {err:#}");
         }
+        let now = Instant::now();
+        self.last_refresh = now;
+        self.last_relative_time_redraw = now;
     }
 
     pub(super) fn toggle_theme(&mut self) {

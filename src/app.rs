@@ -42,6 +42,7 @@ use crate::{
 
 const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
+const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const DIFF_WHEEL_SCROLL_LINES: isize = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 const LIST_HIGHLIGHT_SYMBOL: &str = ">> ";
@@ -244,6 +245,8 @@ pub struct App {
     diff_pending_op: Option<DiffPendingOp>,
     show_help: bool,
     last_refresh: Instant,
+    last_relative_time_redraw: Instant,
+    needs_redraw: bool,
     should_quit: bool,
 }
 
@@ -745,6 +748,13 @@ fn apply_status_transition(rows: &mut [CommitRow], ids: &BTreeSet<String>, statu
 fn page_step(height: u16, multiplier: f32) -> isize {
     let visible = height.saturating_sub(2).max(1) as f32;
     (visible * multiplier).round() as isize
+}
+
+fn next_poll_timeout(refresh_elapsed: Duration, relative_elapsed: Duration) -> Duration {
+    // Sleep until the earliest maintenance deadline: git auto-refresh or coarse age-label repaint.
+    AUTO_REFRESH_EVERY
+        .saturating_sub(refresh_elapsed)
+        .min(RELATIVE_TIME_REDRAW_EVERY.saturating_sub(relative_elapsed))
 }
 
 fn scrolled_diff_position_preserving_offset(

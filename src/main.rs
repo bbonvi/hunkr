@@ -1,6 +1,4 @@
 use std::io::{self, Stdout};
-use std::time::Duration;
-
 use anyhow::Context;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture},
@@ -25,15 +23,18 @@ fn run_event_loop(
     app: &mut App,
 ) -> anyhow::Result<()> {
     loop {
-        terminal
-            .draw(|frame| app.draw(frame))
-            .context("failed to render frame")?;
-
         if app.should_quit() {
             break;
         }
 
-        if event::poll(Duration::from_millis(800)).context("event poll failed")? {
+        if app.needs_redraw() {
+            terminal
+                .draw(|frame| app.draw(frame))
+                .context("failed to render frame")?;
+            app.mark_drawn();
+        }
+
+        if event::poll(app.poll_timeout()).context("event poll failed")? {
             let evt = event::read().context("event read failed")?;
             app.handle_event(evt);
         } else {

@@ -104,7 +104,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ## Architecture
 
-- `src/main.rs`: terminal lifecycle + event loop
+- `src/main.rs`: terminal lifecycle + event loop (dirty-flag redraw + timed wakeups)
 - `src/app.rs`: UI state, key/mouse routing, selection/status logic, high-level rendering orchestration
 - `src/app/ui/list_panes.rs`: files/commits pane renderers and list-row line presenters
 - `src/app/ui/style.rs`: shared list-row styling and layout helpers

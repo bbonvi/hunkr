@@ -662,6 +662,24 @@ fn relative_time_formats_expected_units() {
 }
 
 #[test]
+fn next_poll_timeout_uses_nearest_deadline() {
+    let timeout = next_poll_timeout(Duration::from_secs(1), Duration::from_secs(10));
+    assert_eq!(timeout, Duration::from_secs(3));
+}
+
+#[test]
+fn next_poll_timeout_zero_when_any_deadline_elapsed() {
+    let timeout = next_poll_timeout(Duration::from_secs(5), Duration::from_secs(1));
+    assert_eq!(timeout, Duration::from_secs(0));
+}
+
+#[test]
+fn next_poll_timeout_after_refresh_waits_for_auto_refresh_window() {
+    let timeout = next_poll_timeout(Duration::from_secs(0), Duration::from_secs(0));
+    assert_eq!(timeout, AUTO_REFRESH_EVERY);
+}
+
+#[test]
 fn h_and_l_cycle_all_panes() {
     assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Diff);
     assert_eq!(focus_with_h(FocusPane::Files), FocusPane::Commits);
