@@ -1,3 +1,4 @@
+//! Keyboard/input-mode handlers for the app lifecycle.
 use super::*;
 
 impl App {

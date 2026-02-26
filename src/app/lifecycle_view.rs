@@ -1,3 +1,4 @@
+//! Render pipeline and modal/footer presentation for the lifecycle flow.
 use super::*;
 
 impl App {

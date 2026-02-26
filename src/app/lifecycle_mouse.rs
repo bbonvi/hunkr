@@ -1,3 +1,4 @@
+//! Mouse interaction handlers for list panes, diff, and comment editor modal.
 use super::*;
 
 impl App {

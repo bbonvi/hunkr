@@ -1,4 +1,4 @@
-
+//! Unit tests for review state persistence and legacy-upgrade behavior.
 use std::collections::BTreeMap;
 
 use tempfile::tempdir;

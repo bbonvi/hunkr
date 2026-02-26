@@ -1,4 +1,4 @@
-
+//! Unit tests for config loading defaults and validation clamps.
 use super::*;
 
 #[test]

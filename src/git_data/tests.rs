@@ -1,4 +1,4 @@
-
+//! Unit tests for git service data loading and commit-range aggregation behavior.
 use std::{
     fs,
     path::Path,
