@@ -927,6 +927,9 @@ impl App {
                 }
                 self.start_comment_edit_mode();
             }
+            KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => {
+                self.copy_review_tasks_path();
+            }
             KeyCode::Char('D') => {
                 if self.uncommitted_selected() {
                     self.status = "Comments are disabled for uncommitted changes".to_owned();
@@ -1212,6 +1215,8 @@ impl App {
                     Span::styled(" scroll ", Style::default().fg(theme.muted)),
                     key_chip("e/D", theme),
                     Span::styled(" edit/delete ", Style::default().fg(theme.muted)),
+                    key_chip("y", theme),
+                    Span::styled(" copy task path ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
                     Span::styled(" jump", Style::default().fg(theme.muted)),
                 ]),
@@ -1652,6 +1657,10 @@ impl App {
             Line::from(vec![
                 key_chip("D", theme),
                 Span::raw(" delete comment under cursor"),
+            ]),
+            Line::from(vec![
+                key_chip("y", theme),
+                Span::raw(" copy review-task file path"),
             ]),
             Line::from(vec![key_chip("t", theme), Span::raw(" toggle theme")]),
             Line::from(vec![

@@ -641,6 +641,20 @@ impl App {
             .any(|row| row.is_uncommitted && row.selected)
     }
 
+    /// Copies the active review-task markdown path to clipboard for quick sharing.
+    pub(super) fn copy_review_tasks_path(&mut self) {
+        let report_path = self.comments.report_path().display().to_string();
+        match crate::clipboard::copy_to_clipboard_with_fallbacks(&report_path) {
+            Ok(backend) => {
+                self.status = format!("Copied review tasks path via {backend}: {report_path}");
+            }
+            Err(err) => {
+                self.status =
+                    format!("Clipboard unavailable; review tasks path: {report_path} ({err:#})");
+            }
+        }
+    }
+
     pub(super) fn sync_comment_report(&self) -> anyhow::Result<()> {
         self.comments.sync_review_tasks_report(|commit_id| {
             self.store.commit_status(&self.review_state, commit_id)

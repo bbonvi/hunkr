@@ -104,6 +104,7 @@ Diff pane:
 - `m`: add comment for current commit/hunk anchor or selected visual range
 - `e`: edit comment under cursor
 - `D`: delete comment under cursor
+- `y`: copy current `.hunkr/comments/<branch>-review-tasks.md` path to clipboard (tries multiple clipboard backends with fallback)
 - switching panes clears active visual selections
 
 Comment mode:
