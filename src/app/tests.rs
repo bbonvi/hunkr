@@ -134,7 +134,7 @@ fn rendered_separator_line_keeps_empty_raw_text_and_visible_marker() {
     assert!(separator.anchor.is_none());
     assert_eq!(separator.comment_id, None);
     assert_eq!(separator.line.spans[0].style.fg, Some(theme.dimmed));
-    assert_eq!(content, "·");
+    assert_eq!(content, "            ");
 }
 
 #[test]
