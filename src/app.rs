@@ -21,11 +21,18 @@ use syntect::{
 
 mod lifecycle_render;
 mod navigation;
+mod nerd_fonts;
 mod state;
 mod ui;
+use self::nerd_fonts::{
+    app_title_label, commit_selection_marker, format_path_with_icon, format_tree_dir_label,
+    format_tree_file_label, list_highlight_symbol, list_highlight_symbol_width, uncommitted_badge,
+    unpushed_marker,
+};
 use self::ui::diff_pane::{
-    DiffPaneRenderer, PendingDiffViewAnchor, capture_pending_diff_view_anchor,
-    find_diff_match_from_cursor, find_index_for_line_locator, is_hunk_header_line,
+    DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, PendingDiffViewAnchor,
+    capture_pending_diff_view_anchor, find_diff_match_from_cursor, find_index_for_line_locator,
+    is_hunk_header_line,
 };
 use self::ui::list_panes::ListPaneRenderer;
 
@@ -45,8 +52,6 @@ const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
-const LIST_HIGHLIGHT_SYMBOL: &str = ">> ";
-const LIST_HIGHLIGHT_SYMBOL_WIDTH: u16 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -241,6 +246,7 @@ pub struct App {
     input_mode: InputMode,
     theme_mode: ThemeMode,
     diff_wheel_scroll_lines: isize,
+    nerd_fonts: bool,
     commit_visual_anchor: Option<usize>,
     diff_visual: Option<DiffVisualSelection>,
     aggregate: AggregatedDiff,
@@ -294,13 +300,19 @@ impl FileTree {
         }
     }
 
-    fn flattened_rows(&self) -> Vec<TreeRow> {
+    fn flattened_rows(&self, nerd_fonts: bool) -> Vec<TreeRow> {
         let mut rows = Vec::new();
-        self.flatten_into(&mut rows, String::new(), 0);
+        self.flatten_into(&mut rows, String::new(), 0, nerd_fonts);
         rows
     }
 
-    fn flatten_into(&self, rows: &mut Vec<TreeRow>, prefix: String, depth: usize) {
+    fn flatten_into(
+        &self,
+        rows: &mut Vec<TreeRow>,
+        prefix: String,
+        depth: usize,
+        nerd_fonts: bool,
+    ) {
         for (dir, child) in &self.dirs {
             let path = if prefix.is_empty() {
                 dir.clone()
@@ -308,12 +320,12 @@ impl FileTree {
                 format!("{prefix}/{dir}")
             };
             rows.push(TreeRow {
-                label: format!("{}[D] {}", "  ".repeat(depth), dir),
+                label: format_tree_dir_label(depth, dir, nerd_fonts),
                 path: None,
                 selectable: false,
                 modified_ts: None,
             });
-            child.flatten_into(rows, path, depth + 1);
+            child.flatten_into(rows, path, depth + 1, nerd_fonts);
         }
 
         for (file, modified_ts) in &self.files {
@@ -323,7 +335,7 @@ impl FileTree {
                 format!("{prefix}/{file}")
             };
             rows.push(TreeRow {
-                label: format!("{}[F] {}", "  ".repeat(depth), file),
+                label: format_tree_file_label(depth, file, &full, nerd_fonts),
                 path: Some(full),
                 selectable: true,
                 modified_ts: Some(*modified_ts),

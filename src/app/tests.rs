@@ -66,12 +66,49 @@ fn file_tree_builds_directories_and_files() {
     let mut tree = FileTree::default();
     tree.insert("src/app.rs", 100);
     tree.insert("src/ui/view.rs", 200);
-    let rows = tree.flattened_rows();
+    let rows = tree.flattened_rows(false);
 
     assert!(rows.iter().any(|r| r.label.contains("[D] src")));
     assert!(rows.iter().any(|r| r.label.contains("[F] app.rs")));
     assert!(rows.iter().any(|r| r.label.contains("[D] ui")));
     assert!(rows.iter().any(|r| r.label.contains("[F] view.rs")));
+}
+
+#[test]
+fn file_tree_uses_file_icons_when_nerd_fonts_enabled() {
+    let mut tree = FileTree::default();
+    tree.insert("src/app.rs", 100);
+    tree.insert("README.md", 200);
+    let rows = tree.flattened_rows(true);
+
+    assert!(rows.iter().any(|r| r.label.contains(" src")));
+    assert!(rows.iter().any(|r| r.label.contains(" app.rs")));
+    assert!(rows.iter().any(|r| r.label.contains(" README.md")));
+}
+
+#[test]
+fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let plain = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, false);
+    let nerd = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, true);
+
+    let plain_text = plain
+        .line
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+    let nerd_text = nerd
+        .line
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(plain_text.contains("src/app.rs"));
+    assert!(nerd_text.contains(" src/app.rs"));
+    assert_eq!(plain.raw_text, "==== file 1/2: src/app.rs ====");
+    assert_eq!(nerd.raw_text, plain.raw_text);
 }
 
 #[test]
@@ -110,8 +147,16 @@ fn diff_index_matches_list_behavior_without_sticky_banner() {
 
 #[test]
 fn list_content_width_accounts_for_border_and_highlight_symbol() {
-    assert_eq!(list_content_width(20), 15);
-    assert_eq!(list_content_width(4), 1);
+    assert_eq!(list_content_width(20, 3), 15);
+    assert_eq!(list_content_width(4, 3), 1);
+}
+
+#[test]
+fn list_content_width_expands_when_nerd_highlight_symbol_hidden() {
+    assert_eq!(
+        list_content_width(20, list_highlight_symbol_width(true)),
+        18
+    );
 }
 
 #[test]
@@ -605,7 +650,7 @@ fn line_with_right_keeps_right_text_visible() {
 fn compose_commit_line_preserves_age_column_on_narrow_width() {
     let row = commit_row("abc1234", false, ReviewStatus::IssueFound);
     let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(24, 3_600, &theme);
+    let presenter = ListLinePresenter::new(24, 3_600, &theme, false);
     let rendered = presenter.commit_row_line(&row);
     let flattened = rendered
         .spans
@@ -619,7 +664,7 @@ fn compose_commit_line_preserves_age_column_on_narrow_width() {
 fn compose_commit_line_marks_selected_rows() {
     let row = commit_row("abc1234", true, ReviewStatus::Unreviewed);
     let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
     let rendered = presenter.commit_row_line(&row);
     let flattened = rendered
         .spans
@@ -628,6 +673,51 @@ fn compose_commit_line_marks_selected_rows() {
         .collect::<String>();
 
     assert!(flattened.starts_with("[x] "));
+}
+
+#[test]
+fn compose_commit_line_uses_nerd_symbols_when_enabled() {
+    let row = commit_row("abc1234", true, ReviewStatus::Unreviewed);
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
+    let rendered = presenter.commit_row_line(&row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.starts_with(" "));
+    assert!(flattened.contains(" "));
+    assert!(flattened.ends_with("1h ago"));
+}
+
+#[test]
+fn compose_uncommitted_line_uses_nerd_draft_badge() {
+    let row = CommitRow {
+        info: CommitInfo {
+            id: UNCOMMITTED_COMMIT_ID.to_owned(),
+            short_id: UNCOMMITTED_COMMIT_SHORT.to_owned(),
+            summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
+            author: "local".to_owned(),
+            timestamp: 0,
+            unpushed: false,
+        },
+        selected: true,
+        status: ReviewStatus::Unreviewed,
+        is_uncommitted: true,
+    };
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
+    let rendered = presenter.commit_row_line(&row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("[ DRAFT]"));
+    assert!(flattened.ends_with("draft"));
 }
 
 #[test]

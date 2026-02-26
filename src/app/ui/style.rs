@@ -79,8 +79,6 @@ pub(in crate::app) fn line_with_right(
     ])
 }
 
-pub(in crate::app) fn list_content_width(rect_width: u16) -> usize {
-    rect_width
-        .saturating_sub(2 + super::super::LIST_HIGHLIGHT_SYMBOL_WIDTH)
-        .max(1) as usize
+pub(in crate::app) fn list_content_width(rect_width: u16, highlight_symbol_width: u16) -> usize {
+    rect_width.saturating_sub(2 + highlight_symbol_width).max(1) as usize
 }

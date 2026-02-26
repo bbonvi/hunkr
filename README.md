@@ -29,6 +29,7 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - File-switch memory: each file remembers last diff cursor/scroll position
 - Diff rendering is viewport-based (visible rows only) to keep large all-files reviews responsive
 - File tree shows relative last-modified time (from latest selected commit touching the file; hidden for draft/uncommitted-only file states)
+- File tree and diff file banners can show Nerd Font file-type icons (`nerd_fonts: true` by default)
 - Mouse support: pane focus, item selection, and wheel scrolling
 - Vim-like keys by default
 - Inline key hints are contextual to the focused pane
@@ -55,6 +56,12 @@ Optional runtime config is loaded from:
 - `~/.config/hunkr/config.yaml` (fallback)
 
 See [`config.example.yaml`](./config.example.yaml) for the canonical template.
+
+Supported keys:
+
+- `startup_theme`: `dark` or `light` (`dark` default)
+- `diff_wheel_scroll_lines`: positive integer (`1` default)
+- `nerd_fonts`: enable Nerd Font icons/symbols in file tree, diff banners, and commit markers (`true` default)
 
 ## Keybindings
 

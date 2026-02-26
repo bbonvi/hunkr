@@ -7,8 +7,9 @@ use ratatui::{
 };
 
 use super::super::{
-    CommitRow, FocusPane, LIST_HIGHLIGHT_SYMBOL, TreeRow, UiTheme, format_relative_time,
-    status_short_label, truncate,
+    CommitRow, FocusPane, TreeRow, UiTheme, commit_selection_marker, format_relative_time,
+    list_highlight_symbol, list_highlight_symbol_width, status_short_label, truncate,
+    uncommitted_badge, unpushed_marker,
 };
 use super::style::{line_with_right, list_content_width, list_row_style, status_style};
 
@@ -16,14 +17,16 @@ use super::style::{line_with_right, list_content_width, list_row_style, status_s
 pub(in crate::app) struct ListPaneRenderer<'a> {
     theme: &'a UiTheme,
     focused: FocusPane,
+    nerd_fonts: bool,
     now_ts: i64,
 }
 
 impl<'a> ListPaneRenderer<'a> {
-    pub(in crate::app) fn new(theme: &'a UiTheme, focused: FocusPane) -> Self {
+    pub(in crate::app) fn new(theme: &'a UiTheme, focused: FocusPane, nerd_fonts: bool) -> Self {
         Self {
             theme,
             focused,
+            nerd_fonts,
             now_ts: Utc::now().timestamp(),
         }
     }
@@ -56,9 +59,10 @@ impl<'a> ListPaneRenderer<'a> {
             Style::default().fg(self.theme.border)
         };
 
-        let width = list_content_width(rect.width);
+        let highlight_symbol = list_highlight_symbol(self.nerd_fonts);
+        let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
         let cursor_idx = file_list_state.selected();
-        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme);
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts);
 
         let items: Vec<ListItem<'static>> = file_rows
             .iter()
@@ -85,7 +89,7 @@ impl<'a> ListPaneRenderer<'a> {
                     .border_style(border_style),
             )
             .highlight_style(Style::default())
-            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
+            .highlight_symbol(highlight_symbol);
 
         frame.render_stateful_widget(list, rect, file_list_state);
     }
@@ -123,9 +127,10 @@ impl<'a> ListPaneRenderer<'a> {
             Style::default().fg(self.theme.border)
         };
 
-        let width = list_content_width(rect.width);
+        let highlight_symbol = list_highlight_symbol(self.nerd_fonts);
+        let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
         let cursor_idx = commit_list_state.selected();
-        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme);
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts);
         let items: Vec<ListItem<'static>> = commits
             .iter()
             .enumerate()
@@ -151,7 +156,7 @@ impl<'a> ListPaneRenderer<'a> {
                     .border_style(border_style),
             )
             .highlight_style(Style::default())
-            .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
+            .highlight_symbol(highlight_symbol);
 
         frame.render_stateful_widget(list, rect, commit_list_state);
     }
@@ -162,14 +167,21 @@ pub(in crate::app) struct ListLinePresenter<'a> {
     width: usize,
     now_ts: i64,
     theme: &'a UiTheme,
+    nerd_fonts: bool,
 }
 
 impl<'a> ListLinePresenter<'a> {
-    pub(in crate::app) fn new(width: usize, now_ts: i64, theme: &'a UiTheme) -> Self {
+    pub(in crate::app) fn new(
+        width: usize,
+        now_ts: i64,
+        theme: &'a UiTheme,
+        nerd_fonts: bool,
+    ) -> Self {
         Self {
             width,
             now_ts,
             theme,
+            nerd_fonts,
         }
     }
 
@@ -198,9 +210,9 @@ impl<'a> ListLinePresenter<'a> {
 
     pub(in crate::app) fn commit_row_line(&self, row: &CommitRow) -> Line<'static> {
         if row.is_uncommitted {
-            let marker = if row.selected { "[x]" } else { "[ ]" };
+            let marker = commit_selection_marker(row.selected, self.nerd_fonts);
             let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
-            let badge = "[UNCOMMITTED]";
+            let badge = uncommitted_badge(self.nerd_fonts);
             let right = "draft";
             let reserved = 1 + badge.chars().count() + 1 + right.chars().count();
             let max_left = self.width.saturating_sub(reserved).max(1);
@@ -227,10 +239,14 @@ impl<'a> ListLinePresenter<'a> {
             ]);
         }
 
-        let marker = if row.selected { "[x]" } else { "[ ]" };
+        let marker = commit_selection_marker(row.selected, self.nerd_fonts);
         let left = format!("{} {} {}", marker, row.info.short_id, row.info.summary);
         let status_label = format!("[{}]", status_short_label(row.status));
-        let unpushed = if row.info.unpushed { " [^]" } else { "" };
+        let unpushed = if row.info.unpushed {
+            unpushed_marker(self.nerd_fonts)
+        } else {
+            ""
+        };
         let right = format_relative_time(row.info.timestamp, self.now_ts);
         let reserved =
             1 + status_label.chars().count() + unpushed.chars().count() + 1 + right.chars().count();

@@ -11,17 +11,12 @@ use serde::Deserialize;
 const DEFAULT_DIFF_WHEEL_SCROLL_LINES: isize = 1;
 
 /// Startup UI theme name from config.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum StartupTheme {
+    #[default]
     Dark,
     Light,
-}
-
-impl Default for StartupTheme {
-    fn default() -> Self {
-        Self::Dark
-    }
 }
 
 /// Minimal runtime settings for hunkr.
@@ -30,6 +25,7 @@ impl Default for StartupTheme {
 pub struct AppConfig {
     pub startup_theme: StartupTheme,
     pub diff_wheel_scroll_lines: isize,
+    pub nerd_fonts: bool,
 }
 
 impl Default for AppConfig {
@@ -37,6 +33,7 @@ impl Default for AppConfig {
         Self {
             startup_theme: StartupTheme::Dark,
             diff_wheel_scroll_lines: DEFAULT_DIFF_WHEEL_SCROLL_LINES,
+            nerd_fonts: true,
         }
     }
 }
@@ -102,17 +99,23 @@ mod tests {
 
         assert_eq!(loaded.startup_theme, StartupTheme::Dark);
         assert_eq!(loaded.diff_wheel_scroll_lines, 1);
+        assert!(loaded.nerd_fonts);
     }
 
     #[test]
     fn config_parses_lowercase_keys() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("config.yaml");
-        fs::write(&path, "startup_theme: light\ndiff_wheel_scroll_lines: 3\n").expect("write");
+        fs::write(
+            &path,
+            "startup_theme: light\ndiff_wheel_scroll_lines: 3\nnerd_fonts: false\n",
+        )
+        .expect("write");
 
         let loaded = AppConfig::load_from_path(&path).expect("load");
         assert_eq!(loaded.startup_theme, StartupTheme::Light);
         assert_eq!(loaded.diff_wheel_scroll_lines, 3);
+        assert!(!loaded.nerd_fonts);
     }
 
     #[test]
@@ -123,5 +126,6 @@ mod tests {
 
         let loaded = AppConfig::load_from_path(&path).expect("load");
         assert_eq!(loaded.diff_wheel_scroll_lines, 1);
+        assert!(loaded.nerd_fonts);
     }
 }

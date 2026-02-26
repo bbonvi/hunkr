@@ -22,6 +22,7 @@ impl App {
             input_mode: InputMode::Normal,
             theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
             diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
+            nerd_fonts: config.nerd_fonts,
             commit_visual_anchor: None,
             diff_visual: None,
             aggregate: AggregatedDiff::default(),
@@ -135,7 +136,7 @@ impl App {
         };
         let headline = Line::from(vec![
             Span::styled(
-                " HUNKR ",
+                app_title_label(self.nerd_fonts),
                 Style::default()
                     .fg(theme.panel_title_fg)
                     .bg(theme.panel_title_bg)
@@ -163,6 +164,10 @@ impl App {
             ),
             Span::styled(
                 format!("theme:{} ", self.theme_mode.label()),
+                Style::default().fg(theme.dimmed),
+            ),
+            Span::styled(
+                format!("nf:{} ", if self.nerd_fonts { "on" } else { "off" }),
                 Style::default().fg(theme.dimmed),
             ),
         ]);
@@ -746,7 +751,7 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        ListPaneRenderer::new(theme, self.focused).render_files(
+        ListPaneRenderer::new(theme, self.focused, self.nerd_fonts).render_files(
             frame,
             rect,
             &self.file_rows,
@@ -761,7 +766,7 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        ListPaneRenderer::new(theme, self.focused).render_commits(
+        ListPaneRenderer::new(theme, self.focused, self.nerd_fonts).render_commits(
             frame,
             rect,
             &self.commits,
@@ -783,17 +788,19 @@ impl App {
         let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
         let sticky_banner_indexes =
             self.sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
-        DiffPaneRenderer::new(theme, self.focused).render(
-            frame,
-            rect,
-            self.selected_file.as_deref(),
-            self.selected_file_progress(),
+        let title = DiffPaneTitle {
+            selected_file: self.selected_file.as_deref(),
+            selected_file_progress: self.selected_file_progress(),
+            nerd_fonts: self.nerd_fonts,
             selected_lines,
-            &self.rendered_diff,
-            self.diff_position,
-            self.diff_selected_range(),
-            &sticky_banner_indexes,
-        );
+        };
+        let body = DiffPaneBody {
+            rendered_diff: &self.rendered_diff,
+            diff_position: self.diff_position,
+            visual_range: self.diff_selected_range(),
+            sticky_banner_indexes: &sticky_banner_indexes,
+        };
+        DiffPaneRenderer::new(theme, self.focused).render(frame, rect, title, body);
     }
 
     pub(super) fn render_footer(

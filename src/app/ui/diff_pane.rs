@@ -7,7 +7,7 @@ use ratatui::{
 
 use super::super::{
     CommentAnchor, DiffPosition, FocusPane, RenderedDiffLine, UiTheme, blend_colors,
-    comment_anchor_matches, is_commit_anchor,
+    comment_anchor_matches, format_path_with_icon, is_commit_anchor,
 };
 
 #[derive(Debug, Clone)]
@@ -22,6 +22,22 @@ pub(in crate::app) struct DiffLineLocator {
     anchor: Option<CommentAnchor>,
     raw_text: String,
     raw_text_occurrence: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::app) struct DiffPaneTitle<'a> {
+    pub selected_file: Option<&'a str>,
+    pub selected_file_progress: Option<(usize, usize)>,
+    pub nerd_fonts: bool,
+    pub selected_lines: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::app) struct DiffPaneBody<'a> {
+    pub rendered_diff: &'a [RenderedDiffLine],
+    pub diff_position: DiffPosition,
+    pub visual_range: Option<(usize, usize)>,
+    pub sticky_banner_indexes: &'a [usize],
 }
 
 /// Renders the diff pane so App can focus on orchestration/state transitions.
@@ -39,13 +55,8 @@ impl<'a> DiffPaneRenderer<'a> {
         &self,
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
-        selected_file: Option<&str>,
-        selected_file_progress: Option<(usize, usize)>,
-        selected_lines: usize,
-        rendered_diff: &[RenderedDiffLine],
-        diff_position: DiffPosition,
-        visual_range: Option<(usize, usize)>,
-        sticky_banner_indexes: &[usize],
+        title: DiffPaneTitle<'_>,
+        body: DiffPaneBody<'_>,
     ) {
         let border_style = if self.focused == FocusPane::Diff {
             Style::default().fg(self.theme.focus_border)
@@ -53,12 +64,14 @@ impl<'a> DiffPaneRenderer<'a> {
             Style::default().fg(self.theme.border)
         };
 
-        let file_label = match (selected_file, selected_file_progress) {
-            (Some(path), Some((index, total))) if total > 1 => {
-                format!("{path} ({index}/{total})")
+        let file_label = match (title.selected_file, title.selected_file_progress) {
+            (Some(path), Some((index, total))) => {
+                format!(
+                    "{} ({index}/{total})",
+                    format_path_with_icon(path, title.nerd_fonts)
+                )
             }
-            (Some(path), Some((index, total))) => format!("{path} ({index}/{total})"),
-            (Some(path), None) => path.to_owned(),
+            (Some(path), None) => format_path_with_icon(path, title.nerd_fonts),
             (None, _) => "(no file selected)".to_owned(),
         };
         let title = Line::from(vec![
@@ -73,7 +86,7 @@ impl<'a> DiffPaneRenderer<'a> {
             Span::styled(file_label, Style::default().fg(self.theme.text)),
             Span::raw(" "),
             Span::styled(
-                format!("{selected_lines} line(s) selected"),
+                format!("{} line(s) selected", title.selected_lines),
                 Style::default().fg(self.theme.muted),
             ),
         ]);
@@ -90,16 +103,22 @@ impl<'a> DiffPaneRenderer<'a> {
         }
 
         let max_sticky_rows = inner.height.saturating_sub(1) as usize;
-        let sticky_rows = sticky_banner_indexes.len().min(max_sticky_rows);
-        for (row, sticky_idx) in sticky_banner_indexes.iter().take(sticky_rows).enumerate() {
-            let sticky_line = rendered_diff
+        let sticky_rows = body.sticky_banner_indexes.len().min(max_sticky_rows);
+        for (row, sticky_idx) in body
+            .sticky_banner_indexes
+            .iter()
+            .take(sticky_rows)
+            .enumerate()
+        {
+            let sticky_line = body
+                .rendered_diff
                 .get(*sticky_idx)
                 .map(|line| {
                     display_line_with_selection(
                         line,
                         *sticky_idx,
-                        visual_range,
-                        diff_position.cursor,
+                        body.visual_range,
+                        body.diff_position.cursor,
                         self.focused == FocusPane::Diff,
                         self.theme,
                     )
@@ -120,15 +139,15 @@ impl<'a> DiffPaneRenderer<'a> {
         if body_height > 0 {
             let mut body_lines = Vec::with_capacity(body_height as usize);
             for row in 0..body_height as usize {
-                let line_idx = diff_position.scroll.saturating_add(row);
-                let Some(line) = rendered_diff.get(line_idx) else {
+                let line_idx = body.diff_position.scroll.saturating_add(row);
+                let Some(line) = body.rendered_diff.get(line_idx) else {
                     break;
                 };
                 body_lines.push(display_line_with_selection(
                     line,
                     line_idx,
-                    visual_range,
-                    diff_position.cursor,
+                    body.visual_range,
+                    body.diff_position.cursor,
                     self.focused == FocusPane::Diff,
                     self.theme,
                 ));
@@ -155,8 +174,8 @@ impl<'a> DiffPaneRenderer<'a> {
         self.render_diff_scrollbar(
             frame,
             rect,
-            rendered_diff.len(),
-            diff_position.scroll,
+            body.rendered_diff.len(),
+            body.diff_position.scroll,
             sticky_rows,
         );
     }
@@ -249,24 +268,24 @@ pub(in crate::app) fn find_diff_match_from_cursor(
 
     let current = cursor.min(lines.len().saturating_sub(1));
     if forward {
-        for idx in current.saturating_add(1)..lines.len() {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+        for (idx, line) in lines.iter().enumerate().skip(current.saturating_add(1)) {
+            if line.raw_text.to_ascii_lowercase().contains(&query) {
                 return Some(idx);
             }
         }
-        for idx in 0..=current {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+        for (idx, line) in lines.iter().enumerate().take(current + 1) {
+            if line.raw_text.to_ascii_lowercase().contains(&query) {
                 return Some(idx);
             }
         }
     } else {
-        for idx in (0..current).rev() {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+        for (idx, line) in lines.iter().enumerate().take(current).rev() {
+            if line.raw_text.to_ascii_lowercase().contains(&query) {
                 return Some(idx);
             }
         }
-        for idx in (current..lines.len()).rev() {
-            if lines[idx].raw_text.to_ascii_lowercase().contains(&query) {
+        for (idx, line) in lines.iter().enumerate().skip(current).rev() {
+            if line.raw_text.to_ascii_lowercase().contains(&query) {
                 return Some(idx);
             }
         }

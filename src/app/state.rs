@@ -209,6 +209,7 @@ impl App {
                 idx + 1,
                 total_files,
                 &theme,
+                self.nerd_fonts,
             ));
 
             let file_key = (path.clone(), self.theme_mode);
@@ -499,7 +500,7 @@ impl App {
             tree.insert(path, modified_ts);
         }
 
-        self.file_rows = tree.flattened_rows();
+        self.file_rows = tree.flattened_rows(self.nerd_fonts);
         for row in &mut self.file_rows {
             if row.selectable
                 && row
@@ -516,11 +517,11 @@ impl App {
             return;
         }
 
-        if self.file_list_state.selected().is_none() {
-            if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
-                self.file_list_state.select(Some(idx));
-                self.selected_file = self.file_rows[idx].path.clone();
-            }
+        if self.file_list_state.selected().is_none()
+            && let Some(idx) = self.file_rows.iter().position(|row| row.selectable)
+        {
+            self.file_list_state.select(Some(idx));
+            self.selected_file = self.file_rows[idx].path.clone();
         }
     }
 
@@ -620,13 +621,15 @@ impl App {
     }
 }
 
-fn rendered_file_header_line(
+pub(super) fn rendered_file_header_line(
     path: &str,
     file_index: usize,
     total_files: usize,
     theme: &UiTheme,
+    nerd_fonts: bool,
 ) -> RenderedDiffLine {
     let raw_text = format!("==== file {file_index}/{total_files}: {path} ====");
+    let display_path = format_path_with_icon(path, nerd_fonts);
     RenderedDiffLine {
         line: Line::from(vec![
             Span::styled("==== ", Style::default().fg(theme.dimmed)),
@@ -637,7 +640,7 @@ fn rendered_file_header_line(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(": ", Style::default().fg(theme.dimmed)),
-            Span::styled(path.to_owned(), Style::default().fg(theme.text)),
+            Span::styled(display_path, Style::default().fg(theme.text)),
             Span::styled(" ====", Style::default().fg(theme.dimmed)),
         ]),
         raw_text,
