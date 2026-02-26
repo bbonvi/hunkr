@@ -120,6 +120,24 @@ fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
 }
 
 #[test]
+fn rendered_separator_line_keeps_empty_raw_text_and_visible_marker() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let separator = state::rendered_separator_line(&theme);
+    let content = separator
+        .line
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert_eq!(separator.raw_text, "");
+    assert!(separator.anchor.is_none());
+    assert_eq!(separator.comment_id, None);
+    assert_eq!(separator.line.spans[0].style.fg, Some(theme.dimmed));
+    assert_eq!(content, "·");
+}
+
+#[test]
 fn list_index_skips_border_rows() {
     let rect = ratatui::layout::Rect::new(0, 0, 10, 6);
     assert_eq!(list_index_at(0, rect, 3), None);

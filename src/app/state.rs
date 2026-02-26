@@ -231,12 +231,7 @@ impl App {
             rendered.extend(file_rendered.iter().cloned());
 
             if idx + 1 < total_files {
-                rendered.push(RenderedDiffLine {
-                    line: Line::from(""),
-                    raw_text: String::new(),
-                    anchor: None,
-                    comment_id: None,
-                });
+                rendered.push(rendered_separator_line(&theme));
             }
 
             let range_end = rendered.len();
@@ -444,12 +439,7 @@ impl App {
                 }
             }
 
-            rendered.push(RenderedDiffLine {
-                line: Line::from(""),
-                raw_text: String::new(),
-                anchor: None,
-                comment_id: None,
-            });
+            rendered.push(rendered_separator_line(&theme));
         }
 
         rendered
@@ -667,6 +657,15 @@ pub(super) fn rendered_file_header_line(
             Span::styled(" ====", Style::default().fg(theme.dimmed)),
         ]),
         raw_text,
+        anchor: None,
+        comment_id: None,
+    }
+}
+
+pub(super) fn rendered_separator_line(theme: &UiTheme) -> RenderedDiffLine {
+    RenderedDiffLine {
+        line: Line::from(Span::styled("·", Style::default().fg(theme.dimmed))),
+        raw_text: String::new(),
         anchor: None,
         comment_id: None,
     }
