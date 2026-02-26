@@ -1020,10 +1020,21 @@ impl App {
 
         let width = list_content_width(rect.width);
         let now_ts = Utc::now().timestamp();
+        let cursor_idx = self.commit_list_state.selected();
         let items: Vec<ListItem<'static>> = self
             .commits
             .iter()
-            .map(|row| ListItem::new(compose_commit_line(row, width, now_ts, theme)))
+            .enumerate()
+            .map(|(idx, row)| {
+                let line = compose_commit_line(row, width, now_ts, theme);
+                let is_cursor = cursor_idx == Some(idx);
+                ListItem::new(line).style(commit_row_style(
+                    row.selected,
+                    is_cursor,
+                    self.focused == FocusPane::Commits,
+                    theme,
+                ))
+            })
             .collect();
 
         let list = List::new(items)
@@ -1034,7 +1045,7 @@ impl App {
                     .border_type(BorderType::Rounded)
                     .border_style(border_style),
             )
-            .highlight_style(Style::default().bg(theme.highlight_bg))
+            .highlight_style(Style::default())
             .highlight_symbol(LIST_HIGHLIGHT_SYMBOL);
 
         frame.render_stateful_widget(list, rect, &mut self.commit_list_state);
@@ -2668,20 +2679,29 @@ fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
     }
 }
 
+fn commit_row_style(selected: bool, cursor: bool, cursor_focused: bool, theme: &UiTheme) -> Style {
+    if cursor {
+        let cursor_bg = if selected {
+            blend_colors(theme.visual_bg, theme.cursor_bg, 170)
+        } else if cursor_focused {
+            theme.cursor_bg
+        } else {
+            theme.highlight_bg
+        };
+        return Style::default().bg(cursor_bg).add_modifier(Modifier::BOLD);
+    }
+    if selected {
+        return Style::default().bg(theme.visual_bg);
+    }
+    Style::default()
+}
+
 fn compose_commit_line(
     row: &CommitRow,
     width: usize,
     now_ts: i64,
     theme: &UiTheme,
 ) -> Line<'static> {
-    let emphasize_selected = |line: Line<'static>| -> Line<'static> {
-        if row.selected {
-            tint_line_background(&line, theme.visual_bg, false)
-        } else {
-            line
-        }
-    };
-
     if row.is_uncommitted {
         let marker = if row.selected { "[x]" } else { "[ ]" };
         let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
@@ -2698,7 +2718,7 @@ fn compose_commit_line(
             " ".repeat(width - static_used)
         };
 
-        return emphasize_selected(Line::from(vec![
+        return Line::from(vec![
             Span::styled(left_render, Style::default().fg(theme.text)),
             Span::raw(" "),
             Span::styled(
@@ -2709,7 +2729,7 @@ fn compose_commit_line(
             ),
             Span::raw(spaces),
             Span::styled(right, Style::default().fg(theme.dimmed)),
-        ]));
+        ]);
     }
 
     let marker = if row.selected { "[x]" } else { "[ ]" };
@@ -2732,14 +2752,14 @@ fn compose_commit_line(
         " ".repeat(width - static_used)
     };
 
-    emphasize_selected(Line::from(vec![
+    Line::from(vec![
         Span::styled(left_render, Style::default().fg(theme.text)),
         Span::raw(" "),
         Span::styled(status_label, status_style(row.status, theme)),
         Span::styled(unpushed.to_owned(), Style::default().fg(theme.unpushed)),
         Span::raw(spaces),
         Span::styled(right, Style::default().fg(theme.dimmed)),
-    ]))
+    ])
 }
 
 fn centered_rect(
@@ -3407,17 +3427,29 @@ mod tests {
     }
 
     #[test]
-    fn compose_commit_line_tints_selected_rows() {
+    fn compose_commit_line_marks_selected_rows() {
         let row = commit_row("abc1234", true, ReviewStatus::Unreviewed);
         let theme = UiTheme::from_mode(ThemeMode::Dark);
         let rendered = compose_commit_line(&row, 80, 3_600, &theme);
+        let flattened = rendered
+            .spans
+            .iter()
+            .map(|span| span.content.to_string())
+            .collect::<String>();
 
-        assert!(
-            rendered
-                .spans
-                .iter()
-                .any(|span| span.style.bg == Some(theme.visual_bg))
-        );
+        assert!(flattened.starts_with("[x] "));
+    }
+
+    #[test]
+    fn commit_row_style_layers_cursor_over_selection() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let selected_only = commit_row_style(true, false, false, &theme);
+        let cursor_only = commit_row_style(false, true, true, &theme);
+        let selected_cursor = commit_row_style(true, true, true, &theme);
+
+        assert_eq!(selected_only.bg, Some(theme.visual_bg));
+        assert_eq!(cursor_only.bg, Some(theme.cursor_bg));
+        assert!(selected_cursor.bg.is_some_and(|bg| bg != theme.visual_bg));
     }
 
     #[test]
