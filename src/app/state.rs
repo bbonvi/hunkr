@@ -653,6 +653,7 @@ impl App {
 
     pub(super) fn on_selection_changed(&mut self) {
         self.selection_rebuild_due = None;
+        self.reset_diff_view_for_commit_selection_change();
         if let Err(err) = self.rebuild_selection_dependent_views() {
             self.status = format!("failed to rebuild diff: {err:#}");
         } else {
@@ -663,6 +664,7 @@ impl App {
 
     pub(super) fn on_selection_changed_debounced(&mut self) {
         self.selection_rebuild_due = Some(Instant::now() + SELECTION_REBUILD_DEBOUNCE);
+        self.reset_diff_view_for_commit_selection_change();
         let selected = self.commits.iter().filter(|row| row.selected).count();
         self.status = format!("{} commit(s) selected", selected);
     }
@@ -671,12 +673,21 @@ impl App {
         if self.selection_rebuild_due.take().is_none() {
             return;
         }
+        self.reset_diff_view_for_commit_selection_change();
         if let Err(err) = self.rebuild_selection_dependent_views() {
             self.status = format!("failed to rebuild diff: {err:#}");
             return;
         }
         let selected = self.commits.iter().filter(|row| row.selected).count();
         self.status = format!("{} commit(s) selected", selected);
+    }
+
+    pub(super) fn reset_diff_view_for_commit_selection_change(&mut self) {
+        self.pending_diff_view_anchor = None;
+        self.diff_positions.clear();
+        self.diff_position = DiffPosition::default();
+        self.diff_visual = None;
+        self.diff_mouse_anchor = None;
     }
 
     pub(super) fn selected_commit_ids_oldest_first(&self) -> Vec<String> {
