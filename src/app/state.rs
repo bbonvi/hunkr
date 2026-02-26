@@ -559,10 +559,7 @@ impl App {
             .iter()
             .enumerate()
             .filter(|(_, row)| self.commit_status_filter.matches_row(row))
-            .filter(|(_, row)| {
-                self.commit_search_query.is_empty()
-                    || commit_row_matches_query(row, &self.commit_search_query)
-            })
+            .filter(|(_, row)| commit_row_matches_filter_query(row, &self.commit_search_query))
             .map(|(idx, _)| idx)
             .collect()
     }

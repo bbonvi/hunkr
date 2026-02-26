@@ -952,6 +952,17 @@ fn commit_search_matches_text_and_status_case_insensitively() {
 }
 
 #[test]
+fn uncommitted_row_bypasses_commit_query_filter() {
+    let mut draft = commit_row("wip", false, ReviewStatus::Unreviewed);
+    draft.is_uncommitted = true;
+    let committed = commit_row("abc1234", false, ReviewStatus::IssueFound);
+
+    assert!(commit_row_matches_filter_query(&draft, "no-match"));
+    assert!(!commit_row_matches_filter_query(&committed, "no-match"));
+    assert!(commit_row_matches_filter_query(&committed, "abc"));
+}
+
+#[test]
 fn switching_status_filter_deselects_hidden_commits() {
     let mut unreviewed = commit_row("a", true, ReviewStatus::Unreviewed);
     let reviewed = commit_row("b", true, ReviewStatus::Reviewed);

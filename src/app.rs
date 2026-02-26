@@ -598,6 +598,10 @@ fn commit_row_matches_query(row: &CommitRow, query: &str) -> bool {
         || contains_case_insensitive(status, query)
 }
 
+fn commit_row_matches_filter_query(row: &CommitRow, query: &str) -> bool {
+    row.is_uncommitted || query.is_empty() || commit_row_matches_query(row, query)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WordClass {
     Whitespace,
