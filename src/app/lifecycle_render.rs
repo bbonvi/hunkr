@@ -27,6 +27,7 @@ impl App {
             commit_visual_anchor: None,
             commit_mouse_anchor: None,
             commit_mouse_dragging: false,
+            last_list_wheel_event: None,
             diff_visual: None,
             diff_mouse_anchor: None,
             aggregate: AggregatedDiff::default(),
@@ -1101,18 +1102,18 @@ impl App {
             MouseEventKind::ScrollDown => {
                 if in_diff {
                     self.scroll_diff_viewport(self.diff_wheel_scroll_lines);
-                } else if in_files {
+                } else if in_files && self.should_scroll_list_wheel(FocusPane::Files, 1) {
                     self.scroll_file_list_lines(1);
-                } else if in_commits {
+                } else if in_commits && self.should_scroll_list_wheel(FocusPane::Commits, 1) {
                     self.scroll_commit_list_lines(1);
                 }
             }
             MouseEventKind::ScrollUp => {
                 if in_diff {
                     self.scroll_diff_viewport(-self.diff_wheel_scroll_lines);
-                } else if in_files {
+                } else if in_files && self.should_scroll_list_wheel(FocusPane::Files, -1) {
                     self.scroll_file_list_lines(-1);
-                } else if in_commits {
+                } else if in_commits && self.should_scroll_list_wheel(FocusPane::Commits, -1) {
                     self.scroll_commit_list_lines(-1);
                 }
             }
@@ -1205,6 +1206,21 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn should_scroll_list_wheel(&mut self, pane: FocusPane, delta: isize) -> bool {
+        let now = Instant::now();
+        if list_wheel_event_is_duplicate(
+            self.last_list_wheel_event,
+            pane,
+            delta,
+            now,
+            LIST_WHEEL_EVENT_MIN_INTERVAL,
+        ) {
+            return false;
+        }
+        self.last_list_wheel_event = Some((pane, delta, now));
+        true
     }
 
     fn handle_comment_mouse(&mut self, mouse: crossterm::event::MouseEvent) {

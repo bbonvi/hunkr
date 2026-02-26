@@ -309,6 +309,42 @@ fn list_drag_scroll_delta_marks_top_and_bottom_edges() {
 }
 
 #[test]
+fn list_wheel_event_duplicate_detection_matches_pane_direction_and_interval() {
+    let base = Instant::now();
+    let last = Some((FocusPane::Commits, 1, base));
+    let min = Duration::from_millis(45);
+
+    assert!(list_wheel_event_is_duplicate(
+        last,
+        FocusPane::Commits,
+        1,
+        base + Duration::from_millis(20),
+        min
+    ));
+    assert!(!list_wheel_event_is_duplicate(
+        last,
+        FocusPane::Commits,
+        -1,
+        base + Duration::from_millis(20),
+        min
+    ));
+    assert!(!list_wheel_event_is_duplicate(
+        last,
+        FocusPane::Files,
+        1,
+        base + Duration::from_millis(20),
+        min
+    ));
+    assert!(!list_wheel_event_is_duplicate(
+        last,
+        FocusPane::Commits,
+        1,
+        base + Duration::from_millis(60),
+        min
+    ));
+}
+
+#[test]
 fn diff_index_maps_sticky_row_to_banner_line() {
     let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
     let sticky = vec![7];

@@ -57,6 +57,7 @@ const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
+const LIST_WHEEL_EVENT_MIN_INTERVAL: Duration = Duration::from_millis(45);
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -313,6 +314,7 @@ pub struct App {
     commit_visual_anchor: Option<usize>,
     commit_mouse_anchor: Option<usize>,
     commit_mouse_dragging: bool,
+    last_list_wheel_event: Option<(FocusPane, isize, Instant)>,
     diff_visual: Option<DiffVisualSelection>,
     diff_mouse_anchor: Option<usize>,
     aggregate: AggregatedDiff,
@@ -537,6 +539,21 @@ fn list_drag_scroll_delta(mouse_y: u16, rect: ratatui::layout::Rect, edge_margin
         return 1;
     }
     0
+}
+
+fn list_wheel_event_is_duplicate(
+    last_event: Option<(FocusPane, isize, Instant)>,
+    pane: FocusPane,
+    delta: isize,
+    now: Instant,
+    min_interval: Duration,
+) -> bool {
+    if let Some((last_pane, last_delta, last_time)) = last_event {
+        return last_pane == pane
+            && last_delta == delta
+            && now.duration_since(last_time) < min_interval;
+    }
+    false
 }
 
 fn diff_index_at(
