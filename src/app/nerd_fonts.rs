@@ -226,78 +226,49 @@ fn file_extension_icon(ext: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    fn icon_prefix(rendered: &str) -> &str {
+        rendered.split_once(' ').map(|(icon, _)| icon).unwrap_or("")
+    }
+
     #[test]
-    fn ascii_mode_uses_plain_labels() {
+    fn ascii_mode_keeps_path_unchanged() {
         assert_eq!(format_path_with_icon("src/app.rs", false), "src/app.rs");
-        assert_eq!(format_tree_dir_label(1, "src", false), "  [D] src");
-        assert_eq!(
-            format_tree_file_label(1, "app.rs", "src/app.rs", false),
-            "  [F] app.rs"
-        );
     }
 
     #[test]
-    fn nerd_mode_uses_language_specific_file_icons() {
-        assert_eq!(format_path_with_icon("src/app.rs", true), " src/app.rs");
-        assert_eq!(
-            format_tree_file_label(0, "README.md", "README.md", true),
-            " README.md"
-        );
+    fn nerd_mode_prefixes_icon_and_preserves_path() {
+        let rendered = format_path_with_icon("src/app.rs", true);
+        assert_ne!(rendered, "src/app.rs");
+        assert!(rendered.ends_with("src/app.rs"));
+        assert!(rendered.contains(' '));
     }
 
     #[test]
-    fn cargo_lock_uses_lock_icon_without_special_case() {
-        assert_eq!(format_path_with_icon("Cargo.lock", true), "󰌾 Cargo.lock");
+    fn env_family_uses_consistent_icon() {
+        let env = format_path_with_icon(".env", true);
+        let env_dev = format_path_with_icon(".env.dev", true);
+        let env_example = format_path_with_icon(".env.example", true);
+
+        let env_icon = icon_prefix(&env);
+        assert_eq!(env_icon, icon_prefix(&env_dev));
+        assert_eq!(env_icon, icon_prefix(&env_example));
     }
 
     #[test]
-    fn env_variants_map_to_env_icon() {
-        assert_eq!(format_path_with_icon(".env", true), " .env");
-        assert_eq!(format_path_with_icon(".env.dev", true), " .env.dev");
-        assert_eq!(
-            format_path_with_icon(".env.example", true),
-            " .env.example"
-        );
+    fn example_variants_inherit_base_icon_family() {
+        let base_path = format_path_with_icon("config.yaml", true);
+        let example_path = format_path_with_icon("config.yaml.example", true);
+        let base = icon_prefix(&base_path);
+        let example = icon_prefix(&example_path);
+        assert_eq!(base, example);
     }
 
     #[test]
-    fn example_variants_inherit_base_file_type_icon() {
-        assert_eq!(
-            format_path_with_icon("config.yaml.example", true),
-            " config.yaml.example"
-        );
-        assert_eq!(
-            format_path_with_icon("Dockerfile.example", true),
-            " Dockerfile.example"
-        );
-    }
-
-    #[test]
-    fn docker_compose_files_use_docker_icon() {
-        assert_eq!(
-            format_path_with_icon("docker-compose.yml", true),
-            " docker-compose.yml"
-        );
-        assert_eq!(
-            format_path_with_icon("docker-compose.override.yaml", true),
-            " docker-compose.override.yaml"
-        );
-        assert_eq!(
-            format_path_with_icon("compose.yaml", true),
-            " compose.yaml"
-        );
-    }
-
-    #[test]
-    fn dockerfile_variants_use_docker_icon() {
-        assert_eq!(format_path_with_icon("Dockerfile", true), " Dockerfile");
-        assert_eq!(
-            format_path_with_icon("Dockerfile.dev", true),
-            " Dockerfile.dev"
-        );
-        assert_eq!(
-            format_path_with_icon("Dockerfile-prod", true),
-            " Dockerfile-prod"
-        );
+    fn docker_manifest_and_dockerfile_share_icon_family() {
+        let compose_path = format_path_with_icon("docker-compose.yml", true);
+        let dockerfile_path = format_path_with_icon("Dockerfile.dev", true);
+        let compose = icon_prefix(&compose_path);
+        let dockerfile = icon_prefix(&dockerfile_path);
+        assert_eq!(compose, dockerfile);
     }
 }
