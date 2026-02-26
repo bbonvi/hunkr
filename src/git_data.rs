@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, anyhow};
 use chrono::Utc;
-use git2::{BranchType, DiffOptions, Oid, Repository, Sort};
+use git2::{BranchType, DiffOptions, ErrorCode, Oid, Repository, Sort};
 
 use crate::model::{
     AggregatedDiff, CommitInfo, DiffLineKind, FilePatch, Hunk, HunkLine, UNCOMMITTED_COMMIT_ID,
@@ -26,7 +26,16 @@ impl GitService {
     }
 
     pub fn open_at(path: &Path) -> anyhow::Result<Self> {
-        let repo = Repository::discover(path).context("failed to discover git repository")?;
+        let repo = match Repository::discover(path) {
+            Ok(repo) => repo,
+            Err(err) if err.code() == ErrorCode::NotFound => {
+                return Err(anyhow!(
+                    "no git repository found at or above {}",
+                    path.display()
+                ));
+            }
+            Err(err) => return Err(anyhow!(err).context("failed to discover git repository")),
+        };
         let root = repo
             .workdir()
             .map(Path::to_path_buf)
@@ -723,6 +732,21 @@ mod tests {
         assert_eq!(
             affected,
             BTreeSet::from([history[2].id.clone(), history[1].id.clone()])
+        );
+    }
+
+    #[test]
+    fn open_at_without_repository_returns_clear_error() {
+        let non_repo = tempdir().expect("tempdir");
+        let err = match GitService::open_at(non_repo.path()) {
+            Ok(_) => panic!("missing repo should fail"),
+            Err(err) => err,
+        };
+        let rendered = format!("{err:#}");
+
+        assert!(
+            rendered.contains("no git repository found at or above"),
+            "expected friendly missing-repo error, got: {rendered}"
         );
     }
 

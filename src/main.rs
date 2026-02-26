@@ -10,8 +10,8 @@ use std::io::{self, Stdout};
 use hunkr::app::App;
 
 fn main() -> anyhow::Result<()> {
-    let mut terminal = init_terminal().context("failed to initialize terminal")?;
     let mut app = App::bootstrap()?;
+    let mut terminal = init_terminal().context("failed to initialize terminal")?;
 
     let result = run_event_loop(&mut terminal, &mut app);
     restore_terminal(&mut terminal).context("failed to restore terminal")?;
