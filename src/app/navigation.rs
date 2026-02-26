@@ -495,16 +495,15 @@ impl App {
         false
     }
 
-    pub(super) fn comment_target_from_selection(&self) -> Option<CommentTarget> {
+    pub(super) fn comment_target_from_selection(&self) -> anyhow::Result<Option<CommentTarget>> {
         if self.diff_selection_spans_multiple_files() {
-            return None;
+            return Ok(None);
         }
 
-        let selected_commits = self
-            .selected_commit_ids_oldest_first()
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let (start_idx, end_idx) = self.diff_selected_range()?;
+        let selected_commits_ordered = self.selected_commit_ids_oldest_first();
+        let Some((start_idx, end_idx)) = self.diff_selected_range() else {
+            return Ok(None);
+        };
         let mut commit_anchors = Vec::new();
         let mut hunk_anchors = Vec::new();
         let mut commit_paths = BTreeSet::new();
@@ -534,54 +533,69 @@ impl App {
         }
 
         if hunk_anchors.is_empty() && commit_anchors.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         if hunk_anchors.is_empty() {
             if commit_paths.len() > 1 {
-                return None;
+                return Ok(None);
             }
-            let anchor = commit_anchors.last()?.clone();
-            let commits = if selected_commits.is_empty() {
+            let Some(anchor) = commit_anchors.last().cloned() else {
+                return Ok(None);
+            };
+            let commits = self.git.commits_affecting_selection(
+                &selected_commits_ordered,
+                &anchor.file_path,
+                &[],
+            )?;
+            let commits = if commits.is_empty() {
                 BTreeSet::from([anchor.commit_id.clone()])
             } else {
-                selected_commits
+                commits
             };
-            return Some(CommentTarget {
+            return Ok(Some(CommentTarget {
                 kind: CommentTargetKind::Commit,
                 start: anchor.clone(),
                 end: anchor.clone(),
                 commits,
-                selected_lines: if commit_lines.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![commit_lines.last()?.clone()]
-                },
-            });
+                selected_lines: commit_lines
+                    .last()
+                    .map(|line| vec![line.clone()])
+                    .unwrap_or_default(),
+            }));
         }
 
         if hunk_paths.len() > 1 {
-            return None;
+            return Ok(None);
         }
 
-        let start = hunk_anchors.first()?.clone();
-        let end = hunk_anchors.last()?.clone();
-        let commits = if selected_commits.is_empty() {
+        let Some(start) = hunk_anchors.first().cloned() else {
+            return Ok(None);
+        };
+        let Some(end) = hunk_anchors.last().cloned() else {
+            return Ok(None);
+        };
+        let commits = self.git.commits_affecting_selection(
+            &selected_commits_ordered,
+            &start.file_path,
+            &hunk_lines,
+        )?;
+        let commits = if commits.is_empty() {
             hunk_anchors
                 .iter()
                 .map(|anchor| anchor.commit_id.clone())
                 .collect::<BTreeSet<_>>()
         } else {
-            selected_commits
+            commits
         };
 
-        Some(CommentTarget {
+        Ok(Some(CommentTarget {
             kind: CommentTargetKind::Hunk,
             start,
             end,
             commits,
             selected_lines: hunk_lines,
-        })
+        }))
     }
 
     pub(super) fn status_counts(&self) -> (usize, usize, usize, usize) {

@@ -258,6 +258,79 @@ impl GitService {
 
         Ok(AggregatedDiff { files })
     }
+
+    pub fn commits_affecting_selection(
+        &self,
+        ordered_commit_ids: &[String],
+        file_path: &str,
+        selected_lines: &[String],
+    ) -> anyhow::Result<BTreeSet<String>> {
+        if ordered_commit_ids.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+
+        let selected_signatures = selection_line_signatures(selected_lines);
+        let mut affecting = BTreeSet::new();
+
+        for commit_id in ordered_commit_ids {
+            let oid = Oid::from_str(commit_id)
+                .with_context(|| format!("invalid commit id {commit_id}"))?;
+            let commit = self
+                .repo
+                .find_commit(oid)
+                .with_context(|| format!("failed to load commit {commit_id}"))?;
+            let current_tree = commit.tree().context("failed to load commit tree")?;
+            let parent_tree = if commit.parent_count() > 0 {
+                Some(
+                    commit
+                        .parent(0)
+                        .context("failed to load commit parent")?
+                        .tree()
+                        .context("failed to load parent tree")?,
+                )
+            } else {
+                None
+            };
+
+            let mut opts = DiffOptions::new();
+            opts.context_lines(3);
+            let diff = self
+                .repo
+                .diff_tree_to_tree(parent_tree.as_ref(), Some(&current_tree), Some(&mut opts))
+                .with_context(|| format!("failed to diff commit {commit_id}"))?;
+
+            let source = DiffSourceMeta {
+                commit_id: commit_id.clone(),
+                commit_short: short_id(commit_id),
+                commit_summary: commit
+                    .summary()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| "(no summary)".to_owned()),
+                commit_timestamp: commit.time().seconds(),
+            };
+            let mut files = BTreeMap::<String, FilePatch>::new();
+            append_diff_files(&mut files, &diff, &source)
+                .with_context(|| format!("failed to iterate diff for commit {commit_id}"))?;
+            let Some(patch) = files.remove(file_path) else {
+                continue;
+            };
+
+            if selected_signatures.is_empty() {
+                affecting.insert(commit_id.clone());
+                continue;
+            }
+
+            let commit_signatures = patch_line_signatures(&patch);
+            if selected_signatures
+                .iter()
+                .any(|signature| commit_signatures.contains(signature))
+            {
+                affecting.insert(commit_id.clone());
+            }
+        }
+
+        Ok(affecting)
+    }
 }
 
 struct DiffSourceMeta {
@@ -403,6 +476,33 @@ fn path_to_string(path: &Path) -> String {
 
 fn short_id(id: &str) -> String {
     id.chars().take(7).collect()
+}
+
+fn selection_line_signatures(lines: &[String]) -> BTreeSet<String> {
+    lines
+        .iter()
+        .filter_map(|line| match line.chars().next() {
+            Some('+') | Some('-') | Some('~') => Some(line.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn patch_line_signatures(patch: &FilePatch) -> BTreeSet<String> {
+    patch
+        .hunks
+        .iter()
+        .flat_map(|hunk| hunk.lines.iter())
+        .filter_map(|line| {
+            let prefix = match line.kind {
+                DiffLineKind::Add => '+',
+                DiffLineKind::Remove => '-',
+                DiffLineKind::Meta => '~',
+                DiffLineKind::Context => return None,
+            };
+            Some(format!("{prefix}{}", line.text))
+        })
+        .collect()
 }
 
 fn aggregate_commit_summary(
@@ -560,6 +660,69 @@ mod tests {
                 .iter()
                 .flat_map(|hunk| hunk.lines.iter())
                 .any(|line| line.kind == DiffLineKind::Add && line.text.contains("fn added() {}"))
+        );
+    }
+
+    #[test]
+    fn commits_affecting_selection_matches_only_commits_touching_selected_lines() {
+        let repo_dir = tempdir().expect("tempdir");
+        init_repo(repo_dir.path());
+        commit_file(repo_dir.path(), "src.txt", "let a = 1;\n", "first");
+        commit_file(
+            repo_dir.path(),
+            "src.txt",
+            "let a = 2;\nlet b = 3;\n",
+            "second",
+        );
+        commit_file(repo_dir.path(), "other.txt", "x\n", "third");
+
+        let service = GitService::open_at(repo_dir.path()).expect("service");
+        let history = service.load_first_parent_history(10).expect("history");
+        let selected = vec![
+            history[2].id.clone(),
+            history[1].id.clone(),
+            history[0].id.clone(),
+        ];
+
+        let affected = service
+            .commits_affecting_selection(
+                &selected,
+                "src.txt",
+                &[String::from("+let a = 2;"), String::from("+let b = 3;")],
+            )
+            .expect("affected");
+
+        assert_eq!(affected, BTreeSet::from([history[1].id.clone()]));
+    }
+
+    #[test]
+    fn commits_affecting_selection_without_changed_lines_uses_file_scope() {
+        let repo_dir = tempdir().expect("tempdir");
+        init_repo(repo_dir.path());
+        commit_file(repo_dir.path(), "src.txt", "let a = 1;\n", "first");
+        commit_file(
+            repo_dir.path(),
+            "src.txt",
+            "let a = 2;\nlet b = 3;\n",
+            "second",
+        );
+        commit_file(repo_dir.path(), "other.txt", "x\n", "third");
+
+        let service = GitService::open_at(repo_dir.path()).expect("service");
+        let history = service.load_first_parent_history(10).expect("history");
+        let selected = vec![
+            history[2].id.clone(),
+            history[1].id.clone(),
+            history[0].id.clone(),
+        ];
+
+        let affected = service
+            .commits_affecting_selection(&selected, "src.txt", &[])
+            .expect("affected");
+
+        assert_eq!(
+            affected,
+            BTreeSet::from([history[2].id.clone(), history[1].id.clone()])
         );
     }
 

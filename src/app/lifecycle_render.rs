@@ -304,8 +304,8 @@ impl App {
                 }
 
                 match self.input_mode {
-                    InputMode::CommentCreate => {
-                        if let Some(target) = self.comment_target_from_selection() {
+                    InputMode::CommentCreate => match self.comment_target_from_selection() {
+                        Ok(Some(target)) => {
                             let result = self.comments.add_comment(&target, &self.comment_buffer);
                             match result {
                                 Ok(id) => {
@@ -332,14 +332,19 @@ impl App {
                                     self.status = format!("Failed to save comment: {err:#}");
                                 }
                             }
-                        } else {
+                        }
+                        Ok(None) => {
                             self.status = if self.diff_selection_spans_multiple_files() {
                                 "Comment range must stay within a single file".to_owned()
                             } else {
                                 "No hunk/line anchor at cursor or selected range".to_owned()
                             };
                         }
-                    }
+                        Err(err) => {
+                            self.status =
+                                format!("Failed to resolve affected commits for comment: {err:#}");
+                        }
+                    },
                     InputMode::CommentEdit(id) => {
                         match self.comments.update_comment(id, &self.comment_buffer) {
                             Ok(true) => {
