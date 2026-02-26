@@ -1,3 +1,4 @@
+use crate::model::ReviewStatus;
 use chrono::Utc;
 use ratatui::{
     Frame,
@@ -316,17 +317,31 @@ impl<'a> ListLinePresenter<'a> {
         } else {
             " ".repeat(self.width - static_used)
         };
+        let emphasis = if matches!(
+            row.status,
+            ReviewStatus::Unreviewed | ReviewStatus::IssueFound
+        ) {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
 
         Line::from(vec![
-            Span::styled(left_render, Style::default().fg(self.theme.text)),
+            Span::styled(
+                left_render,
+                Style::default().fg(self.theme.text).patch(emphasis),
+            ),
             Span::raw(" "),
             Span::styled(status_label, status_style(row.status, self.theme)),
             Span::styled(
                 unpushed.to_owned(),
-                Style::default().fg(self.theme.unpushed),
+                Style::default().fg(self.theme.unpushed).patch(emphasis),
             ),
             Span::raw(spaces),
-            Span::styled(right, Style::default().fg(self.theme.dimmed)),
+            Span::styled(
+                right,
+                Style::default().fg(self.theme.dimmed).patch(emphasis),
+            ),
         ])
     }
 }

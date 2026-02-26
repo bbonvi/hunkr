@@ -40,6 +40,25 @@ impl App {
         self.select_file_row(idx as usize);
     }
 
+    pub(super) fn scroll_file_list_lines(&mut self, delta: isize) {
+        let visible = self.visible_file_indices();
+        if visible.is_empty() {
+            return;
+        }
+
+        let len = visible.len() as isize;
+        let current = self.file_list_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, len - 1) as usize;
+        if next == current as usize {
+            return;
+        }
+
+        self.file_list_state.select(Some(next));
+        if self.file_rows[visible[next]].selectable {
+            self.select_file_row(next);
+        }
+    }
+
     pub(super) fn page_files(&mut self, multiplier: f32) {
         let step = page_step(self.pane_rects.files.height, multiplier);
         self.move_file_cursor(step);
@@ -99,6 +118,10 @@ impl App {
         if self.commit_visual_anchor.is_some() {
             self.apply_commit_visual_range();
         }
+    }
+
+    pub(super) fn scroll_commit_list_lines(&mut self, delta: isize) {
+        self.move_commit_cursor(delta);
     }
 
     pub(super) fn page_commits(&mut self, multiplier: f32) {
@@ -511,6 +534,8 @@ impl App {
         }
         self.focused = next;
         self.commit_visual_anchor = None;
+        self.commit_mouse_anchor = None;
+        self.commit_mouse_dragging = false;
         self.clear_diff_visual_selection();
         self.diff_pending_op = None;
     }

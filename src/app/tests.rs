@@ -301,6 +301,14 @@ fn list_index_skips_border_rows() {
 }
 
 #[test]
+fn list_drag_scroll_delta_marks_top_and_bottom_edges() {
+    let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
+    assert_eq!(list_drag_scroll_delta(1, rect, 1), -1);
+    assert_eq!(list_drag_scroll_delta(4, rect, 1), 0);
+    assert_eq!(list_drag_scroll_delta(6, rect, 1), 1);
+}
+
+#[test]
 fn diff_index_maps_sticky_row_to_banner_line() {
     let rect = ratatui::layout::Rect::new(0, 0, 20, 8);
     let sticky = vec![7];
@@ -866,6 +874,30 @@ fn compose_commit_line_marks_selected_rows() {
         .collect::<String>();
 
     assert!(flattened.starts_with("[x] "));
+}
+
+#[test]
+fn compose_commit_line_bolds_unreviewed_and_issue_found_rows() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
+
+    let unreviewed = presenter.commit_row_line(&commit_row("u1", false, ReviewStatus::Unreviewed));
+    let issue = presenter.commit_row_line(&commit_row("i1", false, ReviewStatus::IssueFound));
+    let reviewed = presenter.commit_row_line(&commit_row("r1", false, ReviewStatus::Reviewed));
+
+    assert!(
+        unreviewed.spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+    assert!(issue.spans[0].style.add_modifier.contains(Modifier::BOLD));
+    assert!(
+        !reviewed.spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
 }
 
 #[test]

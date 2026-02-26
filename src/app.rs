@@ -56,6 +56,7 @@ const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
+const LIST_DRAG_EDGE_MARGIN: u16 = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +311,8 @@ pub struct App {
     nerd_fonts: bool,
     nerd_font_theme: NerdFontTheme,
     commit_visual_anchor: Option<usize>,
+    commit_mouse_anchor: Option<usize>,
+    commit_mouse_dragging: bool,
     diff_visual: Option<DiffVisualSelection>,
     diff_mouse_anchor: Option<usize>,
     aggregate: AggregatedDiff,
@@ -519,6 +522,21 @@ fn list_index_at(mouse_y: u16, rect: ratatui::layout::Rect, offset: usize) -> Op
     }
     let row = mouse_y.saturating_sub(rect.y + 1) as usize;
     Some(offset + row)
+}
+
+fn list_drag_scroll_delta(mouse_y: u16, rect: ratatui::layout::Rect, edge_margin: u16) -> isize {
+    if rect.height < 3 {
+        return 0;
+    }
+    let content_top = rect.y.saturating_add(1);
+    let content_bottom = rect.y.saturating_add(rect.height.saturating_sub(2));
+    if mouse_y <= content_top.saturating_add(edge_margin) {
+        return -1;
+    }
+    if mouse_y >= content_bottom.saturating_sub(edge_margin) {
+        return 1;
+    }
+    0
 }
 
 fn diff_index_at(

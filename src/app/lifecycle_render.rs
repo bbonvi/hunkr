@@ -25,6 +25,8 @@ impl App {
             nerd_fonts: config.nerd_fonts,
             nerd_font_theme: NerdFontTheme::default(),
             commit_visual_anchor: None,
+            commit_mouse_anchor: None,
+            commit_mouse_dragging: false,
             diff_visual: None,
             diff_mouse_anchor: None,
             aggregate: AggregatedDiff::default(),
@@ -1087,27 +1089,36 @@ impl App {
                 &sticky_banner_indexes,
             )
         };
+        let resolve_commit_visible_idx = |app: &Self, mouse_y: u16| -> Option<usize> {
+            list_index_at(
+                mouse_y,
+                app.pane_rects.commits,
+                app.commit_list_state.offset(),
+            )
+        };
 
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if in_diff {
                     self.scroll_diff_viewport(self.diff_wheel_scroll_lines);
                 } else if in_files {
-                    self.move_file_cursor(1);
+                    self.scroll_file_list_lines(1);
                 } else if in_commits {
-                    self.move_commit_cursor(1);
+                    self.scroll_commit_list_lines(1);
                 }
             }
             MouseEventKind::ScrollUp => {
                 if in_diff {
                     self.scroll_diff_viewport(-self.diff_wheel_scroll_lines);
                 } else if in_files {
-                    self.move_file_cursor(-1);
+                    self.scroll_file_list_lines(-1);
                 } else if in_commits {
-                    self.move_commit_cursor(-1);
+                    self.scroll_commit_list_lines(-1);
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
+                self.commit_mouse_anchor = None;
+                self.commit_mouse_dragging = false;
                 if in_files {
                     self.set_focus(FocusPane::Files);
                     self.diff_mouse_anchor = None;
@@ -1119,9 +1130,11 @@ impl App {
                 } else if in_commits {
                     self.set_focus(FocusPane::Commits);
                     self.diff_mouse_anchor = None;
-                    if let Some(idx) =
-                        list_index_at(y, self.pane_rects.commits, self.commit_list_state.offset())
+                    self.commit_visual_anchor = None;
+                    if let Some(idx) = resolve_commit_visible_idx(self, y)
+                        && let Some(full_idx) = self.visible_commit_indices().get(idx).copied()
                     {
+                        self.commit_mouse_anchor = Some(full_idx);
                         self.select_commit_row(idx, true);
                     }
                 } else if in_diff {
@@ -1137,6 +1150,30 @@ impl App {
                     self.diff_mouse_anchor = None;
                 }
             }
+            MouseEventKind::Drag(MouseButton::Left) if self.commit_mouse_anchor.is_some() => {
+                let edge_delta =
+                    list_drag_scroll_delta(y, self.pane_rects.commits, LIST_DRAG_EDGE_MARGIN);
+                if edge_delta != 0 {
+                    self.scroll_commit_list_lines(edge_delta);
+                }
+
+                let target_visible_idx =
+                    resolve_commit_visible_idx(self, y).or(self.commit_list_state.selected());
+                if let Some(visible_idx) = target_visible_idx {
+                    let visible_indices = self.visible_commit_indices();
+                    if let Some(full_idx) = visible_indices.get(visible_idx).copied() {
+                        self.commit_list_state.select(Some(visible_idx));
+                        let anchor = self.commit_mouse_anchor.expect("checked above");
+                        apply_range_selection(&mut self.commits, anchor, full_idx);
+                        if anchor != full_idx {
+                            self.commit_mouse_dragging = true;
+                        }
+                        if self.commit_mouse_dragging {
+                            self.on_selection_changed_debounced();
+                        }
+                    }
+                }
+            }
             MouseEventKind::Drag(MouseButton::Left) if in_diff => {
                 if let Some(row) = resolve_diff_row(self, y) {
                     self.set_diff_cursor(row);
@@ -1146,16 +1183,25 @@ impl App {
                     );
                 }
             }
-            MouseEventKind::Up(MouseButton::Left) if in_diff => {
-                if let Some(row) = resolve_diff_row(self, y) {
-                    self.set_diff_cursor(row);
-                }
-                self.diff_visual =
-                    diff_visual_from_drag_anchor(self.diff_mouse_anchor, self.diff_position.cursor);
-                self.diff_mouse_anchor = None;
-            }
             MouseEventKind::Up(MouseButton::Left) => {
+                let commit_dragging = self.commit_mouse_dragging;
+                self.commit_mouse_anchor = None;
+                self.commit_mouse_dragging = false;
+
+                if in_diff {
+                    if let Some(row) = resolve_diff_row(self, y) {
+                        self.set_diff_cursor(row);
+                    }
+                    self.diff_visual = diff_visual_from_drag_anchor(
+                        self.diff_mouse_anchor,
+                        self.diff_position.cursor,
+                    );
+                }
                 self.diff_mouse_anchor = None;
+
+                if commit_dragging {
+                    self.on_selection_changed();
+                }
             }
             _ => {}
         }
