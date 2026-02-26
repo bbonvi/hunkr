@@ -6,8 +6,24 @@ use ratatui::{
 };
 
 use super::super::{
-    DiffPosition, FocusPane, RenderedDiffLine, UiTheme, blend_colors, is_commit_anchor,
+    CommentAnchor, DiffPosition, FocusPane, RenderedDiffLine, UiTheme, blend_colors,
+    comment_anchor_matches, is_commit_anchor,
 };
+
+#[derive(Debug, Clone)]
+pub(in crate::app) struct PendingDiffViewAnchor {
+    pub path: String,
+    pub cursor_line: DiffLineLocator,
+    pub top_line: DiffLineLocator,
+    pub cursor_to_top_offset: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::app) struct DiffLineLocator {
+    anchor: Option<CommentAnchor>,
+    raw_text: String,
+    raw_text_occurrence: usize,
+}
 
 /// Renders the diff pane so App can focus on orchestration/state transitions.
 pub(in crate::app) struct DiffPaneRenderer<'a> {
@@ -243,6 +259,66 @@ pub(in crate::app) fn find_diff_match_from_cursor(
     None
 }
 
+pub(in crate::app) fn capture_pending_diff_view_anchor(
+    path: &str,
+    lines: &[RenderedDiffLine],
+    diff_position: DiffPosition,
+) -> Option<PendingDiffViewAnchor> {
+    if lines.is_empty() {
+        return None;
+    }
+
+    let cursor_idx = diff_position.cursor.min(lines.len() - 1);
+    let top_idx = diff_position.scroll.min(lines.len() - 1);
+    let cursor_line = diff_line_locator_for_index(lines, cursor_idx);
+    let top_line = diff_line_locator_for_index(lines, top_idx);
+
+    Some(PendingDiffViewAnchor {
+        path: path.to_owned(),
+        cursor_line,
+        top_line,
+        cursor_to_top_offset: cursor_idx.saturating_sub(top_idx),
+    })
+}
+
+pub(in crate::app) fn find_index_for_line_locator(
+    lines: &[RenderedDiffLine],
+    locator: &DiffLineLocator,
+) -> Option<usize> {
+    if lines.is_empty() {
+        return None;
+    }
+
+    if let Some(expected_anchor) = &locator.anchor {
+        let anchor_matches = lines
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                line.anchor.as_ref().and_then(|actual| {
+                    comment_anchor_matches(actual, expected_anchor).then_some(idx)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if anchor_matches.len() == 1 {
+            return anchor_matches.first().copied();
+        }
+        if !anchor_matches.is_empty() {
+            if let Some(idx) = find_index_for_raw_text_occurrence_in_candidates(
+                lines,
+                &anchor_matches,
+                &locator.raw_text,
+                locator.raw_text_occurrence,
+            ) {
+                return Some(idx);
+            }
+            return anchor_matches.last().copied();
+        }
+    }
+
+    find_index_for_raw_text_occurrence(lines, &locator.raw_text, locator.raw_text_occurrence)
+}
+
 pub(in crate::app) fn scrollbar_thumb(
     total: usize,
     viewport: usize,
@@ -265,4 +341,64 @@ pub(in crate::app) fn scrollbar_thumb(
         (clamped_scroll * track_len) / max_scroll
     };
     (thumb_start, thumb_len)
+}
+
+fn diff_line_locator_for_index(lines: &[RenderedDiffLine], idx: usize) -> DiffLineLocator {
+    let idx = idx.min(lines.len().saturating_sub(1));
+    let line = &lines[idx];
+    DiffLineLocator {
+        anchor: line.anchor.clone(),
+        raw_text: line.raw_text.clone(),
+        raw_text_occurrence: raw_text_occurrence_at_index(lines, idx, &line.raw_text),
+    }
+}
+
+fn raw_text_occurrence_at_index(lines: &[RenderedDiffLine], idx: usize, raw_text: &str) -> usize {
+    lines[..=idx]
+        .iter()
+        .filter(|line| line.raw_text == raw_text)
+        .count()
+        .saturating_sub(1)
+}
+
+fn find_index_for_raw_text_occurrence(
+    lines: &[RenderedDiffLine],
+    raw_text: &str,
+    occurrence: usize,
+) -> Option<usize> {
+    let mut seen = 0usize;
+    let mut last_match = None;
+    for (idx, line) in lines.iter().enumerate() {
+        if line.raw_text == raw_text {
+            if seen == occurrence {
+                return Some(idx);
+            }
+            seen = seen.saturating_add(1);
+            last_match = Some(idx);
+        }
+    }
+    last_match
+}
+
+fn find_index_for_raw_text_occurrence_in_candidates(
+    lines: &[RenderedDiffLine],
+    candidate_indexes: &[usize],
+    raw_text: &str,
+    occurrence: usize,
+) -> Option<usize> {
+    let mut seen = 0usize;
+    let mut last_match = None;
+    for idx in candidate_indexes {
+        let Some(line) = lines.get(*idx) else {
+            continue;
+        };
+        if line.raw_text == raw_text {
+            if seen == occurrence {
+                return Some(*idx);
+            }
+            seen = seen.saturating_add(1);
+            last_match = Some(*idx);
+        }
+    }
+    last_match
 }
