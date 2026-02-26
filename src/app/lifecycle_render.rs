@@ -1810,7 +1810,7 @@ impl App {
     }
 
     pub(super) fn render_onboarding(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
-        let area = centered_rect(62, 44, frame.area());
+        let area = centered_rect(54, 36, frame.area());
         frame.render_widget(Clear, area);
 
         let block = Block::default()
@@ -1829,57 +1829,41 @@ impl App {
         frame.render_widget(block.clone(), area);
         let inner = block.inner(area);
 
-        let (step_badge, question_line) = match self.onboarding_step {
-            Some(OnboardingStep::ConsentProjectDataDir) => (
-                "step 1/2",
-                Line::from(vec![
-                    Span::styled("Create ", Style::default().fg(theme.text)),
-                    Span::styled(
-                        ".hunkr/",
-                        Style::default()
-                            .fg(theme.accent)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" ?", Style::default().fg(theme.text)),
-                ]),
-            ),
-            Some(OnboardingStep::GitignoreChoice) => (
-                "step 2/2",
-                Line::from(vec![
-                    Span::styled("Add ", Style::default().fg(theme.text)),
-                    Span::styled(
-                        ".hunkr",
-                        Style::default()
-                            .fg(theme.accent)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" to ", Style::default().fg(theme.text)),
-                    Span::styled(
-                        ".gitignore",
-                        Style::default()
-                            .fg(theme.accent)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" ?", Style::default().fg(theme.text)),
-                ]),
-            ),
-            None => (
-                "setup complete",
-                Line::from(Span::styled(
-                    "Loading workspace...",
-                    Style::default().fg(theme.text),
-                )),
-            ),
+        let question_line = match self.onboarding_step {
+            Some(OnboardingStep::ConsentProjectDataDir) => Line::from(vec![
+                Span::styled("Create ", Style::default().fg(theme.text)),
+                Span::styled(
+                    ".hunkr/",
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" ?", Style::default().fg(theme.text)),
+            ]),
+            Some(OnboardingStep::GitignoreChoice) => Line::from(vec![
+                Span::styled("Add ", Style::default().fg(theme.text)),
+                Span::styled(
+                    ".hunkr",
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" to ", Style::default().fg(theme.text)),
+                Span::styled(
+                    ".gitignore",
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" ?", Style::default().fg(theme.text)),
+            ]),
+            None => Line::from(Span::styled(
+                "Loading workspace...",
+                Style::default().fg(theme.text),
+            )),
         };
 
         let mut lines = vec![
-            Line::from(Span::styled(
-                step_badge,
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
             question_line,
             Line::from(""),
             Line::from(vec![
