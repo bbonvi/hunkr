@@ -27,9 +27,6 @@ impl CommentStore {
     pub fn new(project_data_dir: &Path, branch: &str) -> anyhow::Result<Self> {
         let root = project_data_dir.join(COMMENTS_DIR);
         let index_path = root.join(COMMENTS_INDEX_FILE);
-        fs::create_dir_all(&root)
-            .with_context(|| format!("failed to create {}", root.display()))?;
-
         let comments = load_index(&index_path)?;
         let next_id = comments
             .iter()
@@ -116,6 +113,8 @@ impl CommentStore {
     }
 
     fn save_index(&self) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("failed to create {}", self.root.display()))?;
         let payload = serde_json::to_string_pretty(&self.comments)
             .context("failed to encode comments index")?;
         fs::write(&self.index_path, payload)

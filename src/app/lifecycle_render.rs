@@ -3,24 +3,11 @@ use crate::config::AppConfig;
 
 impl App {
     pub fn bootstrap() -> anyhow::Result<Self> {
-        let config = AppConfig::load()?;
         let git = GitService::open_current()?;
+        let config = AppConfig::load()?;
         let store = StateStore::for_project(git.root());
-        let first_open = !store.root_dir().exists();
-        let mut review_state = store.load()?;
-        if first_open {
-            let history = git.load_first_parent_history(HISTORY_LIMIT)?;
-            let reviewed_ids = first_open_reviewed_commit_ids(&history);
-            if !reviewed_ids.is_empty() {
-                store.set_many_status(
-                    &mut review_state,
-                    reviewed_ids,
-                    ReviewStatus::Reviewed,
-                    git.branch_name(),
-                );
-                store.save(&review_state)?;
-            }
-        }
+        let first_open = !store.has_state_file();
+        let review_state = store.load()?;
         let comments = CommentStore::new(store.root_dir(), git.branch_name())?;
 
         let mut app = Self {
@@ -77,19 +64,134 @@ impl App {
             diff_pending_op: None,
             selection_rebuild_due: None,
             show_help: false,
+            onboarding_step: first_open.then_some(OnboardingStep::ConsentProjectDataDir),
             last_refresh: Instant::now(),
             last_relative_time_redraw: Instant::now(),
             needs_redraw: true,
             should_quit: false,
         };
 
-        app.reload_commits(true)?;
-        app.ensure_rendered_diff();
-        if app.status.is_empty() {
+        if app.onboarding_active() {
+            app.status.clear();
+        } else {
+            app.reload_commits(true)?;
+            app.ensure_rendered_diff();
             app.status =
                 "Ready. Select commit range with <space>/v, set statuses with r/i/s/u.".to_owned();
         }
         Ok(app)
+    }
+
+    fn onboarding_active(&self) -> bool {
+        self.onboarding_step.is_some()
+    }
+
+    fn complete_first_open_setup(&mut self) -> anyhow::Result<()> {
+        let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
+        let reviewed_ids = first_open_reviewed_commit_ids(&history);
+        if !reviewed_ids.is_empty() {
+            self.store.set_many_status(
+                &mut self.review_state,
+                reviewed_ids,
+                ReviewStatus::Reviewed,
+                self.git.branch_name(),
+            );
+        }
+        self.store.save(&self.review_state)?;
+        Ok(())
+    }
+
+    fn finish_onboarding(&mut self, onboarding_note: Option<String>) {
+        if let Err(err) = self.complete_first_open_setup() {
+            self.status = format!("setup failed: {err:#}");
+            return;
+        }
+        if let Err(err) = self.reload_commits(true) {
+            self.status = format!("reload failed after setup: {err:#}");
+            return;
+        }
+        self.ensure_rendered_diff();
+        self.onboarding_step = None;
+        self.last_refresh = Instant::now();
+        self.last_relative_time_redraw = Instant::now();
+
+        let ready = "Ready. Select commit range with <space>/v, set statuses with r/i/s/u.";
+        self.status = if let Some(note) = onboarding_note {
+            format!("{note} {ready}")
+        } else {
+            ready.to_owned()
+        };
+    }
+
+    fn handle_onboarding_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.status = match self.onboarding_step {
+                    Some(OnboardingStep::ConsentProjectDataDir) => {
+                        "Setup canceled. Exiting without creating .hunkr".to_owned()
+                    }
+                    Some(OnboardingStep::GitignoreChoice) => {
+                        "Setup canceled before completion. Reopen hunkr to continue setup."
+                            .to_owned()
+                    }
+                    None => "Setup canceled".to_owned(),
+                };
+                self.should_quit = true;
+            }
+            _ => match self.onboarding_step {
+                Some(OnboardingStep::ConsentProjectDataDir) => {
+                    self.handle_project_data_dir_consent(key)
+                }
+                Some(OnboardingStep::GitignoreChoice) => self.handle_gitignore_choice(key),
+                None => {}
+            },
+        }
+    }
+
+    fn handle_project_data_dir_consent(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                if let Err(err) = std::fs::create_dir_all(self.store.root_dir()) {
+                    self.status = format!(
+                        "failed to create {}: {err}",
+                        self.store.root_dir().display()
+                    );
+                    return;
+                }
+                self.onboarding_step = Some(OnboardingStep::GitignoreChoice);
+                self.status.clear();
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') => {
+                self.status = "Setup declined. Exiting without creating .hunkr".to_owned();
+                self.should_quit = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_gitignore_choice(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                let gitignore_path = self.git.root().join(".gitignore");
+                let note = match append_gitignore_entry(&gitignore_path, ".hunkr") {
+                    Ok(GitignoreUpdate::Added) => "Added .hunkr to .gitignore.".to_owned(),
+                    Ok(GitignoreUpdate::AlreadyPresent) => {
+                        ".hunkr is already ignored in .gitignore.".to_owned()
+                    }
+                    Err(err) => {
+                        self.status =
+                            format!("failed to update {}: {err:#}", gitignore_path.display());
+                        return;
+                    }
+                };
+                self.finish_onboarding(Some(note));
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') => self.finish_onboarding(Some(
+                "Skipped .gitignore update. You can ignore .hunkr per project or globally."
+                    .to_owned(),
+            )),
+            _ => {}
+        }
     }
 
     pub fn should_quit(&self) -> bool {
@@ -105,6 +207,10 @@ impl App {
     }
 
     pub fn poll_timeout(&self) -> Duration {
+        if self.onboarding_active() {
+            return Duration::from_millis(250);
+        }
+
         let selection_rebuild_in = self
             .selection_rebuild_due
             .map(|due| due.saturating_duration_since(Instant::now()));
@@ -116,8 +222,13 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
-        self.ensure_rendered_diff();
         let theme = UiTheme::from_mode(self.theme_mode);
+        if self.onboarding_active() {
+            self.render_onboarding(frame, &theme);
+            return;
+        }
+
+        self.ensure_rendered_diff();
         self.comment_editor_rect = None;
         self.comment_editor_line_ranges.clear();
         self.comment_editor_view_start = 0;
@@ -230,6 +341,10 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        if self.onboarding_active() {
+            return;
+        }
+
         let now = Instant::now();
         if self.selection_rebuild_due.is_some_and(|due| now >= due) {
             self.flush_pending_selection_rebuild();
@@ -277,6 +392,11 @@ impl App {
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) {
+        if self.onboarding_active() {
+            self.handle_onboarding_key(key);
+            return;
+        }
+
         if !matches!(self.input_mode, InputMode::Normal) {
             self.handle_non_normal_input(key);
             return;
@@ -1094,6 +1214,10 @@ impl App {
     }
 
     pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        if self.onboarding_active() {
+            return;
+        }
+
         if matches!(
             self.input_mode,
             InputMode::CommentCreate | InputMode::CommentEdit(_)
@@ -1683,6 +1807,101 @@ impl App {
 
         frame.render_widget(status_widget, chunks[0]);
         frame.render_widget(hint_widget, chunks[1]);
+    }
+
+    pub(super) fn render_onboarding(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
+        let area = centered_rect(62, 44, frame.area());
+        frame.render_widget(Clear, area);
+
+        let block = Block::default()
+            .title(Span::styled(
+                " WELCOME TO HUNKR ",
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .title_alignment(ratatui::layout::Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .style(Style::default().bg(theme.modal_bg))
+            .border_style(Style::default().fg(theme.focus_border));
+        frame.render_widget(block.clone(), area);
+        let inner = block.inner(area);
+
+        let (step_badge, question_line) = match self.onboarding_step {
+            Some(OnboardingStep::ConsentProjectDataDir) => (
+                "step 1/2",
+                Line::from(vec![
+                    Span::styled("Create ", Style::default().fg(theme.text)),
+                    Span::styled(
+                        ".hunkr/",
+                        Style::default()
+                            .fg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ?", Style::default().fg(theme.text)),
+                ]),
+            ),
+            Some(OnboardingStep::GitignoreChoice) => (
+                "step 2/2",
+                Line::from(vec![
+                    Span::styled("Add ", Style::default().fg(theme.text)),
+                    Span::styled(
+                        ".hunkr",
+                        Style::default()
+                            .fg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" to ", Style::default().fg(theme.text)),
+                    Span::styled(
+                        ".gitignore",
+                        Style::default()
+                            .fg(theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" ?", Style::default().fg(theme.text)),
+                ]),
+            ),
+            None => (
+                "setup complete",
+                Line::from(Span::styled(
+                    "Loading workspace...",
+                    Style::default().fg(theme.text),
+                )),
+            ),
+        };
+
+        let mut lines = vec![
+            Line::from(Span::styled(
+                step_badge,
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            question_line,
+            Line::from(""),
+            Line::from(vec![
+                key_chip("Y", theme),
+                Span::styled(" / ", Style::default().fg(theme.dimmed)),
+                key_chip("N", theme),
+            ]),
+        ];
+        if !self.status.is_empty() {
+            let note_style = if self.status.contains("failed") || self.status.contains("Failed") {
+                Style::default().fg(theme.issue)
+            } else {
+                Style::default().fg(theme.dimmed)
+            };
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(self.status.clone(), note_style)));
+        }
+
+        let widget = Paragraph::new(lines)
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(Style::default().bg(theme.modal_bg));
+        frame.render_widget(widget, inner);
     }
 
     pub(super) fn render_comment_modal(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {

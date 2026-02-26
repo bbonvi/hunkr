@@ -30,6 +30,10 @@ impl StateStore {
         &self.root
     }
 
+    pub fn has_state_file(&self) -> bool {
+        self.state_path.exists()
+    }
+
     pub fn load(&self) -> anyhow::Result<ReviewState> {
         if !self.state_path.exists() {
             return Ok(ReviewState::default());
@@ -181,6 +185,16 @@ mod tests {
             state.statuses.get("a1").expect("a1").status,
             ReviewStatus::Resolved
         );
+    }
+
+    #[test]
+    fn has_state_file_tracks_persistence() {
+        let tmp = tempdir().expect("tempdir");
+        let store = StateStore::for_project(tmp.path());
+        assert!(!store.has_state_file());
+
+        store.save(&ReviewState::default()).expect("save");
+        assert!(store.has_state_file());
     }
 
     #[test]

@@ -1,10 +1,13 @@
 use std::{
     cmp::{max, min},
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    fs,
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
@@ -74,6 +77,12 @@ enum InputMode {
     CommentEdit(u64),
     DiffSearch,
     ListSearch(FocusPane),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnboardingStep {
+    ConsentProjectDataDir,
+    GitignoreChoice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -309,6 +318,12 @@ enum CommitMouseSelectionMode {
     Range,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GitignoreUpdate {
+    Added,
+    AlreadyPresent,
+}
+
 /// High-level app state and interaction flow for the hunkr UI.
 pub struct App {
     git: GitService,
@@ -364,6 +379,7 @@ pub struct App {
     diff_pending_op: Option<DiffPendingOp>,
     selection_rebuild_due: Option<Instant>,
     show_help: bool,
+    onboarding_step: Option<OnboardingStep>,
     last_refresh: Instant,
     last_relative_time_redraw: Instant,
     needs_redraw: bool,
@@ -759,6 +775,53 @@ fn first_open_reviewed_commit_ids(commits: &[CommitInfo]) -> Vec<String> {
         .filter(|commit| !commit.unpushed)
         .map(|commit| commit.id.clone())
         .collect()
+}
+
+fn canonical_gitignore_entry(entry: &str) -> String {
+    let trimmed = entry.trim();
+    let trimmed = trimmed.strip_prefix("./").unwrap_or(trimmed);
+    let trimmed = trimmed.trim_start_matches('/');
+    trimmed.trim_end_matches('/').to_owned()
+}
+
+fn gitignore_contains_entry(contents: &str, entry: &str) -> bool {
+    let needle = canonical_gitignore_entry(entry);
+    if needle.is_empty() {
+        return false;
+    }
+
+    contents.lines().any(|line| {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return false;
+        }
+        canonical_gitignore_entry(trimmed) == needle
+    })
+}
+
+fn append_gitignore_entry(path: &Path, entry: &str) -> anyhow::Result<GitignoreUpdate> {
+    let canonical = canonical_gitignore_entry(entry);
+    if canonical.is_empty() {
+        return Ok(GitignoreUpdate::AlreadyPresent);
+    }
+
+    let existing = if path.exists() {
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?
+    } else {
+        String::new()
+    };
+    if gitignore_contains_entry(&existing, &canonical) {
+        return Ok(GitignoreUpdate::AlreadyPresent);
+    }
+
+    let mut next = existing;
+    if !next.is_empty() && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    next.push_str(&canonical);
+    next.push('\n');
+    fs::write(path, next).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(GitignoreUpdate::Added)
 }
 
 fn matching_file_indices_with_parent_dirs(rows: &[TreeRow], query: &str) -> Vec<usize> {

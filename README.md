@@ -31,6 +31,12 @@ No remote service is required.
 cargo run
 ```
 
+On first run in a repository, `hunkr` opens a centered onboarding screen before showing review panes:
+
+- Verifies you are inside a git repository.
+- Asks permission to create `.hunkr/` for local review state.
+- Offers to append `.hunkr` to the project `.gitignore` (or you can manage it globally).
+
 ## Configuration
 
 Optional config file:

@@ -2,6 +2,8 @@ use super::ui::diff_pane::{scrollbar_thumb, tint_line_background};
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{line_with_right, list_content_width, list_row_style};
 use super::*;
+use std::fs;
+use tempfile::tempdir;
 
 fn commit_row(id: &str, selected: bool, status: ReviewStatus) -> CommitRow {
     CommitRow {
@@ -73,6 +75,53 @@ fn first_open_reviewed_commit_ids_excludes_unpushed_commits() {
     assert_eq!(
         first_open_reviewed_commit_ids(&commits),
         vec!["pushed-a".to_owned(), "pushed-b".to_owned()]
+    );
+}
+
+#[test]
+fn gitignore_match_accepts_common_hunkr_variants() {
+    assert!(gitignore_contains_entry(".hunkr\n", ".hunkr"));
+    assert!(gitignore_contains_entry("/.hunkr/\n", ".hunkr"));
+    assert!(gitignore_contains_entry(".hunkr/\n", "/.hunkr"));
+    assert!(!gitignore_contains_entry("target\n", ".hunkr"));
+}
+
+#[test]
+fn append_gitignore_entry_adds_once_and_skips_duplicates() {
+    let tmp = tempdir().expect("tempdir");
+    let path = tmp.path().join(".gitignore");
+    fs::write(&path, "target").expect("seed gitignore");
+
+    assert_eq!(
+        append_gitignore_entry(&path, ".hunkr").expect("append"),
+        GitignoreUpdate::Added
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("read after append"),
+        "target\n.hunkr\n"
+    );
+    assert_eq!(
+        append_gitignore_entry(&path, ".hunkr").expect("append duplicate"),
+        GitignoreUpdate::AlreadyPresent
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("read after duplicate"),
+        "target\n.hunkr\n"
+    );
+}
+
+#[test]
+fn append_gitignore_entry_creates_file_when_missing() {
+    let tmp = tempdir().expect("tempdir");
+    let path = tmp.path().join(".gitignore");
+
+    assert_eq!(
+        append_gitignore_entry(&path, ".hunkr").expect("append"),
+        GitignoreUpdate::Added
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("read created gitignore"),
+        ".hunkr\n"
     );
 }
 
