@@ -1574,8 +1574,18 @@ impl App {
                 line_overrides.insert(idx, line);
             }
         }
+        let empty_state_message = diff_empty_state_message(
+            !self.rendered_diff.is_empty(),
+            self.aggregate.files.len(),
+            self.file_diff_ranges.len(),
+            &self.file_search_query,
+        );
+        let selected_file = self
+            .selected_file
+            .as_deref()
+            .filter(|path| self.file_diff_range_by_path.contains_key(*path));
         let title = DiffPaneTitle {
-            selected_file: self.selected_file.as_deref(),
+            selected_file,
             selected_file_progress: self.selected_file_progress(),
             nerd_fonts: self.nerd_fonts,
             nerd_font_theme: &self.nerd_font_theme,
@@ -1586,7 +1596,7 @@ impl App {
             diff_position: self.diff_position,
             visual_range: self.diff_selected_range(),
             sticky_banner_indexes: &sticky_banner_indexes,
-            empty_state_message: None,
+            empty_state_message: empty_state_message.as_deref(),
             line_overrides: &line_overrides,
         };
         DiffPaneRenderer::new(theme, self.focused).render(frame, rect, title, body);

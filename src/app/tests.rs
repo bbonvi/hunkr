@@ -324,6 +324,25 @@ fn file_filter_keeps_parent_directories_for_matching_files() {
 }
 
 #[test]
+fn diff_empty_state_message_explains_when_file_filter_hides_everything() {
+    let message = diff_empty_state_message(false, 3, 0, "main")
+        .expect("filtered-out file message should be present");
+    assert_eq!(
+        message,
+        "Diff hidden: file tree filter /main hides all 3 changed file(s)"
+    );
+}
+
+#[test]
+fn diff_empty_state_message_is_absent_without_active_file_filter() {
+    assert!(diff_empty_state_message(false, 3, 0, "").is_none());
+    assert!(diff_empty_state_message(false, 3, 0, "   ").is_none());
+    assert!(diff_empty_state_message(false, 0, 0, "main").is_none());
+    assert!(diff_empty_state_message(false, 3, 1, "main").is_none());
+    assert!(diff_empty_state_message(true, 3, 0, "main").is_none());
+}
+
+#[test]
 fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let nerd_theme = NerdFontTheme::default();

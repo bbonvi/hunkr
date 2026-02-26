@@ -359,7 +359,7 @@ pub struct App {
     diff_position: DiffPosition,
     rendered_diff: Arc<Vec<RenderedDiffLine>>,
     rendered_diff_cache: HashMap<(String, ThemeMode), Arc<Vec<RenderedDiffLine>>>,
-    rendered_diff_key: Option<ThemeMode>,
+    rendered_diff_key: Option<RenderedDiffKey>,
     highlighter: DiffSyntaxHighlighter,
     pane_rects: PaneRects,
     status: String,
@@ -384,6 +384,12 @@ pub struct App {
     last_relative_time_redraw: Instant,
     needs_redraw: bool,
     should_quit: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderedDiffKey {
+    theme_mode: ThemeMode,
+    visible_paths: Vec<String>,
 }
 
 #[derive(Default)]
@@ -1598,6 +1604,26 @@ fn deselect_rows_outside_status_filter(
 fn page_step(height: u16, multiplier: f32) -> isize {
     let visible = height.saturating_sub(2).max(1) as f32;
     (visible * multiplier).round() as isize
+}
+
+fn diff_empty_state_message(
+    has_rendered_diff: bool,
+    changed_files: usize,
+    rendered_files: usize,
+    file_search_query: &str,
+) -> Option<String> {
+    if has_rendered_diff || changed_files == 0 || rendered_files > 0 {
+        return None;
+    }
+
+    let query = file_search_query.trim();
+    if query.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "Diff hidden: file tree filter /{query} hides all {changed_files} changed file(s)"
+    ))
 }
 
 fn next_poll_timeout(

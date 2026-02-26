@@ -195,13 +195,28 @@ impl App {
             return;
         }
 
-        let key = self.theme_mode;
+        let ordered_paths = self.file_tree_paths_in_order();
+        let key = RenderedDiffKey {
+            theme_mode: self.theme_mode,
+            visible_paths: ordered_paths.clone(),
+        };
         if self.rendered_diff_key.as_ref() == Some(&key) {
             return;
         }
 
+        // Preserve local viewport within the selected file before ranges are rebuilt.
+        self.persist_selected_file_position();
+
+        if ordered_paths.is_empty() {
+            self.rendered_diff = Arc::new(Vec::new());
+            self.file_diff_ranges.clear();
+            self.file_diff_range_by_path.clear();
+            self.rendered_diff_key = Some(key);
+            self.diff_position = DiffPosition::default();
+            return;
+        }
+
         let theme = UiTheme::from_mode(self.theme_mode);
-        let ordered_paths = self.file_tree_paths_in_order();
         let mut rendered = Vec::new();
         let mut ranges = Vec::new();
         let mut range_by_path = HashMap::new();
@@ -252,6 +267,13 @@ impl App {
         self.file_diff_ranges = ranges;
         self.file_diff_range_by_path = range_by_path;
         self.rendered_diff_key = Some(key);
+        if let Some(path) = self.selected_file.clone()
+            && self.file_diff_range_by_path.contains_key(&path)
+        {
+            self.restore_diff_position(&path);
+        } else {
+            self.diff_position = DiffPosition::default();
+        }
         self.apply_pending_diff_view_anchor();
         self.sync_diff_cursor_to_content_bounds();
     }
@@ -695,8 +717,9 @@ impl App {
     }
 
     pub(super) fn file_tree_paths_in_order(&self) -> Vec<String> {
-        self.file_rows
-            .iter()
+        self.visible_file_indices()
+            .into_iter()
+            .filter_map(|idx| self.file_rows.get(idx))
             .filter(|row| row.selectable)
             .filter_map(|row| row.path.clone())
             .collect()
