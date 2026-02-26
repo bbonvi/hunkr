@@ -1,7 +1,9 @@
 use super::*;
+use crate::config::AppConfig;
 
 impl App {
     pub fn bootstrap() -> anyhow::Result<Self> {
+        let config = AppConfig::load()?;
         let git = GitService::open_current()?;
         let store = StateStore::for_project(git.root());
         let review_state = store.load()?;
@@ -18,7 +20,8 @@ impl App {
             file_list_state: ListState::default(),
             focused: FocusPane::Commits,
             input_mode: InputMode::Normal,
-            theme_mode: ThemeMode::Dark,
+            theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
+            diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
             commit_visual_anchor: None,
             diff_visual: None,
             aggregate: AggregatedDiff::default(),
@@ -686,7 +689,7 @@ impl App {
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if in_diff {
-                    self.scroll_diff_viewport(DIFF_WHEEL_SCROLL_LINES);
+                    self.scroll_diff_viewport(self.diff_wheel_scroll_lines);
                 } else if in_files {
                     self.move_file_cursor(1);
                 } else if in_commits {
@@ -695,7 +698,7 @@ impl App {
             }
             MouseEventKind::ScrollUp => {
                 if in_diff {
-                    self.scroll_diff_viewport(-DIFF_WHEEL_SCROLL_LINES);
+                    self.scroll_diff_viewport(-self.diff_wheel_scroll_lines);
                 } else if in_files {
                     self.move_file_cursor(-1);
                 } else if in_commits {

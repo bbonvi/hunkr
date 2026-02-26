@@ -47,6 +47,15 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 
 This storage is project-local and independent of Git remotes.
 
+## Config
+
+Optional runtime config is loaded from:
+
+- `$XDG_CONFIG_HOME/hunkr/config.yaml` (if `XDG_CONFIG_HOME` is set)
+- `~/.config/hunkr/config.yaml` (fallback)
+
+See [`config.example.yaml`](./config.example.yaml) for the canonical template.
+
 ## Keybindings
 
 Global:

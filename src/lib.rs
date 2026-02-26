@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod comments;
+pub mod config;
 pub mod git_data;
 pub mod model;
 pub mod store;

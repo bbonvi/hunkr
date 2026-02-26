@@ -31,6 +31,7 @@ use self::ui::list_panes::ListPaneRenderer;
 
 use crate::{
     comments::CommentStore,
+    config::StartupTheme,
     git_data::GitService,
     model::{
         AggregatedDiff, CommentAnchor, CommentTarget, CommentTargetKind, CommitInfo, DiffLineKind,
@@ -43,7 +44,6 @@ use crate::{
 const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
-const DIFF_WHEEL_SCROLL_LINES: isize = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 const LIST_HIGHLIGHT_SYMBOL: &str = ">> ";
 const LIST_HIGHLIGHT_SYMBOL_WIDTH: u16 = 3;
@@ -70,6 +70,13 @@ enum ThemeMode {
 }
 
 impl ThemeMode {
+    fn from_startup_theme(theme: StartupTheme) -> Self {
+        match theme {
+            StartupTheme::Dark => Self::Dark,
+            StartupTheme::Light => Self::Light,
+        }
+    }
+
     fn toggle(self) -> Self {
         match self {
             Self::Dark => Self::Light,
@@ -233,6 +240,7 @@ pub struct App {
     focused: FocusPane,
     input_mode: InputMode,
     theme_mode: ThemeMode,
+    diff_wheel_scroll_lines: isize,
     commit_visual_anchor: Option<usize>,
     diff_visual: Option<DiffVisualSelection>,
     aggregate: AggregatedDiff,
