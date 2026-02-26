@@ -727,6 +727,13 @@ impl App {
                 self.commit_visual_anchor = None;
                 self.on_selection_changed();
             }
+            KeyCode::Enter => {
+                if let Some(idx) = self.commit_list_state.selected() {
+                    select_only_index(&mut self.commits, idx);
+                    self.commit_visual_anchor = None;
+                    self.on_selection_changed();
+                }
+            }
             KeyCode::Char('u') => self.set_current_commit_status(ReviewStatus::Unreviewed),
             KeyCode::Char('r') => self.set_current_commit_status(ReviewStatus::Reviewed),
             KeyCode::Char('i') => self.set_current_commit_status(ReviewStatus::IssueFound),
@@ -2807,6 +2814,12 @@ fn apply_range_selection(rows: &mut [CommitRow], start: usize, end: usize) {
     }
 }
 
+fn select_only_index(rows: &mut [CommitRow], selected_idx: usize) {
+    for (idx, row) in rows.iter_mut().enumerate() {
+        row.selected = idx == selected_idx;
+    }
+}
+
 fn apply_status_ids(rows: &mut [CommitRow], ids: &BTreeSet<String>, status: ReviewStatus) {
     for row in rows {
         if ids.contains(&row.info.id) {
@@ -3034,6 +3047,21 @@ mod tests {
         ];
         apply_range_selection(&mut rows, 2, 0);
         assert!(rows.iter().all(|row| row.selected));
+    }
+
+    #[test]
+    fn select_only_index_keeps_only_target_selected() {
+        let mut rows = vec![
+            commit_row("a", true, ReviewStatus::Unreviewed),
+            commit_row("b", true, ReviewStatus::Reviewed),
+            commit_row("c", false, ReviewStatus::Unreviewed),
+        ];
+
+        select_only_index(&mut rows, 1);
+
+        assert!(!rows[0].selected);
+        assert!(rows[1].selected);
+        assert!(!rows[2].selected);
     }
 
     #[test]
