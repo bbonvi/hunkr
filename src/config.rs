@@ -1,6 +1,7 @@
 //! Application configuration loaded from `~/.config/hunkr/config.yaml`.
 
 use std::{
+    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -26,6 +27,19 @@ pub struct AppConfig {
     pub startup_theme: StartupTheme,
     pub diff_wheel_scroll_lines: isize,
     pub nerd_fonts: bool,
+    pub nerd_font_icons: NerdFontIconConfig,
+}
+
+/// Optional Nerd Font icon overrides loaded from config.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NerdFontIconConfig {
+    pub directory_icon: Option<String>,
+    pub default_file_icon: Option<String>,
+    pub env_icon: Option<String>,
+    pub docker_icon: Option<String>,
+    pub special_files: BTreeMap<String, String>,
+    pub extensions: BTreeMap<String, String>,
 }
 
 impl Default for AppConfig {
@@ -34,6 +48,7 @@ impl Default for AppConfig {
             startup_theme: StartupTheme::Dark,
             diff_wheel_scroll_lines: DEFAULT_DIFF_WHEEL_SCROLL_LINES,
             nerd_fonts: true,
+            nerd_font_icons: NerdFontIconConfig::default(),
         }
     }
 }
@@ -100,6 +115,7 @@ mod tests {
         assert_eq!(loaded.startup_theme, StartupTheme::Dark);
         assert_eq!(loaded.diff_wheel_scroll_lines, 1);
         assert!(loaded.nerd_fonts);
+        assert!(loaded.nerd_font_icons.extensions.is_empty());
     }
 
     #[test]
@@ -108,7 +124,7 @@ mod tests {
         let path = temp.path().join("config.yaml");
         fs::write(
             &path,
-            "startup_theme: light\ndiff_wheel_scroll_lines: 3\nnerd_fonts: false\n",
+            "startup_theme: light\ndiff_wheel_scroll_lines: 3\nnerd_fonts: false\nnerd_font_icons:\n  env_icon: \"\"\n  extensions:\n    rs: \"\"\n",
         )
         .expect("write");
 
@@ -116,6 +132,15 @@ mod tests {
         assert_eq!(loaded.startup_theme, StartupTheme::Light);
         assert_eq!(loaded.diff_wheel_scroll_lines, 3);
         assert!(!loaded.nerd_fonts);
+        assert_eq!(loaded.nerd_font_icons.env_icon.as_deref(), Some(""));
+        assert_eq!(
+            loaded
+                .nerd_font_icons
+                .extensions
+                .get("rs")
+                .map(String::as_str),
+            Some("")
+        );
     }
 
     #[test]
@@ -127,5 +152,6 @@ mod tests {
         let loaded = AppConfig::load_from_path(&path).expect("load");
         assert_eq!(loaded.diff_wheel_scroll_lines, 1);
         assert!(loaded.nerd_fonts);
+        assert!(loaded.nerd_font_icons.special_files.is_empty());
     }
 }

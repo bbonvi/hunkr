@@ -18,6 +18,7 @@ use ratatui::{
 use syntect::{
     easy::HighlightLines, highlighting::Theme, highlighting::ThemeSet, parsing::SyntaxSet,
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod lifecycle_render;
 mod navigation;
@@ -25,9 +26,9 @@ mod nerd_fonts;
 mod state;
 mod ui;
 use self::nerd_fonts::{
-    app_title_label, commit_selection_marker, format_path_with_icon, format_tree_dir_label,
-    format_tree_file_label, list_highlight_symbol, list_highlight_symbol_width, uncommitted_badge,
-    unpushed_marker,
+    NerdFontTheme, app_title_label, commit_selection_marker, format_path_with_icon,
+    format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
+    list_highlight_symbol_width, uncommitted_badge, unpushed_marker,
 };
 use self::ui::diff_pane::{
     DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, PendingDiffViewAnchor,
@@ -247,6 +248,7 @@ pub struct App {
     theme_mode: ThemeMode,
     diff_wheel_scroll_lines: isize,
     nerd_fonts: bool,
+    nerd_font_theme: NerdFontTheme,
     commit_visual_anchor: Option<usize>,
     diff_visual: Option<DiffVisualSelection>,
     aggregate: AggregatedDiff,
@@ -300,9 +302,9 @@ impl FileTree {
         }
     }
 
-    fn flattened_rows(&self, nerd_fonts: bool) -> Vec<TreeRow> {
+    fn flattened_rows(&self, nerd_fonts: bool, nerd_font_theme: &NerdFontTheme) -> Vec<TreeRow> {
         let mut rows = Vec::new();
-        self.flatten_into(&mut rows, String::new(), 0, nerd_fonts);
+        self.flatten_into(&mut rows, String::new(), 0, nerd_fonts, nerd_font_theme);
         rows
     }
 
@@ -312,6 +314,7 @@ impl FileTree {
         prefix: String,
         depth: usize,
         nerd_fonts: bool,
+        nerd_font_theme: &NerdFontTheme,
     ) {
         for (dir, child) in &self.dirs {
             let path = if prefix.is_empty() {
@@ -320,12 +323,12 @@ impl FileTree {
                 format!("{prefix}/{dir}")
             };
             rows.push(TreeRow {
-                label: format_tree_dir_label(depth, dir, nerd_fonts),
+                label: format_tree_dir_label(depth, dir, nerd_fonts, nerd_font_theme),
                 path: None,
                 selectable: false,
                 modified_ts: None,
             });
-            child.flatten_into(rows, path, depth + 1, nerd_fonts);
+            child.flatten_into(rows, path, depth + 1, nerd_fonts, nerd_font_theme);
         }
 
         for (file, modified_ts) in &self.files {
@@ -335,7 +338,7 @@ impl FileTree {
                 format!("{prefix}/{file}")
             };
             rows.push(TreeRow {
-                label: format_tree_file_label(depth, file, &full, nerd_fonts),
+                label: format_tree_file_label(depth, file, &full, nerd_fonts, nerd_font_theme),
                 path: Some(full),
                 selectable: true,
                 modified_ts: Some(*modified_ts),
@@ -482,15 +485,33 @@ fn compose_sticky_banner_indexes(
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if display_width(text) <= max_chars {
         return text.to_owned();
     }
-    let mut out = text
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
+    if max_chars == 1 {
+        return "…".to_owned();
+    }
+
+    let target_width = max_chars.saturating_sub(1);
+    let mut out = String::new();
+    let mut used_width = 0usize;
+    for ch in text.chars() {
+        let width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used_width + width > target_width {
+            break;
+        }
+        out.push(ch);
+        used_width += width;
+    }
     out.push('…');
     out
+}
+
+fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
 }
 
 fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {

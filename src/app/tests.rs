@@ -62,11 +62,17 @@ fn truncate_long_strings_adds_ellipsis() {
 }
 
 #[test]
+fn truncate_uses_terminal_cell_width_for_wide_glyphs() {
+    assert_eq!(truncate("你你你", 4), "你…");
+}
+
+#[test]
 fn file_tree_builds_directories_and_files() {
     let mut tree = FileTree::default();
     tree.insert("src/app.rs", 100);
     tree.insert("src/ui/view.rs", 200);
-    let rows = tree.flattened_rows(false);
+    let nerd_theme = NerdFontTheme::default();
+    let rows = tree.flattened_rows(false, &nerd_theme);
 
     assert!(rows.iter().any(|r| r.label.contains("[D] src")));
     assert!(rows.iter().any(|r| r.label.contains("[F] app.rs")));
@@ -79,7 +85,8 @@ fn file_tree_uses_file_icons_when_nerd_fonts_enabled() {
     let mut tree = FileTree::default();
     tree.insert("src/app.rs", 100);
     tree.insert("README.md", 200);
-    let rows = tree.flattened_rows(true);
+    let nerd_theme = NerdFontTheme::default();
+    let rows = tree.flattened_rows(true, &nerd_theme);
 
     assert!(rows.iter().any(|r| r.label.contains(" src")));
     assert!(rows.iter().any(|r| r.label.contains(" app.rs")));
@@ -89,8 +96,9 @@ fn file_tree_uses_file_icons_when_nerd_fonts_enabled() {
 #[test]
 fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let plain = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, false);
-    let nerd = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, true);
+    let nerd_theme = NerdFontTheme::default();
+    let plain = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, false, &nerd_theme);
+    let nerd = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, true, &nerd_theme);
 
     let plain_text = plain
         .line

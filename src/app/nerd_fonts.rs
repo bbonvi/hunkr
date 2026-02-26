@@ -1,4 +1,63 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
+
+use unicode_width::UnicodeWidthStr;
+
+use crate::config::NerdFontIconConfig;
+
+const DEFAULT_DIRECTORY_ICON: &str = "";
+const DEFAULT_FILE_ICON: &str = "󰈔";
+const DEFAULT_ENV_ICON: &str = "";
+const DEFAULT_DOCKER_ICON: &str = "";
+
+#[derive(Debug, Clone)]
+pub(super) struct NerdFontTheme {
+    directory_icon: String,
+    default_file_icon: String,
+    env_icon: String,
+    docker_icon: String,
+    special_files: HashMap<String, String>,
+    extensions: HashMap<String, String>,
+}
+
+impl Default for NerdFontTheme {
+    fn default() -> Self {
+        Self {
+            directory_icon: DEFAULT_DIRECTORY_ICON.to_owned(),
+            default_file_icon: DEFAULT_FILE_ICON.to_owned(),
+            env_icon: DEFAULT_ENV_ICON.to_owned(),
+            docker_icon: DEFAULT_DOCKER_ICON.to_owned(),
+            special_files: default_special_file_icons(),
+            extensions: default_extension_icons(),
+        }
+    }
+}
+
+impl NerdFontTheme {
+    pub(super) fn from_config(config: &NerdFontIconConfig) -> Self {
+        let mut theme = Self::default();
+        apply_string_override(&mut theme.directory_icon, &config.directory_icon);
+        apply_string_override(&mut theme.default_file_icon, &config.default_file_icon);
+        apply_string_override(&mut theme.env_icon, &config.env_icon);
+        apply_string_override(&mut theme.docker_icon, &config.docker_icon);
+
+        for (name, icon) in &config.special_files {
+            if let Some(icon) = normalized_non_empty(icon) {
+                theme
+                    .special_files
+                    .insert(normalize_name_key(name), icon.to_owned());
+            }
+        }
+        for (extension, icon) in &config.extensions {
+            if let Some(icon) = normalized_non_empty(icon) {
+                theme
+                    .extensions
+                    .insert(normalize_extension_key(extension), icon.to_owned());
+            }
+        }
+
+        theme
+    }
+}
 
 /// Returns the header title label with optional Nerd Font icon.
 pub(super) fn app_title_label(nerd_fonts: bool) -> &'static str {
@@ -22,7 +81,7 @@ pub(super) fn list_highlight_symbol(nerd_fonts: bool) -> &'static str {
 
 /// Returns the width reserved for list highlight symbols.
 pub(super) fn list_highlight_symbol_width(nerd_fonts: bool) -> u16 {
-    list_highlight_symbol(nerd_fonts).chars().count() as u16
+    UnicodeWidthStr::width(list_highlight_symbol(nerd_fonts)) as u16
 }
 
 /// Returns the unpushed suffix badge in commit rows.
@@ -40,10 +99,15 @@ pub(super) fn uncommitted_badge(nerd_fonts: bool) -> &'static str {
 }
 
 /// Formats a file-tree directory label with optional icon.
-pub(super) fn format_tree_dir_label(depth: usize, dir: &str, nerd_fonts: bool) -> String {
+pub(super) fn format_tree_dir_label(
+    depth: usize,
+    dir: &str,
+    nerd_fonts: bool,
+    theme: &NerdFontTheme,
+) -> String {
     let indent = "  ".repeat(depth);
     if nerd_fonts {
-        format!("{indent} {dir}")
+        format!("{indent}{} {dir}", theme.directory_icon)
     } else {
         format!("{indent}[D] {dir}")
     }
@@ -55,10 +119,11 @@ pub(super) fn format_tree_file_label(
     file_name: &str,
     full_path: &str,
     nerd_fonts: bool,
+    theme: &NerdFontTheme,
 ) -> String {
     let indent = "  ".repeat(depth);
     if nerd_fonts {
-        let icon = nerd_file_icon_for_path(full_path);
+        let icon = nerd_file_icon_for_path(full_path, theme);
         format!("{indent}{icon} {file_name}")
     } else {
         format!("{indent}[F] {file_name}")
@@ -66,16 +131,16 @@ pub(super) fn format_tree_file_label(
 }
 
 /// Prepends a file-type icon to file paths when Nerd Fonts are enabled.
-pub(super) fn format_path_with_icon(path: &str, nerd_fonts: bool) -> String {
+pub(super) fn format_path_with_icon(path: &str, nerd_fonts: bool, theme: &NerdFontTheme) -> String {
     if !nerd_fonts {
         return path.to_owned();
     }
 
-    let icon = nerd_file_icon_for_path(path);
+    let icon = nerd_file_icon_for_path(path, theme);
     format!("{icon} {path}")
 }
 
-fn nerd_file_icon_for_path(path: &str) -> &'static str {
+fn nerd_file_icon_for_path<'a>(path: &str, theme: &'a NerdFontTheme) -> &'a str {
     let file_name = Path::new(path)
         .file_name()
         .and_then(|name| name.to_str())
@@ -83,67 +148,60 @@ fn nerd_file_icon_for_path(path: &str) -> &'static str {
     let lower_name = file_name.to_ascii_lowercase();
 
     if is_env_file_name(&lower_name) {
-        return "";
+        return theme.env_icon.as_str();
     }
-
-    if let Some(icon) = example_variant_icon(&lower_name) {
+    if let Some(icon) = example_variant_icon(&lower_name, theme) {
         return icon;
     }
-
-    if let Some(icon) = special_file_icon(&lower_name) {
-        return icon;
+    if is_docker_compose_file_name(&lower_name) || is_dockerfile_name(&lower_name) {
+        return theme.docker_icon.as_str();
+    }
+    if let Some(icon) = theme.special_files.get(lower_name.as_str()) {
+        return icon.as_str();
     }
 
     let extension = Path::new(file_name)
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase());
-    if let Some(icon) = extension.as_deref().and_then(file_extension_icon) {
-        return icon;
+        .map(normalize_extension_key);
+    if let Some(icon) = extension
+        .as_deref()
+        .and_then(|ext| theme.extensions.get(ext))
+    {
+        return icon.as_str();
     }
 
-    "󰈔"
+    theme.default_file_icon.as_str()
 }
 
 fn is_env_file_name(lower_name: &str) -> bool {
     lower_name == ".env" || lower_name.starts_with(".env.")
 }
 
-fn example_variant_icon(lower_name: &str) -> Option<&'static str> {
+fn example_variant_icon<'a>(lower_name: &str, theme: &'a NerdFontTheme) -> Option<&'a str> {
     let base_name = lower_name.strip_suffix(".example")?;
     if base_name.is_empty() {
         return None;
     }
 
     if is_env_file_name(base_name) {
-        return Some("");
+        return Some(theme.env_icon.as_str());
     }
-    if let Some(icon) = special_file_icon(base_name) {
-        return Some(icon);
+    if is_docker_compose_file_name(base_name) || is_dockerfile_name(base_name) {
+        return Some(theme.docker_icon.as_str());
+    }
+    if let Some(icon) = theme.special_files.get(base_name) {
+        return Some(icon.as_str());
     }
 
-    Path::new(base_name)
+    let extension = Path::new(base_name)
         .extension()
         .and_then(|ext| ext.to_str())
-        .and_then(file_extension_icon)
-}
-
-fn special_file_icon(lower_name: &str) -> Option<&'static str> {
-    if is_docker_compose_file_name(lower_name) {
-        return Some("");
-    }
-    if is_dockerfile_name(lower_name) {
-        return Some("");
-    }
-
-    match lower_name {
-        ".gitignore" | ".gitattributes" | ".gitmodules" => Some(""),
-        ".dockerignore" => Some(""),
-        "makefile" => Some(""),
-        "readme" | "readme.md" | "readme.txt" => Some(""),
-        "license" | "copying" => Some(""),
-        _ => None,
-    }
+        .map(normalize_extension_key);
+    extension
+        .as_deref()
+        .and_then(|ext| theme.extensions.get(ext))
+        .map(String::as_str)
 }
 
 fn is_dockerfile_name(lower_name: &str) -> bool {
@@ -157,69 +215,179 @@ fn is_docker_compose_file_name(lower_name: &str) -> bool {
         || lower_name.starts_with("docker-compose.")
 }
 
-fn file_extension_icon(ext: &str) -> Option<&'static str> {
-    match ext {
-        "rs" => Some(""),
-        "c" | "h" => Some(""),
-        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => Some(""),
-        "cs" => Some("󰌛"),
-        "go" => Some(""),
-        "java" => Some(""),
-        "kt" | "kts" => Some(""),
-        "php" => Some(""),
-        "py" => Some(""),
-        "rb" => Some(""),
-        "swift" => Some(""),
-        "js" | "mjs" | "cjs" => Some(""),
-        "jsx" | "tsx" => Some(""),
-        "ts" => Some(""),
-        "vue" => Some("󰡄"),
-        "svelte" => Some(""),
-        "html" | "htm" => Some(""),
-        "css" | "scss" | "sass" | "less" => Some(""),
-        "json" => Some(""),
-        "toml" | "yaml" | "yml" | "ini" | "cfg" | "conf" => Some(""),
-        "xml" => Some("󰗀"),
-        "sql" => Some(""),
-        "md" | "markdown" => Some(""),
-        "sh" | "bash" | "zsh" | "fish" => Some(""),
-        "diff" | "patch" => Some(""),
-        "git" => Some(""),
-        "lockb" => Some("󰌾"),
-        "pem" | "crt" | "key" | "pub" => Some("󰌆"),
-        "asc" | "sig" => Some("󰷃"),
-        "pdf" => Some(""),
-        "doc" | "docx" => Some("󰈬"),
-        "xls" | "xlsx" | "csv" | "tsv" => Some("󱎏"),
-        "ppt" | "pptx" => Some("󰈧"),
-        "log" => Some(""),
-        "bak" => Some("󰁯"),
-        "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" | "rar" | "zst" => Some(""),
-        "svg" => Some("󰜡"),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tiff" => Some("󰈟"),
-        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" => Some("󰎆"),
-        "mp4" | "mov" | "mkv" | "avi" | "webm" => Some("󰕧"),
-        "ttf" | "otf" | "woff" | "woff2" => Some(""),
-        "wasm" => Some(""),
-        "proto" => Some("󱘦"),
-        "graphql" | "gql" => Some("󰡷"),
-        "tf" | "tfvars" => Some(""),
-        "nix" => Some(""),
-        "lua" => Some(""),
-        "r" => Some("󰟔"),
-        "dart" => Some(""),
-        "elm" => Some(""),
-        "ex" | "exs" => Some(""),
-        "erl" | "hrl" => Some(""),
-        "clj" | "cljs" | "cljc" | "edn" => Some(""),
-        "scala" => Some(""),
-        "zig" => Some(""),
-        "pl" | "pm" => Some(""),
-        "ps1" => Some("󰨊"),
-        "lock" => Some("󰌾"),
-        "txt" => Some("󰈙"),
-        _ => None,
+fn normalize_name_key(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn normalize_extension_key(value: &str) -> String {
+    value.trim().trim_start_matches('.').to_ascii_lowercase()
+}
+
+fn normalized_non_empty(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+fn apply_string_override(target: &mut String, source: &Option<String>) {
+    if let Some(source) = source.as_deref().and_then(normalized_non_empty) {
+        *target = source.to_owned();
     }
+}
+
+fn default_special_file_icons() -> HashMap<String, String> {
+    let entries = [
+        (".gitignore", ""),
+        (".gitattributes", ""),
+        (".gitmodules", ""),
+        (".dockerignore", DEFAULT_DOCKER_ICON),
+        ("makefile", ""),
+        ("readme", ""),
+        ("readme.md", ""),
+        ("readme.txt", ""),
+        ("license", ""),
+        ("copying", ""),
+    ];
+    entries
+        .into_iter()
+        .map(|(name, icon)| (name.to_owned(), icon.to_owned()))
+        .collect()
+}
+
+fn default_extension_icons() -> HashMap<String, String> {
+    let entries = [
+        ("rs", ""),
+        ("c", ""),
+        ("h", ""),
+        ("cc", ""),
+        ("cpp", ""),
+        ("cxx", ""),
+        ("hpp", ""),
+        ("hh", ""),
+        ("hxx", ""),
+        ("cs", "󰌛"),
+        ("go", ""),
+        ("java", ""),
+        ("kt", ""),
+        ("kts", ""),
+        ("php", ""),
+        ("py", ""),
+        ("rb", ""),
+        ("swift", ""),
+        ("js", ""),
+        ("mjs", ""),
+        ("cjs", ""),
+        ("jsx", ""),
+        ("tsx", ""),
+        ("ts", ""),
+        ("vue", "󰡄"),
+        ("svelte", ""),
+        ("html", ""),
+        ("htm", ""),
+        ("css", ""),
+        ("scss", ""),
+        ("sass", ""),
+        ("less", ""),
+        ("json", ""),
+        ("toml", ""),
+        ("yaml", ""),
+        ("yml", ""),
+        ("ini", ""),
+        ("cfg", ""),
+        ("conf", ""),
+        ("xml", "󰗀"),
+        ("sql", ""),
+        ("md", ""),
+        ("markdown", ""),
+        ("sh", ""),
+        ("bash", ""),
+        ("zsh", ""),
+        ("fish", ""),
+        ("diff", ""),
+        ("patch", ""),
+        ("env", DEFAULT_ENV_ICON),
+        ("git", ""),
+        ("lock", "󰌾"),
+        ("lockb", "󰌾"),
+        ("pem", "󰌆"),
+        ("crt", "󰌆"),
+        ("key", "󰌆"),
+        ("pub", "󰌆"),
+        ("asc", "󰷃"),
+        ("sig", "󰷃"),
+        ("pdf", ""),
+        ("doc", "󰈬"),
+        ("docx", "󰈬"),
+        ("xls", "󱎏"),
+        ("xlsx", "󱎏"),
+        ("csv", "󱎏"),
+        ("tsv", "󱎏"),
+        ("ppt", "󰈧"),
+        ("pptx", "󰈧"),
+        ("log", ""),
+        ("bak", "󰁯"),
+        ("zip", ""),
+        ("tar", ""),
+        ("gz", ""),
+        ("bz2", ""),
+        ("xz", ""),
+        ("7z", ""),
+        ("rar", ""),
+        ("zst", ""),
+        ("svg", "󰜡"),
+        ("png", "󰈟"),
+        ("jpg", "󰈟"),
+        ("jpeg", "󰈟"),
+        ("gif", "󰈟"),
+        ("webp", "󰈟"),
+        ("bmp", "󰈟"),
+        ("ico", "󰈟"),
+        ("tiff", "󰈟"),
+        ("mp3", "󰎆"),
+        ("wav", "󰎆"),
+        ("flac", "󰎆"),
+        ("ogg", "󰎆"),
+        ("m4a", "󰎆"),
+        ("aac", "󰎆"),
+        ("mp4", "󰕧"),
+        ("mov", "󰕧"),
+        ("mkv", "󰕧"),
+        ("avi", "󰕧"),
+        ("webm", "󰕧"),
+        ("ttf", ""),
+        ("otf", ""),
+        ("woff", ""),
+        ("woff2", ""),
+        ("wasm", ""),
+        ("proto", "󱘦"),
+        ("graphql", "󰡷"),
+        ("gql", "󰡷"),
+        ("tf", ""),
+        ("tfvars", ""),
+        ("nix", ""),
+        ("lua", ""),
+        ("r", "󰟔"),
+        ("dart", ""),
+        ("elm", ""),
+        ("ex", ""),
+        ("exs", ""),
+        ("erl", ""),
+        ("hrl", ""),
+        ("clj", ""),
+        ("cljs", ""),
+        ("cljc", ""),
+        ("edn", ""),
+        ("scala", ""),
+        ("zig", ""),
+        ("pl", ""),
+        ("pm", ""),
+        ("ps1", "󰨊"),
+        ("txt", "󰈙"),
+    ];
+
+    entries
+        .into_iter()
+        .map(|(extension, icon)| (extension.to_owned(), icon.to_owned()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -232,12 +400,17 @@ mod tests {
 
     #[test]
     fn ascii_mode_keeps_path_unchanged() {
-        assert_eq!(format_path_with_icon("src/app.rs", false), "src/app.rs");
+        let theme = NerdFontTheme::default();
+        assert_eq!(
+            format_path_with_icon("src/app.rs", false, &theme),
+            "src/app.rs"
+        );
     }
 
     #[test]
     fn nerd_mode_prefixes_icon_and_preserves_path() {
-        let rendered = format_path_with_icon("src/app.rs", true);
+        let theme = NerdFontTheme::default();
+        let rendered = format_path_with_icon("src/app.rs", true, &theme);
         assert_ne!(rendered, "src/app.rs");
         assert!(rendered.ends_with("src/app.rs"));
         assert!(rendered.contains(' '));
@@ -245,9 +418,10 @@ mod tests {
 
     #[test]
     fn env_family_uses_consistent_icon() {
-        let env = format_path_with_icon(".env", true);
-        let env_dev = format_path_with_icon(".env.dev", true);
-        let env_example = format_path_with_icon(".env.example", true);
+        let theme = NerdFontTheme::default();
+        let env = format_path_with_icon(".env", true, &theme);
+        let env_dev = format_path_with_icon(".env.dev", true, &theme);
+        let env_example = format_path_with_icon(".env.example", true, &theme);
 
         let env_icon = icon_prefix(&env);
         assert_eq!(env_icon, icon_prefix(&env_dev));
@@ -256,8 +430,9 @@ mod tests {
 
     #[test]
     fn example_variants_inherit_base_icon_family() {
-        let base_path = format_path_with_icon("config.yaml", true);
-        let example_path = format_path_with_icon("config.yaml.example", true);
+        let theme = NerdFontTheme::default();
+        let base_path = format_path_with_icon("config.yaml", true, &theme);
+        let example_path = format_path_with_icon("config.yaml.example", true, &theme);
         let base = icon_prefix(&base_path);
         let example = icon_prefix(&example_path);
         assert_eq!(base, example);
@@ -265,10 +440,24 @@ mod tests {
 
     #[test]
     fn docker_manifest_and_dockerfile_share_icon_family() {
-        let compose_path = format_path_with_icon("docker-compose.yml", true);
-        let dockerfile_path = format_path_with_icon("Dockerfile.dev", true);
+        let theme = NerdFontTheme::default();
+        let compose_path = format_path_with_icon("docker-compose.yml", true, &theme);
+        let dockerfile_path = format_path_with_icon("Dockerfile.dev", true, &theme);
         let compose = icon_prefix(&compose_path);
         let dockerfile = icon_prefix(&dockerfile_path);
         assert_eq!(compose, dockerfile);
+    }
+
+    #[test]
+    fn config_overrides_apply_without_code_changes() {
+        let config = NerdFontIconConfig {
+            env_icon: Some("ENV".to_owned()),
+            extensions: [("rs".to_owned(), "RUST".to_owned())].into_iter().collect(),
+            ..NerdFontIconConfig::default()
+        };
+        let theme = NerdFontTheme::from_config(&config);
+
+        assert!(format_path_with_icon(".env", true, &theme).starts_with("ENV "));
+        assert!(format_path_with_icon("src/lib.rs", true, &theme).starts_with("RUST "));
     }
 }

@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use super::super::{
-    CommentAnchor, DiffPosition, FocusPane, RenderedDiffLine, UiTheme, blend_colors,
+    CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme, blend_colors,
     comment_anchor_matches, format_path_with_icon, is_commit_anchor,
 };
 
@@ -29,6 +29,7 @@ pub(in crate::app) struct DiffPaneTitle<'a> {
     pub selected_file: Option<&'a str>,
     pub selected_file_progress: Option<(usize, usize)>,
     pub nerd_fonts: bool,
+    pub nerd_font_theme: &'a NerdFontTheme,
     pub selected_lines: usize,
 }
 
@@ -68,10 +69,12 @@ impl<'a> DiffPaneRenderer<'a> {
             (Some(path), Some((index, total))) => {
                 format!(
                     "{} ({index}/{total})",
-                    format_path_with_icon(path, title.nerd_fonts)
+                    format_path_with_icon(path, title.nerd_fonts, title.nerd_font_theme)
                 )
             }
-            (Some(path), None) => format_path_with_icon(path, title.nerd_fonts),
+            (Some(path), None) => {
+                format_path_with_icon(path, title.nerd_fonts, title.nerd_font_theme)
+            }
             (None, _) => "(no file selected)".to_owned(),
         };
         let title = Line::from(vec![

@@ -23,6 +23,7 @@ impl App {
             theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
             diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
             nerd_fonts: config.nerd_fonts,
+            nerd_font_theme: NerdFontTheme::from_config(&config.nerd_font_icons),
             commit_visual_anchor: None,
             diff_visual: None,
             aggregate: AggregatedDiff::default(),
@@ -792,6 +793,7 @@ impl App {
             selected_file: self.selected_file.as_deref(),
             selected_file_progress: self.selected_file_progress(),
             nerd_fonts: self.nerd_fonts,
+            nerd_font_theme: &self.nerd_font_theme,
             selected_lines,
         };
         let body = DiffPaneBody {

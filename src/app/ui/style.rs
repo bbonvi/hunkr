@@ -5,7 +5,7 @@ use ratatui::{
 
 use crate::model::ReviewStatus;
 
-use super::super::{UiTheme, blend_colors, truncate};
+use super::super::{UiTheme, blend_colors, display_width, truncate};
 
 pub(in crate::app) fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
     match status {
@@ -58,14 +58,14 @@ pub(in crate::app) fn line_with_right(
     if right.is_empty() {
         return Line::from(Span::styled(truncate(&left, width.max(1)), left_style));
     }
-    let right_width = right.chars().count();
+    let right_width = display_width(&right);
     if right_width + 1 >= width {
         return Line::from(Span::styled(truncate(&right, width.max(1)), right_style));
     }
 
     let max_left = width - right_width - 1;
     let left_render = truncate(&left, max_left.max(1));
-    let left_width = left_render.chars().count();
+    let left_width = display_width(&left_render);
     let spaces = if left_width + right_width + 1 >= width {
         " ".to_owned()
     } else {

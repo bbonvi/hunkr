@@ -210,6 +210,7 @@ impl App {
                 total_files,
                 &theme,
                 self.nerd_fonts,
+                &self.nerd_font_theme,
             ));
 
             let file_key = (path.clone(), self.theme_mode);
@@ -500,7 +501,7 @@ impl App {
             tree.insert(path, modified_ts);
         }
 
-        self.file_rows = tree.flattened_rows(self.nerd_fonts);
+        self.file_rows = tree.flattened_rows(self.nerd_fonts, &self.nerd_font_theme);
         for row in &mut self.file_rows {
             if row.selectable
                 && row
@@ -627,9 +628,10 @@ pub(super) fn rendered_file_header_line(
     total_files: usize,
     theme: &UiTheme,
     nerd_fonts: bool,
+    nerd_font_theme: &NerdFontTheme,
 ) -> RenderedDiffLine {
     let raw_text = format!("==== file {file_index}/{total_files}: {path} ====");
-    let display_path = format_path_with_icon(path, nerd_fonts);
+    let display_path = format_path_with_icon(path, nerd_fonts, nerd_font_theme);
     RenderedDiffLine {
         line: Line::from(vec![
             Span::styled("==== ", Style::default().fg(theme.dimmed)),

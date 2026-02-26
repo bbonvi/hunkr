@@ -7,9 +7,9 @@ use ratatui::{
 };
 
 use super::super::{
-    CommitRow, FocusPane, TreeRow, UiTheme, commit_selection_marker, format_relative_time,
-    list_highlight_symbol, list_highlight_symbol_width, status_short_label, truncate,
-    uncommitted_badge, unpushed_marker,
+    CommitRow, FocusPane, TreeRow, UiTheme, commit_selection_marker, display_width,
+    format_relative_time, list_highlight_symbol, list_highlight_symbol_width, status_short_label,
+    truncate, uncommitted_badge, unpushed_marker,
 };
 use super::style::{line_with_right, list_content_width, list_row_style, status_style};
 
@@ -214,11 +214,11 @@ impl<'a> ListLinePresenter<'a> {
             let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
             let badge = uncommitted_badge(self.nerd_fonts);
             let right = "draft";
-            let reserved = 1 + badge.chars().count() + 1 + right.chars().count();
+            let reserved = 1 + display_width(badge) + 1 + display_width(right);
             let max_left = self.width.saturating_sub(reserved).max(1);
             let left_render = truncate(&left, max_left);
             let static_used =
-                left_render.chars().count() + badge.chars().count() + right.chars().count() + 1;
+                display_width(&left_render) + display_width(badge) + display_width(right) + 1;
             let spaces = if static_used >= self.width {
                 " ".to_owned()
             } else {
@@ -249,13 +249,13 @@ impl<'a> ListLinePresenter<'a> {
         };
         let right = format_relative_time(row.info.timestamp, self.now_ts);
         let reserved =
-            1 + status_label.chars().count() + unpushed.chars().count() + 1 + right.chars().count();
+            1 + display_width(&status_label) + display_width(unpushed) + 1 + display_width(&right);
         let max_left = self.width.saturating_sub(reserved).max(1);
         let left_render = truncate(&left, max_left);
-        let static_used = left_render.chars().count()
-            + status_label.chars().count()
-            + unpushed.chars().count()
-            + right.chars().count()
+        let static_used = display_width(&left_render)
+            + display_width(&status_label)
+            + display_width(unpushed)
+            + display_width(&right)
             + 1;
         let spaces = if static_used >= self.width {
             " ".to_owned()
