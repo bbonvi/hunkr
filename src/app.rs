@@ -746,6 +746,27 @@ fn page_step(height: u16, multiplier: f32) -> isize {
     (visible * multiplier).round() as isize
 }
 
+fn scrolled_diff_position_preserving_offset(
+    current: DiffPosition,
+    delta: isize,
+    max_scroll: usize,
+    max_index: usize,
+) -> DiffPosition {
+    let offset = current.cursor.saturating_sub(current.scroll);
+    let delta_abs = delta.saturating_abs() as usize;
+    let next_scroll = if delta >= 0 {
+        current.scroll.saturating_add(delta_abs)
+    } else {
+        current.scroll.saturating_sub(delta_abs)
+    }
+    .min(max_scroll);
+
+    DiffPosition {
+        scroll: next_scroll,
+        cursor: next_scroll.saturating_add(offset).min(max_index),
+    }
+}
+
 fn focus_with_h(current: FocusPane) -> FocusPane {
     match current {
         FocusPane::Commits => FocusPane::Diff,

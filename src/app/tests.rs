@@ -672,6 +672,51 @@ fn h_and_l_cycle_all_panes() {
 }
 
 #[test]
+fn viewport_scroll_preserves_cursor_offset() {
+    let next = scrolled_diff_position_preserving_offset(
+        DiffPosition {
+            scroll: 10,
+            cursor: 14,
+        },
+        3,
+        200,
+        250,
+    );
+    assert_eq!(next.scroll, 13);
+    assert_eq!(next.cursor, 17);
+}
+
+#[test]
+fn viewport_scroll_clamps_at_top() {
+    let next = scrolled_diff_position_preserving_offset(
+        DiffPosition {
+            scroll: 2,
+            cursor: 5,
+        },
+        -10,
+        200,
+        250,
+    );
+    assert_eq!(next.scroll, 0);
+    assert_eq!(next.cursor, 3);
+}
+
+#[test]
+fn viewport_scroll_clamps_at_bottom_and_content_end() {
+    let next = scrolled_diff_position_preserving_offset(
+        DiffPosition {
+            scroll: 90,
+            cursor: 98,
+        },
+        10,
+        95,
+        99,
+    );
+    assert_eq!(next.scroll, 95);
+    assert_eq!(next.cursor, 99);
+}
+
+#[test]
 fn commit_banner_renders_only_when_commit_changes() {
     let commits = ["a", "a", "b", "b", "a"];
     let mut previous: Option<&str> = None;

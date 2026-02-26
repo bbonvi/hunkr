@@ -1,6 +1,24 @@
 use super::*;
 
 impl App {
+    pub(super) fn scroll_diff_viewport(&mut self, delta: isize) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+
+        let max_idx = self.rendered_diff.len() - 1;
+        let next = scrolled_diff_position_preserving_offset(
+            self.diff_position,
+            delta,
+            self.max_diff_scroll(),
+            max_idx,
+        );
+        self.set_diff_scroll(next.scroll);
+        self.diff_position.cursor = next.cursor.min(max_idx);
+        self.sync_diff_visual_bounds();
+        self.ensure_cursor_visible();
+    }
+
     pub(super) fn move_file_cursor(&mut self, delta: isize) {
         if self.file_rows.is_empty() {
             return;
