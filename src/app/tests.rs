@@ -208,7 +208,6 @@ fn pending_anchor_resolves_cursor_and_top_after_insertions() {
         },
     ];
     let pending = capture_pending_diff_view_anchor(
-        "src/lib.rs",
         &old_lines,
         DiffPosition {
             scroll: 0,
@@ -267,7 +266,6 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
         },
     ];
     let locator = capture_pending_diff_view_anchor(
-        "src/lib.rs",
         &old_lines,
         DiffPosition {
             scroll: 1,
@@ -327,7 +325,6 @@ fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
         },
     ];
     let locator = capture_pending_diff_view_anchor(
-        "src/lib.rs",
         &old_lines,
         DiffPosition {
             scroll: 1,
@@ -385,7 +382,6 @@ fn line_locator_handles_empty_raw_text_occurrence() {
         },
     ];
     let locator = capture_pending_diff_view_anchor(
-        "src/lib.rs",
         &old_lines,
         DiffPosition {
             scroll: 1,

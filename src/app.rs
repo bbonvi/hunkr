@@ -203,6 +203,13 @@ struct RenderedDiffLine {
     comment_id: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+struct FileDiffRange {
+    path: String,
+    start: usize,
+    end: usize,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct DiffVisualSelection {
     anchor: usize,
@@ -231,11 +238,13 @@ pub struct App {
     aggregate: AggregatedDiff,
     selected_file: Option<String>,
     diff_positions: HashMap<String, DiffPosition>,
+    file_diff_ranges: Vec<FileDiffRange>,
+    file_diff_range_by_path: HashMap<String, (usize, usize)>,
     pending_diff_view_anchor: Option<PendingDiffViewAnchor>,
     diff_position: DiffPosition,
     rendered_diff: Arc<Vec<RenderedDiffLine>>,
     rendered_diff_cache: HashMap<(String, ThemeMode), Arc<Vec<RenderedDiffLine>>>,
-    rendered_diff_key: Option<(String, ThemeMode)>,
+    rendered_diff_key: Option<ThemeMode>,
     highlighter: DiffSyntaxHighlighter,
     pane_rects: PaneRects,
     status: String,
@@ -521,6 +530,27 @@ fn prune_diff_positions_for_missing_paths(
     existing_paths: &BTreeSet<String>,
 ) {
     diff_positions.retain(|path, _| existing_paths.contains(path));
+}
+
+fn changed_paths_between_aggregates(
+    current: &AggregatedDiff,
+    next: &AggregatedDiff,
+) -> BTreeSet<String> {
+    let mut changed = BTreeSet::new();
+    let all_paths = current
+        .files
+        .keys()
+        .chain(next.files.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+
+    for path in all_paths {
+        if current.files.get(&path) != next.files.get(&path) {
+            changed.insert(path);
+        }
+    }
+
+    changed
 }
 
 fn should_render_commit_banner(previous_commit_id: Option<&str>, current_commit_id: &str) -> bool {

@@ -105,13 +105,24 @@ impl App {
         if self.uncommitted_selected() {
             merge_aggregate_diff(&mut aggregate, self.git.aggregate_uncommitted()?);
         }
+        let changed_paths = changed_paths_between_aggregates(&self.aggregate, &aggregate);
+        let aggregate_changed = !changed_paths.is_empty();
+
+        if aggregate_changed {
+            self.capture_pending_diff_view_anchor();
+        }
+
         self.aggregate = aggregate;
         self.prune_diff_positions_for_removed_files();
-        self.capture_pending_diff_view_anchor();
 
-        self.rendered_diff_cache.clear();
-        self.rendered_diff_key = None;
-        self.diff_pending_op = None;
+        if aggregate_changed {
+            self.rendered_diff_cache
+                .retain(|(path, _), _| !changed_paths.contains(path));
+            self.rendered_diff_key = None;
+            self.file_diff_ranges.clear();
+            self.file_diff_range_by_path.clear();
+            self.diff_pending_op = None;
+        }
 
         self.rebuild_file_tree();
         self.ensure_selected_file_exists();
@@ -136,18 +147,14 @@ impl App {
     }
 
     pub(super) fn capture_pending_diff_view_anchor(&mut self) {
-        self.pending_diff_view_anchor = self.selected_file.as_ref().and_then(|path| {
-            capture_pending_diff_view_anchor(path, &self.rendered_diff, self.diff_position)
-        });
+        self.pending_diff_view_anchor =
+            capture_pending_diff_view_anchor(&self.rendered_diff, self.diff_position);
     }
 
-    pub(super) fn apply_pending_diff_view_anchor(&mut self, path: &str) {
+    pub(super) fn apply_pending_diff_view_anchor(&mut self) {
         let Some(pending) = self.pending_diff_view_anchor.take() else {
             return;
         };
-        if pending.path != path {
-            return;
-        }
         if self.rendered_diff.is_empty() {
             self.diff_position = DiffPosition::default();
             return;
@@ -174,38 +181,76 @@ impl App {
     }
 
     pub(super) fn ensure_rendered_diff(&mut self) {
-        let Some(path) = self.selected_file.clone() else {
+        if self.file_rows.is_empty() {
             self.rendered_diff = Arc::new(Vec::new());
             self.rendered_diff_key = None;
+            self.file_diff_ranges.clear();
+            self.file_diff_range_by_path.clear();
             self.diff_position = DiffPosition::default();
             return;
-        };
+        }
 
-        let key = (path.clone(), self.theme_mode);
+        let key = self.theme_mode;
         if self.rendered_diff_key.as_ref() == Some(&key) {
             return;
         }
 
-        if let Some(cached) = self.rendered_diff_cache.get(&key) {
-            self.rendered_diff = cached.clone();
-            self.rendered_diff_key = Some(key);
-            self.apply_pending_diff_view_anchor(&path);
-            self.sync_diff_cursor_to_content_bounds();
-            return;
+        let theme = UiTheme::from_mode(self.theme_mode);
+        let ordered_paths = self.file_tree_paths_in_order();
+        let mut rendered = Vec::new();
+        let mut ranges = Vec::new();
+        let mut range_by_path = HashMap::new();
+        let total_files = ordered_paths.len();
+
+        for (idx, path) in ordered_paths.iter().enumerate() {
+            let range_start = rendered.len();
+            rendered.push(rendered_file_header_line(
+                path,
+                idx + 1,
+                total_files,
+                &theme,
+            ));
+
+            let file_key = (path.clone(), self.theme_mode);
+            let file_rendered = if let Some(cached) = self.rendered_diff_cache.get(&file_key) {
+                cached.clone()
+            } else {
+                let built = self
+                    .aggregate
+                    .files
+                    .get(path)
+                    .map(|patch| Arc::new(self.build_diff_lines(patch)))
+                    .unwrap_or_else(|| Arc::new(Vec::new()));
+                self.rendered_diff_cache
+                    .insert(file_key.clone(), built.clone());
+                built
+            };
+
+            rendered.extend(file_rendered.iter().cloned());
+
+            if idx + 1 < total_files {
+                rendered.push(RenderedDiffLine {
+                    line: Line::from(""),
+                    raw_text: String::new(),
+                    anchor: None,
+                    comment_id: None,
+                });
+            }
+
+            let range_end = rendered.len();
+            ranges.push(FileDiffRange {
+                path: path.clone(),
+                start: range_start,
+                end: range_end,
+            });
+            range_by_path.insert(path.clone(), (range_start, range_end));
         }
 
-        let rendered = self
-            .aggregate
-            .files
-            .get(&path)
-            .map(|patch| Arc::new(self.build_diff_lines(patch)))
-            .unwrap_or_else(|| Arc::new(Vec::new()));
-
-        self.rendered_diff_cache
-            .insert(key.clone(), rendered.clone());
-        self.rendered_diff = rendered;
+        self.rendered_diff = Arc::new(rendered);
+        self.file_diff_ranges = ranges;
+        self.file_diff_range_by_path = range_by_path;
         self.rendered_diff_key = Some(key);
-        self.apply_pending_diff_view_anchor(&path);
+        self.apply_pending_diff_view_anchor();
         self.sync_diff_cursor_to_content_bounds();
     }
 
@@ -226,6 +271,8 @@ impl App {
     pub(super) fn invalidate_diff_cache(&mut self) {
         self.rendered_diff_cache.clear();
         self.rendered_diff_key = None;
+        self.file_diff_ranges.clear();
+        self.file_diff_range_by_path.clear();
         self.ensure_rendered_diff();
     }
 
@@ -434,7 +481,15 @@ impl App {
 
     pub(super) fn rebuild_file_tree(&mut self) {
         let mut tree = FileTree::default();
+        let mut draft_paths = BTreeSet::new();
         for (path, patch) in &self.aggregate.files {
+            if patch
+                .hunks
+                .iter()
+                .any(|hunk| hunk.commit_id == UNCOMMITTED_COMMIT_ID)
+            {
+                draft_paths.insert(path.clone());
+            }
             let modified_ts = patch
                 .hunks
                 .iter()
@@ -445,6 +500,16 @@ impl App {
         }
 
         self.file_rows = tree.flattened_rows();
+        for row in &mut self.file_rows {
+            if row.selectable
+                && row
+                    .path
+                    .as_ref()
+                    .is_some_and(|path| draft_paths.contains(path))
+            {
+                row.modified_ts = None;
+            }
+        }
         if self.file_rows.is_empty() {
             self.file_list_state.select(None);
             self.selected_file = None;
@@ -452,7 +517,10 @@ impl App {
         }
 
         if self.file_list_state.selected().is_none() {
-            self.select_first_file();
+            if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
+                self.file_list_state.select(Some(idx));
+                self.selected_file = self.file_rows[idx].path.clone();
+            }
         }
     }
 
@@ -470,11 +538,13 @@ impl App {
                 .position(|row| row.selectable && row.path.as_ref() == Some(&path))
         {
             self.file_list_state.select(Some(idx));
-            self.restore_diff_position(&path);
             return;
         }
 
-        self.select_first_file();
+        if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
+            self.file_list_state.select(Some(idx));
+            self.selected_file = self.file_rows[idx].path.clone();
+        }
     }
 
     pub(super) fn on_selection_changed(&mut self) {
@@ -488,5 +558,90 @@ impl App {
 
     pub(super) fn selected_commit_ids_oldest_first(&self) -> Vec<String> {
         selected_ids_oldest_first(&self.commits)
+    }
+
+    pub(super) fn file_tree_paths_in_order(&self) -> Vec<String> {
+        self.file_rows
+            .iter()
+            .filter(|row| row.selectable)
+            .filter_map(|row| row.path.clone())
+            .collect()
+    }
+
+    pub(super) fn file_range_for_path(&self, path: &str) -> Option<(usize, usize)> {
+        self.file_diff_range_by_path.get(path).copied()
+    }
+
+    pub(super) fn file_range_index_for_line(&self, line: usize) -> Option<usize> {
+        if self.file_diff_ranges.is_empty() {
+            return None;
+        }
+
+        let mut left = 0usize;
+        let mut right = self.file_diff_ranges.len();
+        while left < right {
+            let mid = left + ((right - left) / 2);
+            let range = &self.file_diff_ranges[mid];
+            if line < range.start {
+                right = mid;
+            } else if line >= range.end {
+                left = mid + 1;
+            } else {
+                return Some(mid);
+            }
+        }
+        None
+    }
+
+    pub(super) fn file_path_for_line(&self, line: usize) -> Option<&str> {
+        self.file_range_index_for_line(line)
+            .and_then(|idx| self.file_diff_ranges.get(idx))
+            .map(|range| range.path.as_str())
+    }
+
+    pub(super) fn select_file_row_for_path(&mut self, path: &str) {
+        if let Some(idx) = self
+            .file_rows
+            .iter()
+            .position(|row| row.selectable && row.path.as_deref() == Some(path))
+        {
+            self.file_list_state.select(Some(idx));
+        }
+    }
+
+    pub(super) fn selected_file_progress(&self) -> Option<(usize, usize)> {
+        let path = self.selected_file.as_deref()?;
+        let total = self.file_diff_ranges.len();
+        let index = self
+            .file_diff_ranges
+            .iter()
+            .position(|range| range.path == path)?;
+        Some((index + 1, total))
+    }
+}
+
+fn rendered_file_header_line(
+    path: &str,
+    file_index: usize,
+    total_files: usize,
+    theme: &UiTheme,
+) -> RenderedDiffLine {
+    let raw_text = format!("==== file {file_index}/{total_files}: {path} ====");
+    RenderedDiffLine {
+        line: Line::from(vec![
+            Span::styled("==== ", Style::default().fg(theme.dimmed)),
+            Span::styled(
+                format!("file {file_index}/{total_files}"),
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(": ", Style::default().fg(theme.dimmed)),
+            Span::styled(path.to_owned(), Style::default().fg(theme.text)),
+            Span::styled(" ====", Style::default().fg(theme.dimmed)),
+        ]),
+        raw_text,
+        anchor: None,
+        comment_id: None,
     }
 }

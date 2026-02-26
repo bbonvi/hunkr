@@ -24,6 +24,8 @@ impl App {
             aggregate: AggregatedDiff::default(),
             selected_file: None,
             diff_positions: HashMap::new(),
+            file_diff_ranges: Vec::new(),
+            file_diff_range_by_path: HashMap::new(),
             pending_diff_view_anchor: None,
             diff_position: DiffPosition::default(),
             rendered_diff: Arc::new(Vec::new()),
@@ -322,8 +324,11 @@ impl App {
                                 }
                             }
                         } else {
-                            self.status =
-                                "No hunk/line anchor at cursor or selected range".to_owned();
+                            self.status = if self.diff_selection_spans_multiple_files() {
+                                "Comment range must stay within a single file".to_owned()
+                            } else {
+                                "No hunk/line anchor at cursor or selected range".to_owned()
+                            };
                         }
                     }
                     InputMode::CommentEdit(id) => {
@@ -774,6 +779,7 @@ impl App {
             frame,
             rect,
             self.selected_file.as_deref(),
+            self.selected_file_progress(),
             selected_lines,
             &self.rendered_diff,
             self.diff_position,

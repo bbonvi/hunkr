@@ -14,7 +14,9 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - left/top: commit history with multi-select and review status
 - left/bottom: changed-file tree (only files/directories changed by selected commits)
 - commit history includes a synthetic top entry for `Uncommitted changes` (staged + unstaged worktree draft)
-- right: syntax-highlighted diff viewer
+- right: syntax-highlighted, continuous diff viewer across all changed files
+- each file section in the diff is labeled inline (`file i/n: path`) so it is always obvious there are more files above/below
+- scrolling through the diff auto-syncs file selection in the file tree to the file currently under the diff cursor
 - commit banners stay visible at the top of the diff pane while scrolling through their hunks
 - right pane includes a simple vertical scrollbar for quick position awareness
 - Theme modes: dark and light (`dark` by default)
@@ -25,7 +27,8 @@ When agents produce several commits quickly, reviewing one commit at a time is s
 - Commits moved to `REVIEWED` or `RESOLVED` are auto-deselected; their comments are hidden from the review-task markdown file
 - Unreviewed/issue/resolved/reviewed are explicitly badged in commit list
 - File-switch memory: each file remembers last diff cursor/scroll position
-- File tree shows relative last-modified time (from latest selected commit touching the file)
+- Diff rendering is viewport-based (visible rows only) to keep large all-files reviews responsive
+- File tree shows relative last-modified time (from latest selected commit touching the file; hidden for draft/uncommitted-only file states)
 - Mouse support: pane focus, item selection, and wheel scrolling
 - Vim-like keys by default
 - Inline key hints are contextual to the focused pane

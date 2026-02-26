@@ -61,9 +61,7 @@ impl App {
             return;
         }
 
-        if let Some(prev) = &self.selected_file {
-            self.diff_positions.insert(prev.clone(), self.diff_position);
-        }
+        self.persist_selected_file_position();
 
         self.file_list_state.select(Some(idx));
         let path = self.file_rows[idx]
@@ -72,7 +70,7 @@ impl App {
             .expect("selectable rows always contain path");
         self.selected_file = Some(path.clone());
         self.restore_diff_position(&path);
-        self.ensure_rendered_diff();
+        self.sync_diff_cursor_to_content_bounds();
     }
 
     pub(super) fn move_commit_cursor(&mut self, delta: isize) {
@@ -339,9 +337,6 @@ impl App {
 
     pub(super) fn set_diff_scroll(&mut self, scroll: usize) {
         self.diff_position.scroll = scroll.min(self.max_diff_scroll());
-        if let Some(file) = &self.selected_file {
-            self.diff_positions.insert(file.clone(), self.diff_position);
-        }
     }
 
     pub(super) fn ensure_cursor_visible(&mut self) {
@@ -352,14 +347,73 @@ impl App {
         } else if self.diff_position.cursor >= self.diff_position.scroll + visible {
             self.diff_position.scroll = self.diff_position.cursor + 1 - visible;
         }
-
-        if let Some(file) = &self.selected_file {
-            self.diff_positions.insert(file.clone(), self.diff_position);
-        }
+        self.sync_selected_file_to_cursor();
     }
 
     pub(super) fn restore_diff_position(&mut self, path: &str) {
-        self.diff_position = self.diff_positions.get(path).copied().unwrap_or_default();
+        let Some((start, end)) = self.file_range_for_path(path) else {
+            self.diff_position = DiffPosition::default();
+            return;
+        };
+        if end <= start {
+            self.diff_position = DiffPosition::default();
+            return;
+        }
+
+        let local = self.diff_positions.get(path).copied().unwrap_or_default();
+        let max_local = end - start - 1;
+        self.diff_position = DiffPosition {
+            scroll: start + local.scroll.min(max_local),
+            cursor: start + local.cursor.min(max_local),
+        };
+    }
+
+    pub(super) fn persist_selected_file_position(&mut self) {
+        let Some(path) = self.selected_file.clone() else {
+            return;
+        };
+        let Some((start, end)) = self.file_range_for_path(&path) else {
+            return;
+        };
+        if end <= start {
+            return;
+        }
+
+        let max_local = end - start - 1;
+        self.diff_positions.insert(
+            path,
+            DiffPosition {
+                scroll: self
+                    .diff_position
+                    .scroll
+                    .saturating_sub(start)
+                    .min(max_local),
+                cursor: self
+                    .diff_position
+                    .cursor
+                    .saturating_sub(start)
+                    .min(max_local),
+            },
+        );
+    }
+
+    pub(super) fn sync_selected_file_to_cursor(&mut self) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        let cursor = self.diff_position.cursor.min(self.rendered_diff.len() - 1);
+        let Some(path) = self
+            .file_path_for_line(cursor)
+            .map(|value| value.to_owned())
+        else {
+            return;
+        };
+
+        if self.selected_file.as_deref() != Some(path.as_str()) {
+            self.persist_selected_file_position();
+            self.selected_file = Some(path.clone());
+        }
+        self.select_file_row_for_path(&path);
     }
 
     pub(super) fn sync_diff_visual_bounds(&mut self) {
@@ -409,10 +463,32 @@ impl App {
         }
     }
 
+    pub(super) fn diff_selection_spans_multiple_files(&self) -> bool {
+        let Some((start, end)) = self.diff_selected_range() else {
+            return false;
+        };
+        let mut paths = BTreeSet::new();
+        for idx in start..=end {
+            if let Some(path) = self.file_path_for_line(idx) {
+                paths.insert(path);
+                if paths.len() > 1 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub(super) fn comment_target_from_selection(&self) -> Option<CommentTarget> {
+        if self.diff_selection_spans_multiple_files() {
+            return None;
+        }
+
         let (start_idx, end_idx) = self.diff_selected_range()?;
         let mut commit_anchors = Vec::new();
         let mut hunk_anchors = Vec::new();
+        let mut commit_paths = BTreeSet::new();
+        let mut hunk_paths = BTreeSet::new();
         let mut commit_lines = Vec::new();
         let mut hunk_lines = Vec::new();
 
@@ -423,11 +499,13 @@ impl App {
             if let Some(anchor) = &line.anchor {
                 if is_commit_anchor(anchor) {
                     commit_anchors.push(anchor.clone());
+                    commit_paths.insert(anchor.file_path.clone());
                     if !line.raw_text.trim().is_empty() {
                         commit_lines.push(line.raw_text.clone());
                     }
                 } else {
                     hunk_anchors.push(anchor.clone());
+                    hunk_paths.insert(anchor.file_path.clone());
                     if !line.raw_text.trim().is_empty() {
                         hunk_lines.push(line.raw_text.clone());
                     }
@@ -440,6 +518,9 @@ impl App {
         }
 
         if hunk_anchors.is_empty() {
+            if commit_paths.len() > 1 {
+                return None;
+            }
             let anchor = commit_anchors.last()?.clone();
             return Some(CommentTarget {
                 kind: CommentTargetKind::Commit,
@@ -452,6 +533,10 @@ impl App {
                     vec![commit_lines.last()?.clone()]
                 },
             });
+        }
+
+        if hunk_paths.len() > 1 {
+            return None;
         }
 
         let start = hunk_anchors.first()?.clone();

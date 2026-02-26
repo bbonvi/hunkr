@@ -12,7 +12,6 @@ use super::super::{
 
 #[derive(Debug, Clone)]
 pub(in crate::app) struct PendingDiffViewAnchor {
-    pub path: String,
     pub cursor_line: DiffLineLocator,
     pub top_line: DiffLineLocator,
     pub cursor_to_top_offset: usize,
@@ -41,6 +40,7 @@ impl<'a> DiffPaneRenderer<'a> {
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
         selected_file: Option<&str>,
+        selected_file_progress: Option<(usize, usize)>,
         selected_lines: usize,
         rendered_diff: &[RenderedDiffLine],
         diff_position: DiffPosition,
@@ -53,7 +53,14 @@ impl<'a> DiffPaneRenderer<'a> {
             Style::default().fg(self.theme.border)
         };
 
-        let file_label = selected_file.unwrap_or("(no file selected)");
+        let file_label = match (selected_file, selected_file_progress) {
+            (Some(path), Some((index, total))) if total > 1 => {
+                format!("{path} ({index}/{total})")
+            }
+            (Some(path), Some((index, total))) => format!("{path} ({index}/{total})"),
+            (Some(path), None) => path.to_owned(),
+            (None, _) => "(no file selected)".to_owned(),
+        };
         let title = Line::from(vec![
             Span::styled(
                 " 3 DIFF ",
@@ -71,30 +78,6 @@ impl<'a> DiffPaneRenderer<'a> {
             ),
         ]);
 
-        let mut lines = Vec::with_capacity(rendered_diff.len());
-        for (idx, rendered) in rendered_diff.iter().enumerate() {
-            let mut line = rendered.line.clone();
-
-            if let Some((start, end)) = visual_range
-                && idx >= start
-                && idx <= end
-            {
-                line = tint_line_background(&line, self.theme.visual_bg, false);
-            }
-
-            if idx == diff_position.cursor && self.focused == FocusPane::Diff {
-                line = tint_line_background(&line, self.theme.cursor_bg, true);
-            }
-            lines.push(line);
-        }
-
-        if lines.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "No selected commits or no textual diff for this file",
-                Style::default().fg(self.theme.muted),
-            )));
-        }
-
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
@@ -109,9 +92,18 @@ impl<'a> DiffPaneRenderer<'a> {
         let sticky_rows = usize::from(sticky_commit_idx.is_some() && inner.height > 1);
         if sticky_rows == 1 {
             let sticky_idx = sticky_commit_idx.expect("sticky row requires banner index");
-            let sticky_line = lines
+            let sticky_line = rendered_diff
                 .get(sticky_idx)
-                .cloned()
+                .map(|line| {
+                    display_line_with_selection(
+                        line,
+                        sticky_idx,
+                        visual_range,
+                        diff_position.cursor,
+                        self.focused == FocusPane::Diff,
+                        self.theme,
+                    )
+                })
                 .unwrap_or_else(|| Line::from(""));
             frame.render_widget(
                 Paragraph::new(vec![sticky_line]),
@@ -126,8 +118,31 @@ impl<'a> DiffPaneRenderer<'a> {
 
         let body_height = inner.height.saturating_sub(sticky_rows as u16);
         if body_height > 0 {
+            let mut body_lines = Vec::with_capacity(body_height as usize);
+            for row in 0..body_height as usize {
+                let line_idx = diff_position.scroll.saturating_add(row);
+                let Some(line) = rendered_diff.get(line_idx) else {
+                    break;
+                };
+                body_lines.push(display_line_with_selection(
+                    line,
+                    line_idx,
+                    visual_range,
+                    diff_position.cursor,
+                    self.focused == FocusPane::Diff,
+                    self.theme,
+                ));
+            }
+
+            if body_lines.is_empty() {
+                body_lines.push(Line::from(Span::styled(
+                    "No selected commits or no textual diff for this range",
+                    Style::default().fg(self.theme.muted),
+                )));
+            }
+
             frame.render_widget(
-                Paragraph::new(lines).scroll((diff_position.scroll as u16, 0)),
+                Paragraph::new(body_lines),
                 ratatui::layout::Rect {
                     x: inner.x,
                     y: inner.y + sticky_rows as u16,
@@ -260,7 +275,6 @@ pub(in crate::app) fn find_diff_match_from_cursor(
 }
 
 pub(in crate::app) fn capture_pending_diff_view_anchor(
-    path: &str,
     lines: &[RenderedDiffLine],
     diff_position: DiffPosition,
 ) -> Option<PendingDiffViewAnchor> {
@@ -274,7 +288,6 @@ pub(in crate::app) fn capture_pending_diff_view_anchor(
     let top_line = diff_line_locator_for_index(lines, top_idx);
 
     Some(PendingDiffViewAnchor {
-        path: path.to_owned(),
         cursor_line,
         top_line,
         cursor_to_top_offset: cursor_idx.saturating_sub(top_idx),
@@ -401,4 +414,25 @@ fn find_index_for_raw_text_occurrence_in_candidates(
         }
     }
     last_match
+}
+
+fn display_line_with_selection(
+    rendered: &RenderedDiffLine,
+    idx: usize,
+    visual_range: Option<(usize, usize)>,
+    cursor: usize,
+    focused_diff: bool,
+    theme: &UiTheme,
+) -> Line<'static> {
+    let mut line = rendered.line.clone();
+    if let Some((start, end)) = visual_range
+        && idx >= start
+        && idx <= end
+    {
+        line = tint_line_background(&line, theme.visual_bg, false);
+    }
+    if idx == cursor && focused_diff {
+        line = tint_line_background(&line, theme.cursor_bg, true);
+    }
+    line
 }
