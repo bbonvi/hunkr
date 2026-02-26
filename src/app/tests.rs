@@ -380,6 +380,23 @@ fn diff_visual_from_drag_anchor_only_activates_after_cursor_moves() {
     assert!(diff_visual_from_drag_anchor(Some(14), 14).is_none());
     let visual = diff_visual_from_drag_anchor(Some(14), 17).expect("visual range");
     assert_eq!(visual.anchor, 14);
+    assert_eq!(visual.origin, DiffVisualOrigin::Mouse);
+}
+
+#[test]
+fn wheel_clears_only_keyboard_diff_visual_mode() {
+    let keyboard = Some(DiffVisualSelection {
+        anchor: 7,
+        origin: DiffVisualOrigin::Keyboard,
+    });
+    let mouse = Some(DiffVisualSelection {
+        anchor: 7,
+        origin: DiffVisualOrigin::Mouse,
+    });
+
+    assert!(should_clear_diff_visual_on_wheel(keyboard));
+    assert!(!should_clear_diff_visual_on_wheel(mouse));
+    assert!(!should_clear_diff_visual_on_wheel(None));
 }
 
 #[test]
@@ -1001,6 +1018,8 @@ fn list_row_style_uses_focus_sensitive_cursor_colors() {
 
     assert_eq!(focused.bg, Some(theme.visual_bg));
     assert_eq!(unfocused.bg, Some(theme.cursor_bg));
+    assert!(!focused.add_modifier.contains(Modifier::BOLD));
+    assert!(!unfocused.add_modifier.contains(Modifier::BOLD));
 }
 
 #[test]

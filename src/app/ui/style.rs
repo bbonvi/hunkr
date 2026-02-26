@@ -36,11 +36,9 @@ pub(in crate::app) fn list_row_style(
 
     if cursor {
         if selected {
-            return Style::default()
-                .bg(blend_colors(selected_bg, cursor_bg, 170))
-                .add_modifier(Modifier::BOLD);
+            return Style::default().bg(blend_colors(selected_bg, cursor_bg, 170));
         }
-        return Style::default().bg(cursor_bg).add_modifier(Modifier::BOLD);
+        return Style::default().bg(cursor_bg);
     }
     if selected {
         return Style::default().bg(selected_bg);

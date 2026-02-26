@@ -37,13 +37,6 @@ Optional config file:
 - `$XDG_CONFIG_HOME/hunkr/config.yaml`
 - `~/.config/hunkr/config.yaml`
 
-Key options:
-
-- `startup_theme` (`dark` or `light`)
-- `diff_wheel_scroll_lines` (`>= 1`)
-- `list_wheel_coalesce_ms` (`>= 1`, default `28`)
-- `nerd_fonts` (`true`/`false`)
-
 See [`config.example.yaml`](./config.example.yaml) for supported options.
 
 ## Quality Checks

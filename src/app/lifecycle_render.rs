@@ -884,6 +884,12 @@ impl App {
 
     pub(super) fn handle_commits_key(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Esc => {
+                if self.commit_visual_anchor.is_some() {
+                    self.commit_visual_anchor = None;
+                    self.status = "Commit visual range off".to_owned();
+                }
+            }
             KeyCode::Down | KeyCode::Char('j') => self.move_commit_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_commit_cursor(-1),
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1028,6 +1034,7 @@ impl App {
                     self.diff_mouse_anchor = None;
                     self.diff_visual = Some(DiffVisualSelection {
                         anchor: self.diff_position.cursor,
+                        origin: DiffVisualOrigin::Keyboard,
                     });
                     self.status = "Diff visual range on".to_owned();
                 }
@@ -1102,19 +1109,23 @@ impl App {
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if in_diff {
+                    self.clear_keyboard_diff_visual_selection();
                     self.scroll_diff_viewport(self.diff_wheel_scroll_lines);
                 } else if in_files && self.should_scroll_list_wheel(FocusPane::Files, 1) {
                     self.scroll_file_list_lines(1);
                 } else if in_commits && self.should_scroll_list_wheel(FocusPane::Commits, 1) {
+                    self.commit_visual_anchor = None;
                     self.scroll_commit_list_lines(1);
                 }
             }
             MouseEventKind::ScrollUp => {
                 if in_diff {
+                    self.clear_keyboard_diff_visual_selection();
                     self.scroll_diff_viewport(-self.diff_wheel_scroll_lines);
                 } else if in_files && self.should_scroll_list_wheel(FocusPane::Files, -1) {
                     self.scroll_file_list_lines(-1);
                 } else if in_commits && self.should_scroll_list_wheel(FocusPane::Commits, -1) {
+                    self.commit_visual_anchor = None;
                     self.scroll_commit_list_lines(-1);
                 }
             }
@@ -1222,6 +1233,12 @@ impl App {
         }
         self.last_list_wheel_event = Some((pane, delta, now));
         true
+    }
+
+    fn clear_keyboard_diff_visual_selection(&mut self) {
+        if should_clear_diff_visual_on_wheel(self.diff_visual) {
+            self.clear_diff_visual_selection();
+        }
     }
 
     fn handle_comment_mouse(&mut self, mouse: crossterm::event::MouseEvent) {

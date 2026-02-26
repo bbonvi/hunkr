@@ -287,6 +287,13 @@ struct FileDiffRange {
 #[derive(Debug, Clone, Copy)]
 struct DiffVisualSelection {
     anchor: usize,
+    origin: DiffVisualOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiffVisualOrigin {
+    Keyboard,
+    Mouse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -582,7 +589,14 @@ fn diff_visual_from_drag_anchor(
     cursor: usize,
 ) -> Option<DiffVisualSelection> {
     let anchor = anchor?;
-    (anchor != cursor).then_some(DiffVisualSelection { anchor })
+    (anchor != cursor).then_some(DiffVisualSelection {
+        anchor,
+        origin: DiffVisualOrigin::Mouse,
+    })
+}
+
+fn should_clear_diff_visual_on_wheel(visual: Option<DiffVisualSelection>) -> bool {
+    visual.is_some_and(|selection| selection.origin == DiffVisualOrigin::Keyboard)
 }
 
 fn compose_sticky_banner_indexes(

@@ -515,6 +515,7 @@ impl App {
         if clamped_anchor != visual.anchor {
             self.diff_visual = Some(DiffVisualSelection {
                 anchor: clamped_anchor,
+                origin: visual.origin,
             });
         }
     }
