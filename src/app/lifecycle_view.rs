@@ -965,7 +965,11 @@ impl App {
                         };
                         style = style.bg(cursor_bg);
                     }
-                    Line::from(Span::styled(row.clone(), style))
+                    let mut line = Line::from(Span::styled(row.clone(), style));
+                    if in_visual || idx == self.shell_command.output_cursor {
+                        line = pad_line_to_width(&line, output_inner.width, style);
+                    }
+                    line
                 })
                 .collect::<Vec<_>>();
             frame.render_widget(Paragraph::new(visible_rows), output_inner);

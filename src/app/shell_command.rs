@@ -369,7 +369,7 @@ impl App {
             rows.push(self.shell_command.output_tail.clone());
         }
         if self.shell_command.finished.is_some() {
-            rows.push(" ".to_owned());
+            rows.push(String::new());
         }
         rows
     }

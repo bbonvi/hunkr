@@ -77,6 +77,42 @@ pub(in crate::app) fn line_with_right(
     ])
 }
 
+/// Pads a rendered line to the viewport width so background highlights cover the full row.
+pub(in crate::app) fn pad_line_to_width(
+    line: &Line<'static>,
+    width: u16,
+    fallback_style: Style,
+) -> Line<'static> {
+    let target_width = width as usize;
+    if target_width == 0 {
+        return line.clone();
+    }
+
+    let rendered_width = line
+        .spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum::<usize>();
+    if rendered_width >= target_width {
+        return line.clone();
+    }
+
+    let mut padded = line.clone();
+    let mut padding_style = padded
+        .spans
+        .last()
+        .map(|span| span.style)
+        .unwrap_or(fallback_style);
+    if padding_style.bg.is_none() && fallback_style.bg.is_some() {
+        padding_style = padding_style.patch(fallback_style);
+    }
+    padded.spans.push(Span::styled(
+        " ".repeat(target_width.saturating_sub(rendered_width)),
+        padding_style,
+    ));
+    padded
+}
+
 pub(in crate::app) fn list_content_width(rect_width: u16, highlight_symbol_width: u16) -> usize {
     rect_width.saturating_sub(2 + highlight_symbol_width).max(1) as usize
 }

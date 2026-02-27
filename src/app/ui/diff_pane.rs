@@ -9,7 +9,8 @@ use ratatui::{
 
 use super::super::{
     CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme, blend_colors,
-    comment_anchor_matches, format_path_with_icon, is_commit_anchor, sanitized_span,
+    comment_anchor_matches, format_path_with_icon, is_commit_anchor, pad_line_to_width,
+    sanitized_span,
 };
 
 #[derive(Debug, Clone)]
@@ -125,6 +126,7 @@ impl<'a> DiffPaneRenderer<'a> {
                         line,
                         body.line_overrides.get(sticky_idx),
                         *sticky_idx,
+                        inner.width,
                         body.visual_range,
                         body.diff_position.cursor,
                         self.focused == FocusPane::Diff,
@@ -155,6 +157,7 @@ impl<'a> DiffPaneRenderer<'a> {
                     line,
                     body.line_overrides.get(&line_idx),
                     line_idx,
+                    inner.width,
                     body.visual_range,
                     body.diff_position.cursor,
                     self.focused == FocusPane::Diff,
@@ -451,6 +454,7 @@ fn display_line_with_selection(
     rendered: &RenderedDiffLine,
     override_line: Option<&Line<'static>>,
     idx: usize,
+    line_width: u16,
     visual_range: Option<(usize, usize)>,
     cursor: usize,
     focused_diff: bool,
@@ -459,14 +463,25 @@ fn display_line_with_selection(
     let mut line = override_line
         .cloned()
         .unwrap_or_else(|| rendered.line.clone());
-    if let Some((start, end)) = visual_range
-        && idx >= start
-        && idx <= end
-    {
+    let in_visual = visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
+    if in_visual {
         line = tint_line_background(&line, theme.visual_bg, false);
     }
-    if idx == cursor && focused_diff {
+    let is_cursor = idx == cursor && focused_diff;
+    if is_cursor {
         line = tint_line_background(&line, theme.cursor_bg, true);
+    }
+    if in_visual || is_cursor {
+        let mut row_bg = in_visual.then_some(theme.visual_bg);
+        if is_cursor {
+            row_bg = Some(match row_bg {
+                Some(existing) => blend_colors(existing, theme.cursor_bg, 170),
+                None => theme.cursor_bg,
+            });
+        }
+        if let Some(bg) = row_bg {
+            line = pad_line_to_width(&line, line_width, Style::default().bg(bg));
+        }
     }
     line
 }

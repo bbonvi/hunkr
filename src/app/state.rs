@@ -817,12 +817,9 @@ pub(super) fn rendered_file_header_line(
     }
 }
 
-pub(super) fn rendered_separator_line(theme: &UiTheme) -> RenderedDiffLine {
+pub(super) fn rendered_separator_line(_theme: &UiTheme) -> RenderedDiffLine {
     RenderedDiffLine {
-        line: Line::from(Span::styled(
-            "            ",
-            Style::default().fg(theme.dimmed),
-        )),
+        line: Line::from(""),
         raw_text: String::new(),
         anchor: None,
         comment_id: None,

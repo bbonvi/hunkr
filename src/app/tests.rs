@@ -2,7 +2,7 @@ use super::lifecycle_render::footer_mode_label;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::{scrollbar_thumb, tint_line_background};
 use super::ui::list_panes::ListLinePresenter;
-use super::ui::style::{line_with_right, list_content_width, list_row_style};
+use super::ui::style::{line_with_right, list_content_width, list_row_style, pad_line_to_width};
 use super::*;
 use std::fs;
 use tempfile::tempdir;
@@ -449,7 +449,7 @@ fn rendered_file_banner_sanitizes_untrusted_path_text() {
 }
 
 #[test]
-fn rendered_separator_line_keeps_empty_raw_text_and_visible_marker() {
+fn rendered_separator_line_keeps_empty_raw_text_without_placeholder_glyphs() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let separator = state::rendered_separator_line(&theme);
     let content = separator
@@ -462,8 +462,7 @@ fn rendered_separator_line_keeps_empty_raw_text_and_visible_marker() {
     assert_eq!(separator.raw_text, "");
     assert!(separator.anchor.is_none());
     assert_eq!(separator.comment_id, None);
-    assert_eq!(separator.line.spans[0].style.fg, Some(theme.dimmed));
-    assert_eq!(content, "            ");
+    assert_eq!(content, "");
 }
 
 #[test]
@@ -568,6 +567,13 @@ fn shell_output_copy_payload_clamps_out_of_bounds_visual_range() {
     let payload =
         shell_output_copy_payload_for_rows(&rows, Some((1, 99))).expect("clamped payload");
     assert_eq!(payload, "b\nc");
+}
+
+#[test]
+fn shell_output_copy_payload_preserves_trailing_blank_row() {
+    let rows = vec!["$ cmd".to_owned(), "done".to_owned(), String::new()];
+    let payload = shell_output_copy_payload_for_rows(&rows, None).expect("payload");
+    assert_eq!(payload, "$ cmd\ndone\n");
 }
 
 #[test]
@@ -1174,6 +1180,63 @@ fn line_with_right_keeps_right_text_visible() {
         .map(|s| s.content.to_string())
         .collect::<String>();
     assert!(flattened.ends_with("3h ago"));
+}
+
+#[test]
+fn pad_line_to_width_extends_line_with_matching_style() {
+    let style = Style::default()
+        .fg(Color::Rgb(220, 220, 220))
+        .bg(Color::Rgb(40, 60, 80));
+    let line = Line::from(Span::styled("abc", style));
+
+    let padded = pad_line_to_width(&line, 6, Style::default());
+    let flattened = padded
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert_eq!(flattened, "abc   ");
+    assert_eq!(padded.spans.last().map(|span| span.style.bg), Some(style.bg));
+}
+
+#[test]
+fn pad_line_to_width_uses_fallback_background_when_missing() {
+    let line = Line::from(Span::styled("", Style::default().fg(Color::Yellow)));
+    let fallback = Style::default().bg(Color::Rgb(12, 34, 56));
+
+    let padded = pad_line_to_width(&line, 4, fallback);
+
+    assert_eq!(
+        padded.spans.last().and_then(|span| span.style.bg),
+        fallback.bg
+    );
+}
+
+#[test]
+fn pad_line_to_width_noops_when_line_already_fits() {
+    let line = Line::from("abcdef");
+    let padded = pad_line_to_width(&line, 6, Style::default().bg(Color::Blue));
+    let flattened = padded
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert_eq!(flattened, "abcdef");
+}
+
+#[test]
+fn pad_line_to_width_uses_display_width_for_wide_glyphs() {
+    let line = Line::from(Span::styled("中", Style::default().bg(Color::Green)));
+    let padded = pad_line_to_width(&line, 4, Style::default());
+    let flattened = padded
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert_eq!(flattened, "中  ");
 }
 
 #[test]

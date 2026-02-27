@@ -59,6 +59,7 @@ use self::ui::diff_pane::{
     is_hunk_header_line, scrollbar_thumb,
 };
 use self::ui::list_panes::{CommitPaneModel, FilePaneModel, ListPaneRenderer};
+use self::ui::style::pad_line_to_width;
 
 use crate::{
     comments::CommentStore,
