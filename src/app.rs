@@ -411,8 +411,7 @@ struct CommentEditorState {
 struct ShellCommandState {
     buffer: String,
     cursor: usize,
-    history: VecDeque<String>,
-    history_lower: VecDeque<String>,
+    history: VecDeque<ShellCommandHistoryEntry>,
     history_nav: Option<usize>,
     history_draft: String,
     reverse_search: Option<ShellReverseSearchState>,
@@ -454,6 +453,21 @@ struct ShellReverseSearchState {
 /// Final shell command result displayed after process exit.
 struct ShellCommandResult {
     exit_status: ExitStatus,
+}
+
+#[derive(Debug)]
+struct ShellCommandHistoryEntry {
+    raw: String,
+    raw_lower: String,
+}
+
+impl ShellCommandHistoryEntry {
+    fn new(raw: String) -> Self {
+        Self {
+            raw_lower: raw.to_ascii_lowercase(),
+            raw,
+        }
+    }
 }
 
 /// Process execution state with live stdout/stderr readers.

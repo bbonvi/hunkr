@@ -728,7 +728,7 @@ impl App {
         };
 
         state.match_indexes = reverse_search_match_indexes(
-            &self.shell_command.history_lower,
+            &self.shell_command.history,
             &state.query,
         );
 
@@ -755,7 +755,7 @@ impl App {
         let Some(command) = self.shell_command.history.get(idx) else {
             return;
         };
-        self.shell_command.buffer = command.clone();
+        self.shell_command.buffer = command.raw.clone();
         self.shell_command.cursor = self.shell_command.buffer.len();
     }
 
@@ -788,7 +788,7 @@ impl App {
 
         self.shell_command.history_nav = Some(next);
         if let Some(cmd) = self.shell_command.history.get(next) {
-            self.shell_command.buffer = cmd.clone();
+            self.shell_command.buffer = cmd.raw.clone();
             self.shell_command.cursor = self.shell_command.buffer.len();
         }
     }
@@ -808,7 +808,7 @@ impl App {
 
         self.shell_command.history_nav = Some(next);
         if let Some(cmd) = self.shell_command.history.get(next) {
-            self.shell_command.buffer = cmd.clone();
+            self.shell_command.buffer = cmd.raw.clone();
             self.shell_command.cursor = self.shell_command.buffer.len();
         }
     }
@@ -990,19 +990,18 @@ impl App {
     }
 
     fn push_shell_history(&mut self, command: String) {
-        let command_lower = command.to_ascii_lowercase();
-        self.shell_command.history.push_back(command);
-        self.shell_command.history_lower.push_back(command_lower);
+        self.shell_command
+            .history
+            .push_back(ShellCommandHistoryEntry::new(command));
         while self.shell_command.history.len() > SHELL_HISTORY_LIMIT {
             self.shell_command.history.pop_front();
-            self.shell_command.history_lower.pop_front();
         }
 
         let snapshot = self
             .shell_command
             .history
             .iter()
-            .cloned()
+            .map(|entry| entry.raw.clone())
             .collect::<Vec<_>>();
         if let Err(err) = self.store.save_shell_history(&snapshot) {
             self.runtime.status = format!("failed to save shell history: {err:#}");
@@ -1098,19 +1097,22 @@ impl App {
     }
 }
 
-fn reverse_search_match_indexes(history_lower: &VecDeque<String>, query: &str) -> Vec<usize> {
+fn reverse_search_match_indexes(
+    history: &VecDeque<ShellCommandHistoryEntry>,
+    query: &str,
+) -> Vec<usize> {
     let needle = query.to_ascii_lowercase();
     if needle.is_empty() {
         return Vec::new();
     }
 
     let mut seen = std::collections::HashSet::<&str>::new();
-    history_lower
+    history
         .iter()
         .enumerate()
         .rev()
         .filter_map(|(idx, command)| {
-            if !command.contains(&needle) || !seen.insert(command.as_str()) {
+            if !command.raw_lower.contains(&needle) || !seen.insert(command.raw_lower.as_str()) {
                 return None;
             }
             Some(idx)
@@ -1300,24 +1302,24 @@ mod tests {
 
     #[test]
     fn reverse_search_match_indexes_returns_empty_for_empty_query() {
-        let history_lower = std::collections::VecDeque::from(vec![
-            "git status".to_owned(),
-            "cargo test".to_owned(),
+        let history = std::collections::VecDeque::from(vec![
+            ShellCommandHistoryEntry::new("git status".to_owned()),
+            ShellCommandHistoryEntry::new("cargo test".to_owned()),
         ]);
 
-        assert!(reverse_search_match_indexes(&history_lower, "").is_empty());
+        assert!(reverse_search_match_indexes(&history, "").is_empty());
     }
 
     #[test]
     fn reverse_search_match_indexes_is_newest_first_and_deduplicated() {
-        let history_lower = std::collections::VecDeque::from(vec![
-            "git status".to_owned(),
-            "cargo test".to_owned(),
-            "cargo fmt".to_owned(),
-            "cargo test".to_owned(),
+        let history = std::collections::VecDeque::from(vec![
+            ShellCommandHistoryEntry::new("git status".to_owned()),
+            ShellCommandHistoryEntry::new("cargo test".to_owned()),
+            ShellCommandHistoryEntry::new("cargo fmt".to_owned()),
+            ShellCommandHistoryEntry::new("cargo test".to_owned()),
         ]);
 
-        assert_eq!(reverse_search_match_indexes(&history_lower, "TEST"), vec![3]);
-        assert_eq!(reverse_search_match_indexes(&history_lower, "cargo"), vec![3, 2]);
+        assert_eq!(reverse_search_match_indexes(&history, "TEST"), vec![3]);
+        assert_eq!(reverse_search_match_indexes(&history, "cargo"), vec![3, 2]);
     }
 }
