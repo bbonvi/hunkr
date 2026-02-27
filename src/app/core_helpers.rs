@@ -264,7 +264,17 @@ pub(super) fn append_gitignore_entry(path: &Path, entry: &str) -> anyhow::Result
         return Ok(GitignoreUpdate::AlreadyPresent);
     }
 
-    let mut next = existing;
+    // Re-read right before write so concurrent updates that already added this entry noop.
+    let latest = if path.exists() {
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?
+    } else {
+        String::new()
+    };
+    if gitignore_contains_entry(&latest, &canonical) {
+        return Ok(GitignoreUpdate::AlreadyPresent);
+    }
+
+    let mut next = latest;
     if !next.is_empty() && !next.ends_with('\n') {
         next.push('\n');
     }

@@ -70,7 +70,7 @@ use crate::{
         FilePatch, HunkLine, ReviewComment, ReviewState, ReviewStatus, UNCOMMITTED_COMMIT_ID,
         UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
     },
-    store::StateStore,
+    store::{InstanceLock, StateStore},
 };
 
 const HISTORY_LIMIT: usize = 400;
@@ -506,6 +506,7 @@ struct RuntimeState {
 pub struct App {
     git: GitService,
     store: StateStore,
+    instance_lock: Option<InstanceLock>,
     comments: CommentStore,
     review_state: ReviewState,
     commits: Vec<CommitRow>,

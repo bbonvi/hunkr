@@ -129,3 +129,31 @@ fn shell_history_loads_legacy_array_format() {
         vec!["git status".to_owned(), "cargo test".to_owned()]
     );
 }
+
+#[test]
+fn acquire_instance_lock_creates_and_releases_lock_file() {
+    let tmp = tempdir().expect("tempdir");
+    let project_root = tmp.path().join("repo");
+    let store = StateStore::for_project(&project_root);
+    let lock_path = project_root.join(".hunkr").join("instance.lock");
+
+    let lock = store.acquire_instance_lock().expect("acquire lock");
+    assert!(lock_path.exists());
+    drop(lock);
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn acquire_instance_lock_hard_stops_when_lock_file_exists() {
+    let tmp = tempdir().expect("tempdir");
+    let project_root = tmp.path().join("repo");
+    let store = StateStore::for_project(&project_root);
+
+    let lock = store.acquire_instance_lock().expect("acquire first lock");
+    let err = store
+        .acquire_instance_lock()
+        .expect_err("second lock should fail");
+    let message = err.to_string();
+    assert!(message.contains(".hunkr/instance.lock"));
+    drop(lock);
+}

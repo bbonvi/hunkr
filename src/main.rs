@@ -23,10 +23,6 @@ fn run_event_loop(
     app: &mut App,
 ) -> anyhow::Result<()> {
     loop {
-        if app.should_quit() {
-            break;
-        }
-
         if app.needs_redraw() {
             if app.take_terminal_clear_request() {
                 terminal.clear().context("failed to clear terminal")?;
@@ -35,6 +31,10 @@ fn run_event_loop(
                 .draw(|frame| app.draw(frame))
                 .context("failed to render frame")?;
             app.mark_drawn();
+        }
+
+        if app.should_quit() {
+            break;
         }
 
         if event::poll(app.poll_timeout()).context("event poll failed")? {

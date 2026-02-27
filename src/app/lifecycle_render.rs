@@ -8,6 +8,7 @@ pub(super) use super::lifecycle_view::footer_mode_label;
 struct BootstrapDeps {
     git: GitService,
     store: StateStore,
+    instance_lock: Option<InstanceLock>,
     comments: CommentStore,
     review_state: ReviewState,
 }
@@ -17,12 +18,14 @@ impl App {
         let git = GitService::open_current()?;
         let config = AppConfig::load()?;
         let store = StateStore::for_project(git.root());
+        let instance_lock = store.try_acquire_instance_lock()?;
         let first_open = !store.has_state_file();
         let review_state = store.load()?;
         let comments = CommentStore::new(store.root_dir(), git.branch_name())?;
         let deps = BootstrapDeps {
             git,
             store,
+            instance_lock,
             comments,
             review_state,
         };
@@ -41,13 +44,18 @@ impl App {
 
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
         let now = Instant::now();
-        let shell_history = deps.store.load_shell_history().unwrap_or_default().into_iter();
+        let shell_history = deps
+            .store
+            .load_shell_history()
+            .unwrap_or_default()
+            .into_iter();
         let shell_history = shell_history
             .map(ShellCommandHistoryEntry::new)
             .collect::<VecDeque<_>>();
         Self {
             git: deps.git,
             store: deps.store,
+            instance_lock: deps.instance_lock,
             comments: deps.comments,
             review_state: deps.review_state,
             commits: Vec::new(),
@@ -222,6 +230,16 @@ impl App {
                         self.store.root_dir().display()
                     );
                     return;
+                }
+                if self.instance_lock.is_none() {
+                    match self.store.acquire_instance_lock() {
+                        Ok(lock) => self.instance_lock = Some(lock),
+                        Err(err) => {
+                            self.runtime.status = format!("setup failed: {err:#}");
+                            self.runtime.should_quit = true;
+                            return;
+                        }
+                    }
                 }
                 self.runtime.onboarding_step = Some(OnboardingStep::GitignoreChoice);
                 self.runtime.status.clear();

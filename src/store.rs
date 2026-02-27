@@ -1,5 +1,7 @@
 use std::{
     fs,
+    fs::OpenOptions,
+    io::{ErrorKind, Write},
     path::{Path, PathBuf},
 };
 
@@ -13,6 +15,8 @@ use crate::model::{CommitStatusEntry, ReviewState, ReviewStatus};
 pub const PROJECT_DATA_DIR: &str = ".hunkr";
 const STATE_FILE: &str = "state.json";
 const SHELL_HISTORY_FILE: &str = "shell-history.json";
+const INSTANCE_LOCK_FILE: &str = "instance.lock";
+const INSTANCE_LOCK_REL_PATH: &str = ".hunkr/instance.lock";
 
 /// Project-local persistence manager for review state.
 #[derive(Debug, Clone)]
@@ -20,6 +24,22 @@ pub struct StateStore {
     root: PathBuf,
     state_path: PathBuf,
     shell_history_path: PathBuf,
+}
+
+/// Process-lifetime lock guard used to block concurrent hunkr instances in one repo.
+#[derive(Debug)]
+pub struct InstanceLock {
+    path: PathBuf,
+    file: Option<fs::File>,
+}
+
+impl Drop for InstanceLock {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            drop(file);
+        }
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 impl StateStore {
@@ -36,6 +56,52 @@ impl StateStore {
 
     pub fn root_dir(&self) -> &Path {
         &self.root
+    }
+
+    pub fn instance_lock_rel_path(&self) -> &'static str {
+        INSTANCE_LOCK_REL_PATH
+    }
+
+    pub fn try_acquire_instance_lock(&self) -> anyhow::Result<Option<InstanceLock>> {
+        if !self.root.exists() {
+            return Ok(None);
+        }
+        self.acquire_instance_lock().map(Some)
+    }
+
+    pub fn acquire_instance_lock(&self) -> anyhow::Result<InstanceLock> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("failed to create {}", self.root.display()))?;
+        let lock_path = self.root.join(INSTANCE_LOCK_FILE);
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+                return Err(anyhow::anyhow!(
+                    "another hunkr instance is active ({INSTANCE_LOCK_REL_PATH} exists). If stale, remove {INSTANCE_LOCK_REL_PATH} and retry."
+                ));
+            }
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to create {}", lock_path.display()));
+            }
+        };
+
+        if let Err(err) = writeln!(file, "pid={}", std::process::id()) {
+            let _ = fs::remove_file(&lock_path);
+            return Err(err).with_context(|| format!("failed to write {}", lock_path.display()));
+        }
+        if let Err(err) = file.sync_all() {
+            let _ = fs::remove_file(&lock_path);
+            return Err(err).with_context(|| format!("failed to sync {}", lock_path.display()));
+        }
+        Ok(InstanceLock {
+            path: lock_path,
+            file: Some(file),
+        })
     }
 
     pub fn has_state_file(&self) -> bool {
