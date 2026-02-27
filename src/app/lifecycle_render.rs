@@ -41,7 +41,16 @@ impl App {
 
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
         let now = Instant::now();
-        let shell_history = deps.store.load_shell_history().unwrap_or_default();
+        let shell_history = deps
+            .store
+            .load_shell_history()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<VecDeque<_>>();
+        let shell_history_lower = shell_history
+            .iter()
+            .map(|command| command.to_ascii_lowercase())
+            .collect::<VecDeque<_>>();
         Self {
             git: deps.git,
             store: deps.store,
@@ -104,7 +113,8 @@ impl App {
             shell_command: ShellCommandState {
                 buffer: String::new(),
                 cursor: 0,
-                history: shell_history.into_iter().collect(),
+                history: shell_history,
+                history_lower: shell_history_lower,
                 history_nav: None,
                 history_draft: String::new(),
                 reverse_search: None,

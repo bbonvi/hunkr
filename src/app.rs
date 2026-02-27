@@ -412,6 +412,7 @@ struct ShellCommandState {
     buffer: String,
     cursor: usize,
     history: VecDeque<String>,
+    history_lower: VecDeque<String>,
     history_nav: Option<usize>,
     history_draft: String,
     reverse_search: Option<ShellReverseSearchState>,
