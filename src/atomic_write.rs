@@ -1,7 +1,7 @@
 use std::{
     collections::hash_map::RandomState,
     fs::{self, OpenOptions},
-    hash::{BuildHasher, Hash, Hasher},
+    hash::{BuildHasher, Hasher},
     io::Write,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -73,9 +73,7 @@ fn random_id() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let mut thread_hasher = RandomState::new().build_hasher();
-    std::thread::current().id().hash(&mut thread_hasher);
-    let thread_entropy = u128::from(thread_hasher.finish());
+    let thread_entropy = u128::from(RandomState::new().hash_one(std::thread::current().id()));
     let pid = u128::from(std::process::id());
     let entropy = now ^ (thread_entropy << 1) ^ (pid << 33);
 

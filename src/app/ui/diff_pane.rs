@@ -8,9 +8,9 @@ use ratatui::{
 };
 
 use super::super::{
-    CommentAnchor, CursorSelectionPolicy, DiffPosition, FocusPane, NerdFontTheme,
-    RenderedDiffLine, UiTheme, apply_row_highlight, comment_anchor_matches,
-    format_path_with_icon, is_commit_anchor, sanitized_span,
+    CommentAnchor, CursorSelectionPolicy, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine,
+    UiTheme, apply_row_highlight, comment_anchor_matches, format_path_with_icon, is_commit_anchor,
+    sanitized_span,
 };
 
 #[derive(Debug, Clone)]
@@ -44,6 +44,14 @@ pub(in crate::app) struct DiffPaneBody<'a> {
     pub sticky_banner_indexes: &'a [usize],
     pub empty_state_message: Option<&'a str>,
     pub line_overrides: &'a HashMap<usize, Line<'static>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SelectionRenderContext<'a> {
+    visual_range: Option<(usize, usize)>,
+    cursor: usize,
+    focused_diff: bool,
+    theme: &'a UiTheme,
 }
 
 /// Renders the diff pane so App can focus on orchestration/state transitions.
@@ -112,6 +120,12 @@ impl<'a> DiffPaneRenderer<'a> {
 
         let max_sticky_rows = inner.height.saturating_sub(1) as usize;
         let sticky_rows = body.sticky_banner_indexes.len().min(max_sticky_rows);
+        let selection = SelectionRenderContext {
+            visual_range: body.visual_range,
+            cursor: body.diff_position.cursor,
+            focused_diff: self.focused == FocusPane::Diff,
+            theme: self.theme,
+        };
         for (row, sticky_idx) in body
             .sticky_banner_indexes
             .iter()
@@ -127,10 +141,7 @@ impl<'a> DiffPaneRenderer<'a> {
                         body.line_overrides.get(sticky_idx),
                         *sticky_idx,
                         inner.width,
-                        body.visual_range,
-                        body.diff_position.cursor,
-                        self.focused == FocusPane::Diff,
-                        self.theme,
+                        selection,
                     )
                 })
                 .unwrap_or_else(|| Line::from(""));
@@ -158,10 +169,7 @@ impl<'a> DiffPaneRenderer<'a> {
                     body.line_overrides.get(&line_idx),
                     line_idx,
                     inner.width,
-                    body.visual_range,
-                    body.diff_position.cursor,
-                    self.focused == FocusPane::Diff,
-                    self.theme,
+                    selection,
                 ));
             }
 
@@ -435,23 +443,22 @@ fn display_line_with_selection(
     override_line: Option<&Line<'static>>,
     idx: usize,
     line_width: u16,
-    visual_range: Option<(usize, usize)>,
-    cursor: usize,
-    focused_diff: bool,
-    theme: &UiTheme,
+    selection: SelectionRenderContext<'_>,
 ) -> Line<'static> {
     let line = override_line
         .cloned()
         .unwrap_or_else(|| rendered.line.clone());
-    let in_visual = visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
-    let is_cursor = idx == cursor && focused_diff;
+    let in_visual = selection
+        .visual_range
+        .is_some_and(|(start, end)| idx >= start && idx <= end);
+    let is_cursor = idx == selection.cursor && selection.focused_diff;
     apply_row_highlight(
         &line,
         line_width,
         in_visual,
         is_cursor,
-        theme.visual_bg,
-        theme.cursor_bg,
+        selection.theme.visual_bg,
+        selection.theme.cursor_bg,
         CursorSelectionPolicy::CursorWins,
     )
 }
