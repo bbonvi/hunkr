@@ -2,7 +2,10 @@ use super::lifecycle_render::footer_mode_label;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::{scrollbar_thumb, tint_line_background};
 use super::ui::list_panes::ListLinePresenter;
-use super::ui::style::{line_with_right, list_content_width, list_row_style, pad_line_to_width};
+use super::ui::style::{
+    CursorSelectionPolicy, line_with_right, list_content_width, list_row_style, pad_line_to_width,
+    resolve_row_background,
+};
 use super::*;
 use std::fs;
 use tempfile::tempdir;
@@ -1359,6 +1362,34 @@ fn list_row_style_uses_focus_sensitive_cursor_colors() {
     assert_eq!(unfocused.bg, Some(theme.cursor_bg));
     assert!(!focused.add_modifier.contains(Modifier::BOLD));
     assert!(!unfocused.add_modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn resolve_row_background_cursor_wins_policy_overrides_selection() {
+    let selection_bg = Color::Rgb(10, 20, 30);
+    let cursor_bg = Color::Rgb(40, 50, 60);
+    let bg = resolve_row_background(
+        true,
+        true,
+        selection_bg,
+        cursor_bg,
+        CursorSelectionPolicy::CursorWins,
+    );
+    assert_eq!(bg, Some(cursor_bg));
+}
+
+#[test]
+fn resolve_row_background_blend_policy_combines_selection_and_cursor() {
+    let selection_bg = Color::Rgb(10, 20, 30);
+    let cursor_bg = Color::Rgb(220, 210, 200);
+    let bg = resolve_row_background(
+        true,
+        true,
+        selection_bg,
+        cursor_bg,
+        CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
+    );
+    assert!(bg.is_some_and(|resolved| resolved != selection_bg && resolved != cursor_bg));
 }
 
 #[test]

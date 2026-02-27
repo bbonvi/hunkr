@@ -8,9 +8,9 @@ use ratatui::{
 };
 
 use super::super::{
-    CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme, blend_colors,
-    comment_anchor_matches, format_path_with_icon, is_commit_anchor, pad_line_to_width,
-    sanitized_span,
+    CommentAnchor, CursorSelectionPolicy, DiffPosition, FocusPane, NerdFontTheme,
+    RenderedDiffLine, UiTheme, blend_colors, comment_anchor_matches, format_path_with_icon,
+    is_commit_anchor, pad_line_to_width, resolve_row_background, sanitized_span,
 };
 
 #[derive(Debug, Clone)]
@@ -464,12 +464,16 @@ fn display_line_with_selection(
         .cloned()
         .unwrap_or_else(|| rendered.line.clone());
     let in_visual = visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
-    if in_visual {
-        line = tint_line_background(&line, theme.visual_bg, false);
-    }
     let is_cursor = idx == cursor && focused_diff;
-    if is_cursor {
-        line = tint_line_background(&line, theme.cursor_bg, false);
+    let row_bg = resolve_row_background(
+        in_visual,
+        is_cursor,
+        theme.visual_bg,
+        theme.cursor_bg,
+        CursorSelectionPolicy::CursorWins,
+    );
+    if let Some(bg) = row_bg {
+        line = tint_line_background(&line, bg, false);
     }
     if is_cursor {
         line = pad_line_to_width(&line, line_width, Style::default().bg(theme.cursor_bg));

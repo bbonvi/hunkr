@@ -954,14 +954,18 @@ impl App {
                     let in_visual =
                         visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
                     let mut style = Style::default().fg(theme.text);
-                    if in_visual {
-                        style = style.bg(theme.visual_bg);
-                    }
-                    if idx == self.shell_command.output_cursor {
-                        style = style.bg(theme.cursor_bg);
+                    let is_cursor = idx == self.shell_command.output_cursor;
+                    if let Some(bg) = resolve_row_background(
+                        in_visual,
+                        is_cursor,
+                        theme.visual_bg,
+                        theme.cursor_bg,
+                        CursorSelectionPolicy::CursorWins,
+                    ) {
+                        style = style.bg(bg);
                     }
                     let mut line = Line::from(Span::styled(row.clone(), style));
-                    if idx == self.shell_command.output_cursor {
+                    if is_cursor {
                         line = pad_line_to_width(&line, output_inner.width, style);
                     }
                     line

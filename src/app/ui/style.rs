@@ -7,6 +7,34 @@ use crate::model::ReviewStatus;
 
 use super::super::{UiTheme, blend_colors, display_width, truncate};
 
+/// Determines how cursor background interacts with an existing selection background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum CursorSelectionPolicy {
+    /// Cursor background fully replaces selection background.
+    CursorWins,
+    /// Cursor background is blended over selection background.
+    BlendCursorOverSelection { weight: u8 },
+}
+
+/// Resolves a row background from selection/cursor state using one shared policy.
+pub(in crate::app) fn resolve_row_background(
+    in_selection: bool,
+    is_cursor: bool,
+    selection_bg: Color,
+    cursor_bg: Color,
+    policy: CursorSelectionPolicy,
+) -> Option<Color> {
+    if !is_cursor {
+        return in_selection.then_some(selection_bg);
+    }
+    Some(match (in_selection, policy) {
+        (true, CursorSelectionPolicy::BlendCursorOverSelection { weight }) => {
+            blend_colors(selection_bg, cursor_bg, weight)
+        }
+        _ => cursor_bg,
+    })
+}
+
 pub(in crate::app) fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
     match status {
         ReviewStatus::Unreviewed => Style::default()
@@ -34,14 +62,14 @@ pub(in crate::app) fn list_row_style(
         theme.cursor_bg
     };
 
-    if cursor {
-        if selected {
-            return Style::default().bg(blend_colors(selected_bg, cursor_bg, 170));
-        }
-        return Style::default().bg(cursor_bg);
-    }
-    if selected {
-        return Style::default().bg(selected_bg);
+    if let Some(bg) = resolve_row_background(
+        selected,
+        cursor,
+        selected_bg,
+        cursor_bg,
+        CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
+    ) {
+        return Style::default().bg(bg);
     }
     Style::default()
 }
