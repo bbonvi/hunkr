@@ -485,6 +485,15 @@ impl App {
             return;
         }
 
+        if theme_toggle_conflicts_with_diff_pending_op(
+            key,
+            self.preferences.focused,
+            self.diff_ui.pending_op,
+        ) {
+            self.dispatch_focus_key(key);
+            return;
+        }
+
         match key.code {
             KeyCode::Char('q') => self.runtime.should_quit = true,
             KeyCode::Tab if key.modifiers == KeyModifiers::NONE => self.focus_next(),
@@ -549,4 +558,15 @@ impl App {
 pub(super) fn help_overlay_close_key(key: KeyEvent) -> bool {
     key.modifiers == KeyModifiers::NONE
         && matches!(key.code, KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q'))
+}
+
+pub(super) fn theme_toggle_conflicts_with_diff_pending_op(
+    key: KeyEvent,
+    focused: FocusPane,
+    pending_op: Option<DiffPendingOp>,
+) -> bool {
+    key.modifiers == KeyModifiers::NONE
+        && key.code == KeyCode::Char('t')
+        && focused == FocusPane::Diff
+        && matches!(pending_op, Some(DiffPendingOp::Z))
 }

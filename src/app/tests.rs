@@ -1,5 +1,7 @@
 use super::lifecycle_input::clear_commit_visual_anchor;
-use super::lifecycle_render::{footer_mode_label, help_overlay_close_key};
+use super::lifecycle_render::{
+    footer_mode_label, help_overlay_close_key, theme_toggle_conflicts_with_diff_pending_op,
+};
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
@@ -726,6 +728,31 @@ fn help_overlay_close_key_matches_modal_close_actions() {
         KeyCode::Char('x'),
         KeyModifiers::NONE
     )));
+}
+
+#[test]
+fn theme_toggle_conflict_defers_t_to_diff_pending_z_op() {
+    let t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+    assert!(theme_toggle_conflicts_with_diff_pending_op(
+        t,
+        FocusPane::Diff,
+        Some(DiffPendingOp::Z)
+    ));
+    assert!(!theme_toggle_conflicts_with_diff_pending_op(
+        t,
+        FocusPane::Files,
+        Some(DiffPendingOp::Z)
+    ));
+    assert!(!theme_toggle_conflicts_with_diff_pending_op(
+        t,
+        FocusPane::Diff,
+        None
+    ));
+    assert!(!theme_toggle_conflicts_with_diff_pending_op(
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::SHIFT),
+        FocusPane::Diff,
+        Some(DiffPendingOp::Z)
+    ));
 }
 
 #[test]
