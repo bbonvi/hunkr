@@ -506,7 +506,7 @@ impl App {
         if let Some(bg_color) = bg {
             text_style = text_style.bg(bg_color);
         }
-        spans.push(Span::styled(sanitize_terminal_text(&line.text), text_style));
+        spans.push(sanitized_span(&line.text, Some(text_style)));
 
         Line::from(spans)
     }
@@ -795,8 +795,7 @@ pub(super) fn rendered_file_header_line(
     nerd_fonts: bool,
     nerd_font_theme: &NerdFontTheme,
 ) -> RenderedDiffLine {
-    let display_path =
-        sanitize_terminal_text(&format_path_with_icon(path, nerd_fonts, nerd_font_theme));
+    let display_path = format_path_with_icon(path, nerd_fonts, nerd_font_theme);
     let sanitized_path = sanitize_terminal_text(path);
     let raw_text = format!("==== file {file_index}/{total_files}: {sanitized_path} ====");
     RenderedDiffLine {
@@ -809,7 +808,7 @@ pub(super) fn rendered_file_header_line(
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(": ", Style::default().fg(theme.dimmed)),
-            Span::styled(display_path, Style::default().fg(theme.text)),
+            sanitized_span(&display_path, Some(Style::default().fg(theme.text))),
             Span::styled(" ====", Style::default().fg(theme.dimmed)),
         ]),
         raw_text,
