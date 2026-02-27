@@ -13,6 +13,7 @@ It lets you review a selected commit range as one net diff across all changed fi
 - Auto-generated review task markdown for agent handoff and follow-up
 - Built-in filters/search for commits and files
 - Neovim-style `!` shell command modal with streamed stdout/stderr, persistent command history, and non-interactive execution (stdin/pager prompts disabled)
+- Terminal-safe rendering for shell/diff text (ANSI/control sequences sanitized) plus `Ctrl-l` hard refresh
 - Keyboard-first UX with mouse support (drag-select commit ranges with edge auto-scroll, wheel scroll in list panes)
 - Local performance optimizations for large diff sessions (viewport-based rendering and bounded, lazy syntax highlighting cache)
 

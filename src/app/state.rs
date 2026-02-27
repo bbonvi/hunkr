@@ -510,7 +510,7 @@ impl App {
         if let Some(bg_color) = bg {
             text_style = text_style.bg(bg_color);
         }
-        spans.push(Span::styled(line.text.clone(), text_style));
+        spans.push(Span::styled(sanitize_terminal_text(&line.text), text_style));
 
         Line::from(spans)
     }

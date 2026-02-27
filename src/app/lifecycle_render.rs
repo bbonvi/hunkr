@@ -135,6 +135,8 @@ impl App {
                 onboarding_step: first_open.then_some(OnboardingStep::ConsentProjectDataDir),
                 last_refresh: now,
                 last_relative_time_redraw: now,
+                last_terminal_clear: now,
+                terminal_clear_requested: false,
                 needs_redraw: true,
                 should_quit: false,
             },
@@ -262,6 +264,16 @@ impl App {
         self.runtime.needs_redraw
     }
 
+    pub fn take_terminal_clear_request(&mut self) -> bool {
+        std::mem::take(&mut self.runtime.terminal_clear_requested)
+    }
+
+    pub(super) fn request_terminal_clear(&mut self) {
+        self.runtime.terminal_clear_requested = true;
+        self.runtime.last_terminal_clear = Instant::now();
+        self.runtime.needs_redraw = true;
+    }
+
     pub fn mark_drawn(&mut self) {
         self.runtime.needs_redraw = false;
     }
@@ -362,6 +374,9 @@ impl App {
         }
         self.poll_shell_command_stream();
         self.poll_shell_output_flash();
+        if self.runtime.last_terminal_clear.elapsed() >= TERMINAL_CLEAR_EVERY {
+            self.request_terminal_clear();
+        }
 
         let now = Instant::now();
         if self
@@ -416,6 +431,14 @@ impl App {
     pub(super) fn handle_key(&mut self, key: KeyEvent) {
         if self.onboarding_active() {
             self.handle_onboarding_key(key);
+            return;
+        }
+
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L'))
+        {
+            self.request_terminal_clear();
+            self.runtime.status = "Terminal view refreshed".to_owned();
             return;
         }
 

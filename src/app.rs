@@ -81,6 +81,7 @@ const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
 const SHELL_HISTORY_LIMIT: usize = 1_000;
 const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
+const TERMINAL_CLEAR_EVERY: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -479,6 +480,8 @@ struct RuntimeState {
     onboarding_step: Option<OnboardingStep>,
     last_refresh: Instant,
     last_relative_time_redraw: Instant,
+    last_terminal_clear: Instant,
+    terminal_clear_requested: bool,
     needs_redraw: bool,
     should_quit: bool,
 }

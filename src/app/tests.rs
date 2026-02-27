@@ -143,6 +143,27 @@ fn truncate_uses_terminal_cell_width_for_wide_glyphs() {
 }
 
 #[test]
+fn sanitize_terminal_text_strips_csi_sequences() {
+    assert_eq!(
+        sanitize_terminal_text("ok \u{1b}[31mred\u{1b}[0m done"),
+        "ok red done"
+    );
+}
+
+#[test]
+fn sanitize_terminal_text_strips_osc_sequences() {
+    assert_eq!(
+        sanitize_terminal_text("before\u{1b}]0;title\u{7}after"),
+        "beforeafter"
+    );
+}
+
+#[test]
+fn sanitize_terminal_text_removes_other_control_bytes() {
+    assert_eq!(sanitize_terminal_text("a\u{0}\u{8}b\tc\nd"), "ab\tc\nd");
+}
+
+#[test]
 fn word_boundaries_skip_whitespace_and_symbols() {
     let text = "alpha  + beta";
     let cursor = text.len();

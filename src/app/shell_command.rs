@@ -782,7 +782,8 @@ impl App {
 
     fn append_shell_output_chunk(&mut self, chunk: &str) {
         let normalized = chunk.replace("\r\n", "\n").replace('\r', "\n");
-        self.shell_command.output_tail.push_str(&normalized);
+        let sanitized = sanitize_terminal_text(&normalized);
+        self.shell_command.output_tail.push_str(&sanitized);
 
         let mut consumed = 0usize;
         while let Some(rel_idx) = self.shell_command.output_tail[consumed..].find('\n') {

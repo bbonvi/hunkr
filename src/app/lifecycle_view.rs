@@ -1298,6 +1298,10 @@ impl App {
                 key_chip("Ctrl-d/u", theme),
                 Span::raw(" big jump in focused pane"),
             ]),
+            Line::from(vec![
+                key_chip("Ctrl-l", theme),
+                Span::raw(" hard refresh terminal view"),
+            ]),
             Line::from(""),
             Line::from(vec![
                 Span::styled("UNREVIEWED", Style::default().fg(theme.unreviewed)),

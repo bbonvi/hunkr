@@ -28,6 +28,9 @@ fn run_event_loop(
         }
 
         if app.needs_redraw() {
+            if app.take_terminal_clear_request() {
+                terminal.clear().context("failed to clear terminal")?;
+            }
             terminal
                 .draw(|frame| app.draw(frame))
                 .context("failed to render frame")?;
