@@ -409,6 +409,15 @@ pub(super) fn sanitize_terminal_text(input: &str) -> String {
     out
 }
 
+/// Build a terminal-safe span, optionally applying style in one call.
+pub(super) fn sanitized_span(text: &str, style: Option<Style>) -> Span<'static> {
+    let text = sanitize_terminal_text(text);
+    match style {
+        Some(style) => Span::styled(text, style),
+        None => Span::raw(text),
+    }
+}
+
 pub(super) fn raw_diff_text(line: &HunkLine) -> String {
     let prefix = match line.kind {
         DiffLineKind::Add => '+',

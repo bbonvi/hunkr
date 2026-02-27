@@ -10,7 +10,8 @@ use ratatui::{
 use super::super::{
     CommitRow, FocusPane, TreeRow, UiTheme, commit_selection_marker, display_width,
     format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
-    sanitize_terminal_text, status_short_label, truncate, uncommitted_badge, unpushed_marker,
+    sanitize_terminal_text, sanitized_span, status_short_label, truncate, uncommitted_badge,
+    unpushed_marker,
 };
 use super::style::{line_with_right, list_content_width, list_row_style, status_style};
 
@@ -90,7 +91,7 @@ impl<'a> ListPaneRenderer<'a> {
                 Style::default().fg(self.theme.muted),
             ),
             Span::styled("filter:", Style::default().fg(self.theme.muted)),
-            Span::styled(sanitize_terminal_text(search_display), filter_style),
+            sanitized_span(search_display, Some(filter_style)),
         ]);
         let border_style = if self.focused == FocusPane::Files {
             Style::default().fg(self.theme.focus_border)
@@ -174,7 +175,7 @@ impl<'a> ListPaneRenderer<'a> {
                 Style::default().fg(self.theme.muted),
             ),
             Span::styled("filter:", Style::default().fg(self.theme.muted)),
-            Span::styled(sanitize_terminal_text(search_display), filter_style),
+            sanitized_span(search_display, Some(filter_style)),
         ]);
         let border_style = if self.focused == FocusPane::Commits {
             Style::default().fg(self.theme.focus_border)

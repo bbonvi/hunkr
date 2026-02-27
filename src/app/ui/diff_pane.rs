@@ -9,7 +9,7 @@ use ratatui::{
 
 use super::super::{
     CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme, blend_colors,
-    comment_anchor_matches, format_path_with_icon, is_commit_anchor, sanitize_terminal_text,
+    comment_anchor_matches, format_path_with_icon, is_commit_anchor, sanitized_span,
 };
 
 #[derive(Debug, Clone)]
@@ -90,10 +90,7 @@ impl<'a> DiffPaneRenderer<'a> {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled(
-                sanitize_terminal_text(&file_label),
-                Style::default().fg(self.theme.text),
-            ),
+            sanitized_span(&file_label, Some(Style::default().fg(self.theme.text))),
             Span::raw(" "),
             Span::styled(
                 format!("{} line(s) selected", title.selected_lines),

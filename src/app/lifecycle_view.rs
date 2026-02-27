@@ -888,10 +888,7 @@ impl App {
             };
             command_lines.push(Line::from(vec![
                 Span::styled("reverse-search: ", Style::default().fg(theme.dimmed)),
-                Span::styled(
-                    sanitize_terminal_text(&search.query),
-                    Style::default().fg(theme.accent),
-                ),
+                sanitized_span(&search.query, Some(Style::default().fg(theme.accent))),
                 Span::raw(" "),
                 Span::styled(format!("({marker})"), Style::default().fg(theme.dimmed)),
             ]));
@@ -905,7 +902,7 @@ impl App {
         } else {
             command_lines.push(Line::from(vec![
                 Span::styled("$ ", Style::default().fg(theme.dimmed)),
-                Span::raw(sanitize_terminal_text(&self.shell_command.buffer)),
+                sanitized_span(&self.shell_command.buffer, None),
             ]));
         }
         frame.render_widget(
@@ -1359,7 +1356,7 @@ fn shell_prompt_line(buffer: &str, cursor: usize, theme: &UiTheme) -> Line<'stat
 
     let mut spans = Vec::new();
     spans.push(Span::styled("$ ", Style::default().fg(theme.dimmed)));
-    spans.push(Span::raw(sanitize_terminal_text(&buffer[..clamped])));
+    spans.push(sanitized_span(&buffer[..clamped], None));
 
     match cursor_char {
         Some(ch) => spans.push(Span::styled(
@@ -1377,7 +1374,7 @@ fn shell_prompt_line(buffer: &str, cursor: usize, theme: &UiTheme) -> Line<'stat
     }
 
     if cursor_end < buffer.len() {
-        spans.push(Span::raw(sanitize_terminal_text(&buffer[cursor_end..])));
+        spans.push(sanitized_span(&buffer[cursor_end..], None));
     }
     Line::from(spans)
 }
