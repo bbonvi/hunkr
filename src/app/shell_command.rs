@@ -485,6 +485,9 @@ impl App {
 
     fn handle_running_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
+                self.close_shell_command_modal();
+            }
             KeyCode::Esc => {
                 if self.shell_command.output_visual_selection.is_some() {
                     self.clear_shell_output_visual_selection();
@@ -539,6 +542,9 @@ impl App {
 
     fn handle_finished_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
+                self.close_shell_command_modal();
+            }
             KeyCode::Esc => {
                 if self.shell_command.output_visual_selection.is_some() {
                     self.clear_shell_output_visual_selection();
