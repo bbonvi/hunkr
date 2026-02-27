@@ -1,4 +1,5 @@
 use super::lifecycle_render::footer_mode_label;
+use super::lifecycle_input::clear_commit_visual_anchor;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
@@ -641,6 +642,22 @@ fn selection_copy_post_action_flashes_when_no_visual_selection() {
 fn selection_copy_post_action_clears_when_no_visual_flash_policy() {
     let action = selection_copy_post_action(false, None);
     assert_eq!(action, SelectionCopyPostAction::ClearNow);
+}
+
+#[test]
+fn clear_commit_visual_anchor_clears_existing_anchor() {
+    let mut visual_anchor = Some(7);
+
+    assert!(clear_commit_visual_anchor(&mut visual_anchor));
+    assert_eq!(visual_anchor, None);
+}
+
+#[test]
+fn clear_commit_visual_anchor_noops_when_disabled() {
+    let mut visual_anchor = None;
+
+    assert!(!clear_commit_visual_anchor(&mut visual_anchor));
+    assert_eq!(visual_anchor, None);
 }
 
 #[test]

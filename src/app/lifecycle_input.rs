@@ -620,8 +620,7 @@ impl App {
     pub(super) fn handle_commits_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => {
-                if self.commit_ui.visual_anchor.is_some() {
-                    self.commit_ui.visual_anchor = None;
+                if clear_commit_visual_anchor(&mut self.commit_ui.visual_anchor) {
                     self.runtime.status = "Commit visual range off".to_owned();
                 }
             }
@@ -642,8 +641,7 @@ impl App {
                 self.runtime.status = format!("/{}", self.search.commit_query);
             }
             KeyCode::Char('v') => {
-                if self.commit_ui.visual_anchor.is_some() {
-                    self.commit_ui.visual_anchor = None;
+                if clear_commit_visual_anchor(&mut self.commit_ui.visual_anchor) {
                     self.runtime.status = "Commit visual range off".to_owned();
                 } else {
                     self.commit_ui.visual_anchor = self.selected_commit_full_index();
@@ -670,9 +668,10 @@ impl App {
                 self.on_selection_changed();
             }
             KeyCode::Enter => {
-                if let Some(idx) = self.selected_commit_full_index() {
+                if clear_commit_visual_anchor(&mut self.commit_ui.visual_anchor) {
+                    self.runtime.status = "Commit visual range off".to_owned();
+                } else if let Some(idx) = self.selected_commit_full_index() {
                     select_only_index(&mut self.commits, idx);
-                    self.commit_ui.visual_anchor = None;
                     self.commit_ui.selection_anchor = Some(idx);
                     self.on_selection_changed();
                 }
@@ -819,4 +818,8 @@ impl App {
             _ => {}
         }
     }
+}
+
+pub(super) fn clear_commit_visual_anchor(visual_anchor: &mut Option<usize>) -> bool {
+    visual_anchor.take().is_some()
 }
