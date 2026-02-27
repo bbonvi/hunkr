@@ -386,8 +386,6 @@ impl App {
                     Span::styled(" filter ", Style::default().fg(theme.muted)),
                     key_chip("Enter", theme),
                     Span::styled(" focus diff", Style::default().fg(theme.muted)),
-                    key_chip("w", theme),
-                    Span::styled(" worktrees", Style::default().fg(theme.muted)),
                 ]),
                 FocusPane::Commits => Line::from(vec![
                     key_chip("space", theme),
@@ -400,8 +398,6 @@ impl App {
                     Span::styled(" status filter ", Style::default().fg(theme.muted)),
                     key_chip("/", theme),
                     Span::styled(" search ", Style::default().fg(theme.muted)),
-                    key_chip("w", theme),
-                    Span::styled(" worktrees", Style::default().fg(theme.muted)),
                 ]),
                 FocusPane::Diff => Line::from(vec![
                     key_chip("v", theme),
@@ -422,8 +418,6 @@ impl App {
                     Span::styled(" copy task path ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
                     Span::styled(" jump ", Style::default().fg(theme.muted)),
-                    key_chip("w", theme),
-                    Span::styled(" worktrees", Style::default().fg(theme.muted)),
                 ]),
             },
         };
@@ -1392,6 +1386,10 @@ impl App {
             Line::from(vec![
                 Span::styled("Press ", Style::default().fg(theme.muted)),
                 key_chip("?", theme),
+                Span::styled(" / ", Style::default().fg(theme.muted)),
+                key_chip("q", theme),
+                Span::styled(" / ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
                 Span::styled(" to close", Style::default().fg(theme.muted)),
             ]),
         ];

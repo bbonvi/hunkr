@@ -472,6 +472,14 @@ impl App {
             return;
         }
 
+        if self.runtime.show_help {
+            if help_overlay_close_key(key) {
+                self.runtime.show_help = false;
+                self.runtime.status = "Help overlay closed".to_owned();
+            }
+            return;
+        }
+
         if !matches!(self.preferences.input_mode, InputMode::Normal) {
             self.handle_non_normal_input(key);
             return;
@@ -536,4 +544,9 @@ impl App {
         self.diff_cache.rendered_key = None;
         self.runtime.status = format!("Theme switched to {}", self.preferences.theme_mode.label());
     }
+}
+
+pub(super) fn help_overlay_close_key(key: KeyEvent) -> bool {
+    key.modifiers == KeyModifiers::NONE
+        && matches!(key.code, KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q'))
 }

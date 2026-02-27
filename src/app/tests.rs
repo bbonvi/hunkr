@@ -1,5 +1,5 @@
 use super::lifecycle_input::clear_commit_visual_anchor;
-use super::lifecycle_render::footer_mode_label;
+use super::lifecycle_render::{footer_mode_label, help_overlay_close_key};
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
@@ -8,6 +8,7 @@ use super::ui::style::{
     pad_line_to_width, resolve_row_background, tint_line_background,
 };
 use super::*;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;
 use tempfile::tempdir;
 
@@ -701,6 +702,30 @@ fn footer_mode_label_prioritizes_modal_states() {
         footer_mode_label(InputMode::WorktreeSwitch, true, true),
         "WORKTREE"
     );
+}
+
+#[test]
+fn help_overlay_close_key_matches_modal_close_actions() {
+    assert!(help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('q'),
+        KeyModifiers::NONE
+    )));
+    assert!(help_overlay_close_key(KeyEvent::new(
+        KeyCode::Esc,
+        KeyModifiers::NONE
+    )));
+    assert!(help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('?'),
+        KeyModifiers::NONE
+    )));
+    assert!(!help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('q'),
+        KeyModifiers::CONTROL
+    )));
+    assert!(!help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('x'),
+        KeyModifiers::NONE
+    )));
 }
 
 #[test]
