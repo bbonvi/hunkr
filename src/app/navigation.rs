@@ -755,6 +755,35 @@ impl App {
             .any(|row| row.is_uncommitted && row.selected)
     }
 
+    pub(super) fn copy_diff_visual_selection(&mut self) {
+        if self.diff_ui.visual_selection.is_none() {
+            self.runtime.status = "No diff visual range to copy".to_owned();
+            return;
+        }
+        let Some((start, end)) = self.diff_selected_range() else {
+            self.runtime.status = "No diff visual range to copy".to_owned();
+            return;
+        };
+
+        let payload = self.rendered_diff[start..=end]
+            .iter()
+            .map(|line| line.raw_text.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        match crate::clipboard::copy_to_clipboard_with_fallbacks(&payload) {
+            Ok(backend) => {
+                self.runtime.status = format!(
+                    "Copied {} diff line(s) via {backend}",
+                    end.saturating_sub(start) + 1
+                );
+            }
+            Err(err) => {
+                self.runtime.status = format!("Clipboard unavailable for diff selection ({err:#})");
+            }
+        }
+    }
+
     /// Copies the active review-task markdown path to clipboard for quick sharing.
     pub(super) fn copy_review_tasks_path(&mut self) {
         let report_path = format_path_with_home_tilde(self.comments.report_path());

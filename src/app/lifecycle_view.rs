@@ -284,16 +284,33 @@ impl App {
                 key_chip("Esc", theme),
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
             ]),
-            InputMode::ShellCommand => Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" run/continue ", Style::default().fg(theme.muted)),
-                key_chip("Ctrl-r", theme),
-                Span::styled(" history search ", Style::default().fg(theme.muted)),
-                key_chip("Up/Down", theme),
-                Span::styled(" history/scroll ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" close shell", Style::default().fg(theme.muted)),
-            ]),
+            InputMode::ShellCommand => {
+                if self.shell_command.running.is_some() || self.shell_command.finished.is_some() {
+                    Line::from(vec![
+                        key_chip("j/k", theme),
+                        Span::styled(" move ", Style::default().fg(theme.muted)),
+                        key_chip("Ctrl-d/u", theme),
+                        Span::styled(" jump ", Style::default().fg(theme.muted)),
+                        key_chip("v", theme),
+                        Span::styled(" range ", Style::default().fg(theme.muted)),
+                        key_chip("y", theme),
+                        Span::styled(" copy output ", Style::default().fg(theme.muted)),
+                        key_chip("Esc", theme),
+                        Span::styled(" close shell", Style::default().fg(theme.muted)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        key_chip("Enter", theme),
+                        Span::styled(" run ", Style::default().fg(theme.muted)),
+                        key_chip("Ctrl-r", theme),
+                        Span::styled(" history search ", Style::default().fg(theme.muted)),
+                        key_chip("Up/Down", theme),
+                        Span::styled(" history ", Style::default().fg(theme.muted)),
+                        key_chip("Esc", theme),
+                        Span::styled(" close shell", Style::default().fg(theme.muted)),
+                    ])
+                }
+            }
             InputMode::DiffSearch => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" search ", Style::default().fg(theme.muted)),
@@ -345,6 +362,8 @@ impl App {
                     key_chip("e/D", theme),
                     Span::styled(" edit/delete ", Style::default().fg(theme.muted)),
                     key_chip("y", theme),
+                    Span::styled(" copy visual ", Style::default().fg(theme.muted)),
+                    key_chip("Y", theme),
                     Span::styled(" copy task path ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
                     Span::styled(" jump", Style::default().fg(theme.muted)),
@@ -743,6 +762,8 @@ impl App {
         });
         let border_color = if command_failed {
             theme.unreviewed
+        } else if self.shell_command.finished.is_some() {
+            blend_colors(theme.border, theme.reviewed, 116)
         } else {
             theme.focus_border
         };
@@ -832,7 +853,9 @@ impl App {
         frame.render_widget(command_block, sections[1]);
 
         let mut command_lines = Vec::new();
-        if let Some(search) = self.shell_command.reverse_search.as_ref() {
+        let command_editable =
+            self.shell_command.running.is_none() && self.shell_command.finished.is_none();
+        if command_editable && let Some(search) = self.shell_command.reverse_search.as_ref() {
             let match_count = search.match_indexes.len();
             let marker = if match_count == 0 {
                 "no match".to_owned()
@@ -846,11 +869,18 @@ impl App {
                 Span::styled(format!("({marker})"), Style::default().fg(theme.dimmed)),
             ]));
         }
-        command_lines.push(shell_prompt_line(
-            &self.shell_command.buffer,
-            self.shell_command.cursor,
-            theme,
-        ));
+        if command_editable {
+            command_lines.push(shell_prompt_line(
+                &self.shell_command.buffer,
+                self.shell_command.cursor,
+                theme,
+            ));
+        } else {
+            command_lines.push(Line::from(vec![
+                Span::styled("$ ", Style::default().fg(theme.dimmed)),
+                Span::raw(self.shell_command.buffer.clone()),
+            ]));
+        }
         frame.render_widget(
             Paragraph::new(command_lines).style(Style::default().fg(theme.text)),
             command_inner,
@@ -867,45 +897,55 @@ impl App {
         self.shell_command.output_viewport = output_inner.height as usize;
         frame.render_widget(output_block, sections[2]);
 
-        let mut output_rows = Vec::<String>::new();
-        if let Some(command) = self.shell_command.active_command.as_deref() {
-            output_rows.push(format!("$ {command}"));
-        }
-        output_rows.extend(self.shell_command.output_lines.iter().cloned());
-        if !self.shell_command.output_tail.is_empty() {
-            output_rows.push(self.shell_command.output_tail.clone());
-        }
-        if let Some(result) = self.shell_command.finished.as_ref() {
-            output_rows.push(String::new());
-            let prompt = match result.exit_status.code() {
-                Some(0) => "Press Enter to continue".to_owned(),
-                Some(code) => format!("Exit code {code}. Press Enter to continue"),
-                None => "Process terminated. Press Enter to continue".to_owned(),
-            };
-            output_rows.push(prompt);
-        }
-        if output_rows.is_empty() {
-            output_rows.push("Run any shell command and press Enter.".to_owned());
-        }
+        let output_rows = self.shell_output_rows();
 
         if self.shell_command.output_follow {
             let max_scroll = self.shell_output_max_scroll();
             self.set_shell_output_scroll(max_scroll);
         }
-        let max_scroll = self.shell_output_max_scroll();
-        self.shell_command.output_scroll = self.shell_command.output_scroll.min(max_scroll);
-
+        self.sync_shell_output_visual_bounds();
         let viewport_rows = output_inner.height.max(1) as usize;
-        let visible_rows = output_rows
-            .iter()
-            .skip(self.shell_command.output_scroll)
-            .take(viewport_rows)
-            .map(|row| Line::from(row.clone()))
-            .collect::<Vec<_>>();
-        frame.render_widget(
-            Paragraph::new(visible_rows).style(Style::default().fg(theme.text)),
-            output_inner,
-        );
+
+        if output_rows.is_empty() {
+            frame.render_widget(
+                Paragraph::new(vec![Line::from("Run any shell command and press Enter.")])
+                    .style(Style::default().fg(theme.muted)),
+                output_inner,
+            );
+        } else {
+            self.shell_command.output_cursor = self
+                .shell_command
+                .output_cursor
+                .min(output_rows.len().saturating_sub(1));
+            let max_scroll = self.shell_output_max_scroll();
+            self.shell_command.output_scroll = self.shell_command.output_scroll.min(max_scroll);
+            let visual_range = self.shell_output_visual_range();
+
+            let visible_rows = output_rows
+                .iter()
+                .enumerate()
+                .skip(self.shell_command.output_scroll)
+                .take(viewport_rows)
+                .map(|(idx, row)| {
+                    let in_visual =
+                        visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
+                    let mut style = Style::default().fg(theme.text);
+                    if in_visual {
+                        style = style.bg(theme.visual_bg);
+                    }
+                    if idx == self.shell_command.output_cursor {
+                        let cursor_bg = if in_visual {
+                            blend_colors(theme.visual_bg, theme.cursor_bg, 122)
+                        } else {
+                            theme.cursor_bg
+                        };
+                        style = style.bg(cursor_bg);
+                    }
+                    Line::from(Span::styled(row.clone(), style))
+                })
+                .collect::<Vec<_>>();
+            frame.render_widget(Paragraph::new(visible_rows), output_inner);
+        }
 
         if sections[2].width >= 3 && sections[2].height >= 3 && viewport_rows > 0 {
             let total_rows = output_rows.len().max(1);
@@ -935,14 +975,22 @@ impl App {
                 key_chip("Esc", theme),
                 Span::styled(" close  ", Style::default().fg(theme.muted)),
                 key_chip("Up/Down", theme),
-                Span::styled(" scroll output", Style::default().fg(theme.muted)),
+                Span::styled(" move  ", Style::default().fg(theme.muted)),
+                key_chip("v", theme),
+                Span::styled(" range  ", Style::default().fg(theme.muted)),
+                key_chip("y", theme),
+                Span::styled(" copy output", Style::default().fg(theme.muted)),
             ])
         } else if self.shell_command.finished.is_some() {
             Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" continue  ", Style::default().fg(theme.muted)),
                 key_chip("Esc", theme),
-                Span::styled(" close", Style::default().fg(theme.muted)),
+                Span::styled(" close  ", Style::default().fg(theme.muted)),
+                key_chip("v", theme),
+                Span::styled(" range  ", Style::default().fg(theme.muted)),
+                key_chip("y", theme),
+                Span::styled(" copy output", Style::default().fg(theme.muted)),
             ])
         } else {
             Line::from(vec![
@@ -1211,6 +1259,10 @@ impl App {
             ]),
             Line::from(vec![
                 key_chip("y", theme),
+                Span::raw(" copy visual selection"),
+            ]),
+            Line::from(vec![
+                key_chip("Y", theme),
                 Span::raw(" copy review-task file path"),
             ]),
             Line::from(vec![key_chip("t", theme), Span::raw(" toggle theme")]),

@@ -801,6 +801,11 @@ impl App {
                 self.start_comment_edit_mode();
             }
             KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => {
+                self.copy_diff_visual_selection();
+            }
+            KeyCode::Char('Y')
+                if key.modifiers == KeyModifiers::SHIFT || key.modifiers == KeyModifiers::NONE =>
+            {
                 self.copy_review_tasks_path();
             }
             KeyCode::Char('D') => {

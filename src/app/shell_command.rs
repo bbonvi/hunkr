@@ -262,19 +262,40 @@ impl App {
         self.reset_shell_command_editor();
     }
 
-    pub(super) fn shell_output_total_lines(&self) -> usize {
-        let mut total = 0usize;
-        if self.shell_command.active_command.is_some() {
-            total = total.saturating_add(1);
+    pub(super) fn shell_output_rows(&self) -> Vec<String> {
+        let mut rows = Vec::<String>::new();
+        if let Some(command) = self.shell_command.active_command.as_deref() {
+            rows.push(format!("$ {command}"));
         }
-        total = total.saturating_add(self.shell_command.output_lines.len());
+        rows.extend(self.shell_command.output_lines.iter().cloned());
         if !self.shell_command.output_tail.is_empty() {
-            total = total.saturating_add(1);
+            rows.push(self.shell_command.output_tail.clone());
         }
-        if self.shell_command.finished.is_some() {
-            total = total.saturating_add(2);
+        rows
+    }
+
+    pub(super) fn shell_output_total_lines(&self) -> usize {
+        self.shell_output_rows().len()
+    }
+
+    pub(super) fn shell_output_visual_range(&self) -> Option<(usize, usize)> {
+        let len = self.shell_output_total_lines();
+        if len == 0 {
+            return None;
         }
-        total
+        let max_idx = len - 1;
+        let cursor = self.shell_command.output_cursor.min(max_idx);
+        if let Some(visual) = self.shell_command.output_visual_selection.as_ref() {
+            let anchor = visual.anchor.min(max_idx);
+            Some((min(anchor, cursor), max(anchor, cursor)))
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn shell_output_copy_payload(&self) -> Option<String> {
+        let rows = self.shell_output_rows();
+        shell_output_copy_payload_for_rows(&rows, self.shell_output_visual_range())
     }
 
     pub(super) fn shell_output_max_scroll(&self) -> usize {
@@ -304,17 +325,133 @@ impl App {
         self.shell_command.output_follow = next >= max_scroll;
     }
 
+    pub(super) fn move_shell_output_cursor(&mut self, delta: isize) {
+        let len = self.shell_output_total_lines();
+        if len == 0 {
+            self.shell_command.output_cursor = 0;
+            return;
+        }
+
+        let next = (self.shell_command.output_cursor as isize + delta).clamp(0, len as isize - 1);
+        self.shell_command.output_cursor = next as usize;
+        self.ensure_shell_output_cursor_visible();
+    }
+
+    pub(super) fn set_shell_output_cursor(&mut self, idx: usize) {
+        let len = self.shell_output_total_lines();
+        if len == 0 {
+            self.shell_command.output_cursor = 0;
+            return;
+        }
+        self.shell_command.output_cursor = idx.min(len - 1);
+        self.ensure_shell_output_cursor_visible();
+    }
+
+    pub(super) fn ensure_shell_output_cursor_visible(&mut self) {
+        let len = self.shell_output_total_lines();
+        if len == 0 {
+            self.shell_command.output_scroll = 0;
+            self.shell_command.output_follow = true;
+            return;
+        }
+        let visible = self.shell_command.output_viewport.max(1);
+        if self.shell_command.output_cursor < self.shell_command.output_scroll {
+            self.shell_command.output_scroll = self.shell_command.output_cursor;
+        } else if self.shell_command.output_cursor
+            >= self.shell_command.output_scroll.saturating_add(visible)
+        {
+            self.shell_command.output_scroll = self
+                .shell_command
+                .output_cursor
+                .saturating_add(1)
+                .saturating_sub(visible);
+        }
+        self.shell_command.output_scroll = self.shell_command.output_scroll.min(len - 1);
+        self.shell_command.output_follow =
+            self.shell_command.output_scroll >= self.shell_output_max_scroll();
+    }
+
+    fn clear_shell_output_visual_selection(&mut self) {
+        self.shell_command.output_visual_selection = None;
+        self.shell_command.output_mouse_anchor = None;
+    }
+
+    pub(super) fn sync_shell_output_visual_bounds(&mut self) {
+        let Some(visual) = self.shell_command.output_visual_selection.as_ref() else {
+            return;
+        };
+        let len = self.shell_output_total_lines();
+        if len == 0 {
+            self.shell_command.output_visual_selection = None;
+            return;
+        }
+        let max_idx = len - 1;
+        if visual.anchor > max_idx {
+            self.shell_command.output_visual_selection = Some(ShellOutputVisualSelection {
+                anchor: max_idx,
+                origin: visual.origin,
+            });
+        }
+    }
+
     pub(super) fn handle_shell_command_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         let Some(output_rect) = self.shell_command.output_rect else {
             return;
         };
         if !contains(output_rect, mouse.column, mouse.row) {
+            if matches!(mouse.kind, MouseEventKind::Up(MouseButton::Left)) {
+                self.shell_command.output_mouse_anchor = None;
+            }
             return;
         }
 
         match mouse.kind {
             MouseEventKind::ScrollUp => self.scroll_shell_output_lines(-3),
             MouseEventKind::ScrollDown => self.scroll_shell_output_lines(3),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(idx) = shell_output_index_at(
+                    output_rect,
+                    mouse.column,
+                    mouse.row,
+                    self.shell_command.output_scroll,
+                    self.shell_output_total_lines(),
+                ) {
+                    self.set_shell_output_cursor(idx);
+                    self.clear_shell_output_visual_selection();
+                    self.shell_command.output_mouse_anchor = Some(idx);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(idx) = shell_output_index_at(
+                    output_rect,
+                    mouse.column,
+                    mouse.row,
+                    self.shell_command.output_scroll,
+                    self.shell_output_total_lines(),
+                ) {
+                    self.set_shell_output_cursor(idx);
+                    if let Some(anchor) = self.shell_command.output_mouse_anchor {
+                        self.shell_command.output_visual_selection = (anchor
+                            != self.shell_command.output_cursor)
+                            .then_some(ShellOutputVisualSelection {
+                                anchor,
+                                origin: ShellOutputVisualOrigin::Mouse,
+                            });
+                    }
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some(idx) = shell_output_index_at(
+                    output_rect,
+                    mouse.column,
+                    mouse.row,
+                    self.shell_command.output_scroll,
+                    self.shell_output_total_lines(),
+                ) {
+                    self.set_shell_output_cursor(idx);
+                }
+                self.shell_command.output_mouse_anchor = None;
+            }
             _ => {}
         }
     }
@@ -322,41 +459,91 @@ impl App {
     fn handle_running_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc => self.close_shell_command_modal(),
-            KeyCode::Up => self.scroll_shell_output_lines(-1),
-            KeyCode::Down => self.scroll_shell_output_lines(1),
+            KeyCode::Up | KeyCode::Char('k') => self.move_shell_output_cursor(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.move_shell_output_cursor(1),
+            KeyCode::Char('u') | KeyCode::Char('U')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, -0.5);
+                self.move_shell_output_cursor(step);
+            }
+            KeyCode::Char('d') | KeyCode::Char('D')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, 0.5);
+                self.move_shell_output_cursor(step);
+            }
             KeyCode::PageUp => {
-                self.scroll_shell_output_lines(-(self.shell_command.output_viewport as isize))
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, -1.0);
+                self.move_shell_output_cursor(step);
             }
             KeyCode::PageDown => {
-                self.scroll_shell_output_lines(self.shell_command.output_viewport as isize)
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, 1.0);
+                self.move_shell_output_cursor(step);
             }
-            KeyCode::Home => self.set_shell_output_scroll(0),
-            KeyCode::End => {
-                let max_scroll = self.shell_output_max_scroll();
-                self.set_shell_output_scroll(max_scroll);
+            KeyCode::Char('g') => self.set_shell_output_cursor(0),
+            KeyCode::Char('G') => self.set_shell_output_cursor(usize::MAX),
+            KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers == KeyModifiers::NONE => {
+                if self.shell_command.output_visual_selection.is_some() {
+                    self.clear_shell_output_visual_selection();
+                    self.runtime.status = "Shell output visual range off".to_owned();
+                } else {
+                    self.shell_command.output_visual_selection = Some(ShellOutputVisualSelection {
+                        anchor: self.shell_command.output_cursor,
+                        origin: ShellOutputVisualOrigin::Keyboard,
+                    });
+                    self.runtime.status = "Shell output visual range on".to_owned();
+                }
             }
+            KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => self.copy_shell_output(),
             _ => {}
         }
+        self.sync_shell_output_visual_bounds();
     }
 
     fn handle_finished_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Enter => self.close_shell_command_modal(),
-            KeyCode::Up => self.scroll_shell_output_lines(-1),
-            KeyCode::Down => self.scroll_shell_output_lines(1),
+            KeyCode::Up | KeyCode::Char('k') => self.move_shell_output_cursor(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.move_shell_output_cursor(1),
+            KeyCode::Char('u') | KeyCode::Char('U')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, -0.5);
+                self.move_shell_output_cursor(step);
+            }
+            KeyCode::Char('d') | KeyCode::Char('D')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, 0.5);
+                self.move_shell_output_cursor(step);
+            }
             KeyCode::PageUp => {
-                self.scroll_shell_output_lines(-(self.shell_command.output_viewport as isize))
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, -1.0);
+                self.move_shell_output_cursor(step);
             }
             KeyCode::PageDown => {
-                self.scroll_shell_output_lines(self.shell_command.output_viewport as isize)
+                let step = page_step(self.shell_command.output_viewport as u16 + 2, 1.0);
+                self.move_shell_output_cursor(step);
             }
-            KeyCode::Home => self.set_shell_output_scroll(0),
-            KeyCode::End => {
-                let max_scroll = self.shell_output_max_scroll();
-                self.set_shell_output_scroll(max_scroll);
+            KeyCode::Char('g') => self.set_shell_output_cursor(0),
+            KeyCode::Char('G') => self.set_shell_output_cursor(usize::MAX),
+            KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers == KeyModifiers::NONE => {
+                if self.shell_command.output_visual_selection.is_some() {
+                    self.clear_shell_output_visual_selection();
+                    self.runtime.status = "Shell output visual range off".to_owned();
+                } else {
+                    self.shell_command.output_visual_selection = Some(ShellOutputVisualSelection {
+                        anchor: self.shell_command.output_cursor,
+                        origin: ShellOutputVisualOrigin::Keyboard,
+                    });
+                    self.runtime.status = "Shell output visual range on".to_owned();
+                }
             }
+            KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => self.copy_shell_output(),
             _ => {}
         }
+        self.sync_shell_output_visual_bounds();
     }
 
     fn handle_shell_reverse_search_input(&mut self, key: KeyEvent) {
@@ -519,6 +706,8 @@ impl App {
         self.shell_command.active_command = Some(command.clone());
         self.shell_command.output_lines.clear();
         self.shell_command.output_tail.clear();
+        self.shell_command.output_cursor = 0;
+        self.clear_shell_output_visual_selection();
         self.shell_command.output_scroll = 0;
         self.shell_command.output_follow = true;
         self.shell_command.finished = None;
@@ -527,6 +716,7 @@ impl App {
             Ok(running) => {
                 self.shell_command.running = Some(running);
                 self.shell_command.cursor = self.shell_command.buffer.len();
+                self.set_shell_output_cursor(usize::MAX);
             }
             Err(err) => {
                 self.shell_command
@@ -552,6 +742,7 @@ impl App {
         if self.shell_command.output_follow {
             self.snap_shell_output_to_bottom();
         }
+        self.sync_shell_output_visual_bounds();
     }
 
     fn finalize_shell_command(&mut self) {
@@ -580,6 +771,7 @@ impl App {
         if self.shell_command.output_follow {
             self.snap_shell_output_to_bottom();
         }
+        self.sync_shell_output_visual_bounds();
     }
 
     fn stop_shell_process(&mut self) {
@@ -607,6 +799,9 @@ impl App {
         self.shell_command.active_command = None;
         self.shell_command.output_lines.clear();
         self.shell_command.output_tail.clear();
+        self.shell_command.output_cursor = 0;
+        self.shell_command.output_visual_selection = None;
+        self.shell_command.output_mouse_anchor = None;
         self.shell_command.output_scroll = 0;
         self.shell_command.output_follow = true;
         self.shell_command.finished = None;
@@ -632,7 +827,25 @@ impl App {
     fn snap_shell_output_to_bottom(&mut self) {
         let max_scroll = self.shell_output_max_scroll();
         self.shell_command.output_scroll = max_scroll;
+        let len = self.shell_output_total_lines();
+        self.shell_command.output_cursor = len.saturating_sub(1);
         self.shell_command.output_follow = true;
+    }
+
+    fn copy_shell_output(&mut self) {
+        let Some(payload) = self.shell_output_copy_payload() else {
+            self.runtime.status = "No shell output to copy".to_owned();
+            return;
+        };
+        let line_count = payload.lines().count().max(1);
+        match crate::clipboard::copy_to_clipboard_with_fallbacks(&payload) {
+            Ok(backend) => {
+                self.runtime.status = format!("Copied {line_count} shell line(s) via {backend}");
+            }
+            Err(err) => {
+                self.runtime.status = format!("Clipboard unavailable for shell output ({err:#})");
+            }
+        }
     }
 
     fn reconcile_repository_after_shell_command(&mut self) {
@@ -672,6 +885,37 @@ impl App {
                 format!("repository switched: {previous_branch} -> {next_branch}");
         }
     }
+}
+
+fn shell_output_index_at(
+    rect: ratatui::layout::Rect,
+    x: u16,
+    y: u16,
+    scroll: usize,
+    total_lines: usize,
+) -> Option<usize> {
+    if total_lines == 0 || !contains(rect, x, y) {
+        return None;
+    }
+    let row = y.saturating_sub(rect.y) as usize;
+    Some((scroll + row).min(total_lines - 1))
+}
+
+pub(super) fn shell_output_copy_payload_for_rows(
+    rows: &[String],
+    visual_range: Option<(usize, usize)>,
+) -> Option<String> {
+    if rows.is_empty() {
+        return None;
+    }
+    let selected = if let Some((start, end)) = visual_range {
+        let end = end.min(rows.len().saturating_sub(1));
+        let start = start.min(end);
+        rows[start..=end].to_vec()
+    } else {
+        rows.to_vec()
+    };
+    Some(selected.join("\n"))
 }
 
 fn spawn_shell_command(command: &str) -> anyhow::Result<RunningShellCommand> {

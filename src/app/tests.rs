@@ -1,4 +1,5 @@
 use super::lifecycle_render::footer_mode_label;
+use super::shell_command::shell_output_copy_payload_for_rows;
 use super::ui::diff_pane::{scrollbar_thumb, tint_line_background};
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{line_with_right, list_content_width, list_row_style};
@@ -462,6 +463,32 @@ fn diff_index_matches_list_behavior_without_sticky_banner() {
     assert_eq!(diff_index_at(1, rect, 20, &[]), Some(20));
     assert_eq!(diff_index_at(2, rect, 20, &[]), Some(21));
     assert_eq!(diff_index_at(7, rect, 20, &[]), None);
+}
+
+#[test]
+fn shell_output_copy_payload_uses_visual_range_when_present() {
+    let rows = vec![
+        "$ git status".to_owned(),
+        "On branch main".to_owned(),
+        "nothing to commit".to_owned(),
+    ];
+    let payload = shell_output_copy_payload_for_rows(&rows, Some((1, 2))).expect("visual payload");
+    assert_eq!(payload, "On branch main\nnothing to commit");
+}
+
+#[test]
+fn shell_output_copy_payload_defaults_to_all_rows() {
+    let rows = vec!["line a".to_owned(), "line b".to_owned()];
+    let payload = shell_output_copy_payload_for_rows(&rows, None).expect("full payload");
+    assert_eq!(payload, "line a\nline b");
+}
+
+#[test]
+fn shell_output_copy_payload_clamps_out_of_bounds_visual_range() {
+    let rows = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+    let payload =
+        shell_output_copy_payload_for_rows(&rows, Some((1, 99))).expect("clamped payload");
+    assert_eq!(payload, "b\nc");
 }
 
 #[test]

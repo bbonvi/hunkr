@@ -416,12 +416,27 @@ struct ShellCommandState {
     active_command: Option<String>,
     output_lines: Vec<String>,
     output_tail: String,
+    output_cursor: usize,
+    output_visual_selection: Option<ShellOutputVisualSelection>,
+    output_mouse_anchor: Option<usize>,
     output_scroll: usize,
     output_viewport: usize,
     output_follow: bool,
     output_rect: Option<ratatui::layout::Rect>,
     running: Option<RunningShellCommand>,
     finished: Option<ShellCommandResult>,
+}
+
+/// Visual selection state in shell output panel.
+struct ShellOutputVisualSelection {
+    anchor: usize,
+    origin: ShellOutputVisualOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellOutputVisualOrigin {
+    Keyboard,
+    Mouse,
 }
 
 /// Reverse-search state for shell history (`Ctrl-r`).
