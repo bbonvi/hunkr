@@ -96,32 +96,6 @@ pub(in crate::app) fn status_style(status: ReviewStatus, theme: &UiTheme) -> Sty
     }
 }
 
-pub(in crate::app) fn list_row_style(
-    selected: bool,
-    cursor: bool,
-    cursor_focused: bool,
-    selected_bg: Option<Color>,
-    theme: &UiTheme,
-) -> Style {
-    let selected_bg = selected_bg.unwrap_or(theme.cursor_bg);
-    let cursor_bg = if cursor_focused {
-        theme.visual_bg
-    } else {
-        theme.cursor_bg
-    };
-
-    if let Some(bg) = resolve_row_background(
-        selected,
-        cursor,
-        selected_bg,
-        cursor_bg,
-        CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
-    ) {
-        return Style::default().bg(bg);
-    }
-    Style::default()
-}
-
 pub(in crate::app) fn line_with_right(
     left: String,
     left_style: Style,

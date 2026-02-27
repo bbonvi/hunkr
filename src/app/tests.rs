@@ -4,7 +4,7 @@ use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{
     CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
-    list_row_style, pad_line_to_width, resolve_row_background, tint_line_background,
+    pad_line_to_width, resolve_row_background, tint_line_background,
 };
 use super::*;
 use std::fs;
@@ -1338,30 +1338,6 @@ fn compose_uncommitted_line_uses_nerd_draft_badge() {
 
     assert!(flattened.contains("[ DRAFT]"));
     assert!(flattened.ends_with("draft"));
-}
-
-#[test]
-fn list_row_style_layers_cursor_over_selection() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let selected_only = list_row_style(true, false, false, Some(theme.cursor_bg), &theme);
-    let cursor_only = list_row_style(false, true, true, Some(theme.cursor_bg), &theme);
-    let selected_cursor = list_row_style(true, true, true, Some(theme.cursor_bg), &theme);
-
-    assert_eq!(selected_only.bg, Some(theme.cursor_bg));
-    assert_eq!(cursor_only.bg, Some(theme.visual_bg));
-    assert!(selected_cursor.bg.is_some_and(|bg| bg != theme.cursor_bg));
-}
-
-#[test]
-fn list_row_style_uses_focus_sensitive_cursor_colors() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let focused = list_row_style(false, true, true, None, &theme);
-    let unfocused = list_row_style(false, true, false, None, &theme);
-
-    assert_eq!(focused.bg, Some(theme.visual_bg));
-    assert_eq!(unfocused.bg, Some(theme.cursor_bg));
-    assert!(!focused.add_modifier.contains(Modifier::BOLD));
-    assert!(!unfocused.add_modifier.contains(Modifier::BOLD));
 }
 
 #[test]

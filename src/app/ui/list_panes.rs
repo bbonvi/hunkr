@@ -13,7 +13,9 @@ use super::super::{
     sanitize_terminal_text, sanitized_span, status_short_label, truncate, uncommitted_badge,
     unpushed_marker,
 };
-use super::style::{line_with_right, list_content_width, list_row_style, status_style};
+use super::style::{
+    CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width, status_style,
+};
 
 /// Renders commit/file list panes so App keeps high-level orchestration only.
 pub(in crate::app) struct ListPaneRenderer<'a> {
@@ -101,6 +103,7 @@ impl<'a> ListPaneRenderer<'a> {
 
         let highlight_symbol = list_highlight_symbol(self.nerd_fonts);
         let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
+        let line_width = width as u16;
         let cursor_idx = file_list_state.selected();
         let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts);
 
@@ -108,15 +111,22 @@ impl<'a> ListPaneRenderer<'a> {
             .iter()
             .enumerate()
             .map(|(idx, row)| {
-                let line = presenter.file_row_line(row);
                 let is_cursor = cursor_idx == Some(idx);
-                ListItem::new(line).style(list_row_style(
+                let cursor_bg = if self.focused == FocusPane::Files {
+                    self.theme.visual_bg
+                } else {
+                    self.theme.cursor_bg
+                };
+                let line = apply_row_highlight(
+                    &presenter.file_row_line(row),
+                    line_width,
                     false,
                     is_cursor,
-                    self.focused == FocusPane::Files,
-                    None,
-                    self.theme,
-                ))
+                    self.theme.cursor_bg,
+                    cursor_bg,
+                    CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
+                );
+                ListItem::new(line).style(Style::default())
             })
             .collect();
 
@@ -185,21 +195,29 @@ impl<'a> ListPaneRenderer<'a> {
 
         let highlight_symbol = list_highlight_symbol(self.nerd_fonts);
         let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
+        let line_width = width as u16;
         let cursor_idx = commit_list_state.selected();
         let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts);
         let items: Vec<ListItem<'static>> = commits
             .iter()
             .enumerate()
             .map(|(idx, row)| {
-                let line = presenter.commit_row_line(row);
                 let is_cursor = cursor_idx == Some(idx);
-                ListItem::new(line).style(list_row_style(
+                let cursor_bg = if self.focused == FocusPane::Commits {
+                    self.theme.visual_bg
+                } else {
+                    self.theme.cursor_bg
+                };
+                let line = apply_row_highlight(
+                    &presenter.commit_row_line(row),
+                    line_width,
                     row.selected,
                     is_cursor,
-                    self.focused == FocusPane::Commits,
-                    Some(self.theme.cursor_bg),
-                    self.theme,
-                ))
+                    self.theme.cursor_bg,
+                    cursor_bg,
+                    CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
+                );
+                ListItem::new(line).style(Style::default())
             })
             .collect();
 
