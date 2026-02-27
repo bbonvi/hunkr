@@ -727,16 +727,8 @@ impl App {
             return;
         };
 
-        let needle = state.query.to_ascii_lowercase();
-        state.match_indexes = self
-            .shell_command
-            .history
-            .iter()
-            .enumerate()
-            .filter(|(_, cmd)| needle.is_empty() || cmd.to_ascii_lowercase().contains(&needle))
-            .map(|(idx, _)| idx)
-            .rev()
-            .collect();
+        state.match_indexes =
+            reverse_search_match_indexes(&self.shell_command.history, &state.query);
 
         if state.match_indexes.is_empty() {
             state.match_cursor = 0;
@@ -1101,6 +1093,21 @@ impl App {
     }
 }
 
+fn reverse_search_match_indexes(history: &VecDeque<String>, query: &str) -> Vec<usize> {
+    let needle = query.to_ascii_lowercase();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+
+    history
+        .iter()
+        .enumerate()
+        .filter(|(_, command)| command.to_ascii_lowercase().contains(&needle))
+        .map(|(idx, _)| idx)
+        .rev()
+        .collect()
+}
+
 pub(super) fn shell_output_index_at(
     rect: ratatui::layout::Rect,
     x: u16,
@@ -1279,5 +1286,27 @@ mod tests {
                 .and_then(|v| v.as_deref()),
             Some(OsStr::new("0"))
         );
+    }
+
+    #[test]
+    fn reverse_search_match_indexes_returns_empty_for_empty_query() {
+        let history = std::collections::VecDeque::from(vec![
+            "git status".to_owned(),
+            "cargo test".to_owned(),
+        ]);
+
+        assert!(reverse_search_match_indexes(&history, "").is_empty());
+    }
+
+    #[test]
+    fn reverse_search_match_indexes_is_case_insensitive_and_newest_first() {
+        let history = std::collections::VecDeque::from(vec![
+            "git status".to_owned(),
+            "cargo TEST".to_owned(),
+            "cargo fmt".to_owned(),
+        ]);
+
+        assert_eq!(reverse_search_match_indexes(&history, "test"), vec![1]);
+        assert_eq!(reverse_search_match_indexes(&history, "cargo"), vec![2, 1]);
     }
 }
