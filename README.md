@@ -30,7 +30,6 @@ It lets you review a selected commit range as one net diff across all changed fi
 ## Worktree Support
 
 - Open the worktree switcher in-app and move between linked worktrees without restarting the session.
-- Use `w` to open the switcher, `Enter` to jump, `/` to start filtering, `r` to refresh, and `q` to close.
 - Worktree entries are ordered by latest commit activity (freshest first) while keeping the main repo worktree pinned at the top.
 - Review metadata remains anchored to the launch workspace `.hunkr/` directory, so commit statuses/comments stay shared inside that session.
 
