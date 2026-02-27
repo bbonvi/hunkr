@@ -1,8 +1,10 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
+    fs,
     path::{Path, PathBuf},
     process::Command,
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, anyhow};
@@ -18,6 +20,7 @@ use crate::model::{
 pub struct GitService {
     repo: Repository,
     root: PathBuf,
+    main_root: PathBuf,
     branch: String,
 }
 
@@ -51,8 +54,18 @@ impl GitService {
             .workdir()
             .map(Path::to_path_buf)
             .ok_or_else(|| anyhow!("repository is bare; workdir is required"))?;
+        let main_root = repo
+            .commondir()
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| root.clone());
         let branch = current_branch_name(&repo)?;
-        Ok(Self { repo, root, branch })
+        Ok(Self {
+            repo,
+            root,
+            main_root,
+            branch,
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -76,7 +89,9 @@ impl GitService {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        parse_worktree_list_porcelain(&output.stdout)
+        let mut items = parse_worktree_list_porcelain(&output.stdout)?;
+        sort_worktrees(&mut items, &self.main_root);
+        Ok(items)
     }
 
     pub fn load_first_parent_history(&self, max: usize) -> anyhow::Result<Vec<CommitInfo>> {
@@ -600,6 +615,41 @@ fn parse_worktree_list_porcelain(payload: &[u8]) -> anyhow::Result<Vec<WorktreeI
 fn parse_optional_worktree_message(field_suffix: &str) -> Option<String> {
     let message = field_suffix.trim_start();
     (!message.is_empty()).then(|| message.to_owned())
+}
+
+fn sort_worktrees(items: &mut [WorktreeInfo], main_root: &Path) {
+    sort_worktrees_with(items, main_root, worktree_timestamp);
+}
+
+fn sort_worktrees_with<F>(items: &mut [WorktreeInfo], main_root: &Path, mut timestamp_of: F)
+where
+    F: FnMut(&Path) -> Option<i64>,
+{
+    items.sort_by(|left, right| {
+        let left_main = left.path == main_root;
+        let right_main = right.path == main_root;
+        if left_main != right_main {
+            return right_main.cmp(&left_main);
+        }
+
+        let left_ts = timestamp_of(&left.path);
+        let right_ts = timestamp_of(&right.path);
+        right_ts
+            .cmp(&left_ts)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+}
+
+fn worktree_timestamp(path: &Path) -> Option<i64> {
+    let git_path = path.join(".git");
+    let metadata = fs::metadata(&git_path)
+        .or_else(|_| fs::metadata(path))
+        .ok()?;
+    let modified = metadata.modified().ok()?;
+    modified
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|delta| i64::try_from(delta.as_secs()).ok())
 }
 
 fn selection_line_signatures(lines: &[String]) -> BTreeSet<String> {

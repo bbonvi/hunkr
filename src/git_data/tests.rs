@@ -1,5 +1,6 @@
 //! Unit tests for git service data loading and commit-range aggregation behavior.
 use std::{
+    collections::BTreeMap,
     fs,
     path::Path,
     process::{Command, Stdio},
@@ -257,6 +258,43 @@ fn parse_worktree_list_rejects_field_before_worktree() {
         format!("{err:#}").contains("field before worktree path"),
         "unexpected parse error: {err:#}"
     );
+}
+
+#[test]
+fn sort_worktrees_keeps_main_first_then_newest_linked_entries() {
+    let main = Path::new("/repo/main").to_path_buf();
+    let older = Path::new("/tmp/wt-old").to_path_buf();
+    let newer = Path::new("/tmp/wt-new").to_path_buf();
+    let mut worktrees = vec![
+        WorktreeInfo {
+            path: older.clone(),
+            head: "a".to_owned(),
+            branch: Some("old".to_owned()),
+            locked_reason: None,
+            prunable_reason: None,
+        },
+        WorktreeInfo {
+            path: main.clone(),
+            head: "b".to_owned(),
+            branch: Some("main".to_owned()),
+            locked_reason: None,
+            prunable_reason: None,
+        },
+        WorktreeInfo {
+            path: newer.clone(),
+            head: "c".to_owned(),
+            branch: Some("new".to_owned()),
+            locked_reason: None,
+            prunable_reason: None,
+        },
+    ];
+    let timestamps = BTreeMap::from([(older.clone(), 10_i64), (newer.clone(), 20_i64)]);
+
+    sort_worktrees_with(&mut worktrees, &main, |path| timestamps.get(path).copied());
+
+    assert_eq!(worktrees[0].path, main);
+    assert_eq!(worktrees[1].path, newer);
+    assert_eq!(worktrees[2].path, older);
 }
 
 fn init_repo(path: &Path) {
