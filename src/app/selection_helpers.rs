@@ -99,39 +99,12 @@ pub(super) fn apply_status_ids(
     }
 }
 
-pub(super) fn auto_deselect_status(status: ReviewStatus) -> bool {
-    matches!(status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
-}
-
-pub(super) fn deselect_ids(rows: &mut [CommitRow], ids: &BTreeSet<String>) {
-    for row in rows {
-        if ids.contains(&row.info.id) {
-            row.selected = false;
-        }
-    }
-}
-
 pub(super) fn apply_status_transition(
     rows: &mut [CommitRow],
     ids: &BTreeSet<String>,
     status: ReviewStatus,
 ) {
     apply_status_ids(rows, ids, status);
-    if auto_deselect_status(status) {
-        deselect_ids(rows, ids);
-    }
-}
-
-pub(super) fn selected_ids_will_change_for_status_update(
-    rows: &[CommitRow],
-    ids: &BTreeSet<String>,
-    status: ReviewStatus,
-) -> bool {
-    if !auto_deselect_status(status) {
-        return false;
-    }
-    rows.iter()
-        .any(|row| row.selected && ids.contains(&row.info.id))
 }
 
 pub(super) fn deselect_rows_outside_status_filter(

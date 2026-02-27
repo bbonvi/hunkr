@@ -1244,7 +1244,7 @@ fn apply_status_ids_changes_only_targeted_commits() {
 }
 
 #[test]
-fn reviewed_status_auto_deselects_targeted_commits() {
+fn reviewed_status_keeps_selection_intact() {
     let mut rows = vec![
         commit_row("a", true, ReviewStatus::Unreviewed),
         commit_row("b", true, ReviewStatus::IssueFound),
@@ -1255,7 +1255,7 @@ fn reviewed_status_auto_deselects_targeted_commits() {
     apply_status_transition(&mut rows, &ids, ReviewStatus::Reviewed);
 
     assert!(rows[0].selected);
-    assert!(!rows[1].selected);
+    assert!(rows[1].selected);
     assert!(!rows[2].selected);
     assert_eq!(rows[1].status, ReviewStatus::Reviewed);
     assert_eq!(rows[2].status, ReviewStatus::Reviewed);
@@ -1674,39 +1674,6 @@ fn next_poll_timeout_honors_selection_rebuild_deadline() {
         Some(Duration::from_millis(80)),
     );
     assert_eq!(timeout, Duration::from_millis(80));
-}
-
-#[test]
-fn status_update_selection_change_detects_auto_deselect_targets() {
-    let rows = vec![
-        commit_row("a", true, ReviewStatus::Unreviewed),
-        commit_row("b", false, ReviewStatus::Unreviewed),
-    ];
-    let ids = BTreeSet::from(["a".to_owned()]);
-    assert!(selected_ids_will_change_for_status_update(
-        &rows,
-        &ids,
-        ReviewStatus::Reviewed
-    ));
-    assert!(!selected_ids_will_change_for_status_update(
-        &rows,
-        &ids,
-        ReviewStatus::IssueFound
-    ));
-}
-
-#[test]
-fn status_update_selection_change_ignores_unselected_targets() {
-    let rows = vec![
-        commit_row("a", false, ReviewStatus::Unreviewed),
-        commit_row("b", true, ReviewStatus::Unreviewed),
-    ];
-    let ids = BTreeSet::from(["a".to_owned()]);
-    assert!(!selected_ids_will_change_for_status_update(
-        &rows,
-        &ids,
-        ReviewStatus::Resolved
-    ));
 }
 
 #[test]

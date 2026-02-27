@@ -269,8 +269,6 @@ impl App {
 
     pub(super) fn set_status_for_ids(&mut self, ids: &BTreeSet<String>, status: ReviewStatus) {
         self.flush_pending_selection_rebuild();
-        let selected_ids_changed =
-            selected_ids_will_change_for_status_update(&self.commits, ids, status);
         self.store.set_many_status(
             &mut self.review_state,
             ids.iter().cloned(),
@@ -290,10 +288,6 @@ impl App {
 
         if status != ReviewStatus::Unreviewed {
             self.commit_ui.visual_anchor = None;
-        }
-        if selected_ids_changed && let Err(err) = self.rebuild_selection_dependent_views() {
-            self.runtime.status = format!("failed to rebuild diff: {err:#}");
-            return;
         }
         if let Err(err) = self.sync_comment_report() {
             status_message.push_str(&format!(", review tasks sync failed: {err:#}"));
