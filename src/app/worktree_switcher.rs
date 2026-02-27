@@ -21,16 +21,18 @@ impl App {
     }
 
     pub(super) fn handle_worktree_switch_input(&mut self, key: KeyEvent) {
+        if key.modifiers == KeyModifiers::NONE && matches!(key.code, KeyCode::Char('q')) {
+            self.close_worktree_switcher();
+            return;
+        }
+
         if self.worktree_switch.search_active {
             self.handle_worktree_search_input(key);
             return;
         }
 
         match key.code {
-            KeyCode::Esc => {
-                self.preferences.input_mode = InputMode::Normal;
-                self.runtime.status = "Worktree switcher closed".to_owned();
-            }
+            KeyCode::Esc => self.close_worktree_switcher(),
             KeyCode::Enter => self.switch_to_selected_worktree(),
             KeyCode::Down | KeyCode::Char('j') => self.move_worktree_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_worktree_cursor(-1),
@@ -183,6 +185,10 @@ impl App {
 
     fn handle_worktree_search_input(&mut self, key: KeyEvent) {
         let fallback_visible_idx = self.worktree_switch.list_state.selected();
+        if key.modifiers == KeyModifiers::NONE && matches!(key.code, KeyCode::Char('q')) {
+            self.close_worktree_switcher();
+            return;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.worktree_switch.search_active = false;
@@ -214,6 +220,12 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn close_worktree_switcher(&mut self) {
+        self.worktree_switch.search_active = false;
+        self.preferences.input_mode = InputMode::Normal;
+        self.runtime.status = "Worktree switcher closed".to_owned();
     }
 }
 
