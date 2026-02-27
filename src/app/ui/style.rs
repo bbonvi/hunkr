@@ -35,6 +35,54 @@ pub(in crate::app) fn resolve_row_background(
     })
 }
 
+/// Applies shared row highlight semantics and optional cursor-row width padding.
+pub(in crate::app) fn apply_row_highlight(
+    line: &Line<'static>,
+    line_width: u16,
+    in_selection: bool,
+    is_cursor: bool,
+    selection_bg: Color,
+    cursor_bg: Color,
+    policy: CursorSelectionPolicy,
+) -> Line<'static> {
+    let row_bg = resolve_row_background(
+        in_selection,
+        is_cursor,
+        selection_bg,
+        cursor_bg,
+        policy,
+    );
+    let mut highlighted = match row_bg {
+        Some(bg) => tint_line_background(line, bg, false),
+        None => line.clone(),
+    };
+    if is_cursor {
+        highlighted = pad_line_to_width(&highlighted, line_width, Style::default().bg(cursor_bg));
+    }
+    highlighted
+}
+
+/// Applies a background tint to all spans in a rendered line.
+pub(in crate::app) fn tint_line_background(
+    line: &Line<'static>,
+    tint: Color,
+    blend_existing: bool,
+) -> Line<'static> {
+    let mut patched = line.clone();
+    for span in &mut patched.spans {
+        let bg = if blend_existing {
+            span.style
+                .bg
+                .map(|existing| blend_colors(existing, tint, 170))
+                .unwrap_or(tint)
+        } else {
+            tint
+        };
+        span.style = span.style.patch(Style::default().bg(bg));
+    }
+    patched
+}
+
 pub(in crate::app) fn status_style(status: ReviewStatus, theme: &UiTheme) -> Style {
     match status {
         ReviewStatus::Unreviewed => Style::default()

@@ -1,10 +1,10 @@
 use super::lifecycle_render::footer_mode_label;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
-use super::ui::diff_pane::{scrollbar_thumb, tint_line_background};
+use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{
-    CursorSelectionPolicy, line_with_right, list_content_width, list_row_style, pad_line_to_width,
-    resolve_row_background,
+    CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
+    list_row_style, pad_line_to_width, resolve_row_background, tint_line_background,
 };
 use super::*;
 use std::fs;
@@ -1390,6 +1390,55 @@ fn resolve_row_background_blend_policy_combines_selection_and_cursor() {
         CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
     );
     assert!(bg.is_some_and(|resolved| resolved != selection_bg && resolved != cursor_bg));
+}
+
+#[test]
+fn apply_row_highlight_cursor_wins_and_pads_row() {
+    let cursor_bg = Color::Rgb(30, 70, 120);
+    let line = Line::from(Span::styled("ab", Style::default().fg(Color::White)));
+    let highlighted = apply_row_highlight(
+        &line,
+        5,
+        true,
+        true,
+        Color::Rgb(10, 20, 30),
+        cursor_bg,
+        CursorSelectionPolicy::CursorWins,
+    );
+    let flattened = highlighted
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert_eq!(flattened, "ab   ");
+    assert!(
+        highlighted
+            .spans
+            .iter()
+            .all(|span| span.style.bg == Some(cursor_bg))
+    );
+}
+
+#[test]
+fn apply_row_highlight_visual_only_keeps_original_width() {
+    let line = Line::from(Span::styled("ab", Style::default().fg(Color::White)));
+    let highlighted = apply_row_highlight(
+        &line,
+        5,
+        true,
+        false,
+        Color::Rgb(90, 80, 70),
+        Color::Rgb(20, 30, 40),
+        CursorSelectionPolicy::CursorWins,
+    );
+    let flattened = highlighted
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert_eq!(flattened, "ab");
 }
 
 #[test]

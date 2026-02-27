@@ -2,15 +2,15 @@ use std::collections::HashMap;
 
 use ratatui::{
     Frame,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
 };
 
 use super::super::{
     CommentAnchor, CursorSelectionPolicy, DiffPosition, FocusPane, NerdFontTheme,
-    RenderedDiffLine, UiTheme, blend_colors, comment_anchor_matches, format_path_with_icon,
-    is_commit_anchor, pad_line_to_width, resolve_row_background, sanitized_span,
+    RenderedDiffLine, UiTheme, apply_row_highlight, comment_anchor_matches,
+    format_path_with_icon, is_commit_anchor, sanitized_span,
 };
 
 #[derive(Debug, Clone)]
@@ -239,26 +239,6 @@ impl<'a> DiffPaneRenderer<'a> {
     }
 }
 
-pub(in crate::app) fn tint_line_background(
-    line: &Line<'static>,
-    tint: Color,
-    blend_existing: bool,
-) -> Line<'static> {
-    let mut patched = line.clone();
-    for span in &mut patched.spans {
-        let bg = if blend_existing {
-            span.style
-                .bg
-                .map(|existing| blend_colors(existing, tint, 170))
-                .unwrap_or(tint)
-        } else {
-            tint
-        };
-        span.style = span.style.patch(Style::default().bg(bg));
-    }
-    patched
-}
-
 pub(in crate::app) fn is_hunk_header_line(line: &RenderedDiffLine) -> bool {
     line.raw_text.starts_with("@@ ")
         && line
@@ -460,23 +440,18 @@ fn display_line_with_selection(
     focused_diff: bool,
     theme: &UiTheme,
 ) -> Line<'static> {
-    let mut line = override_line
+    let line = override_line
         .cloned()
         .unwrap_or_else(|| rendered.line.clone());
     let in_visual = visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
     let is_cursor = idx == cursor && focused_diff;
-    let row_bg = resolve_row_background(
+    apply_row_highlight(
+        &line,
+        line_width,
         in_visual,
         is_cursor,
         theme.visual_bg,
         theme.cursor_bg,
         CursorSelectionPolicy::CursorWins,
-    );
-    if let Some(bg) = row_bg {
-        line = tint_line_background(&line, bg, false);
-    }
-    if is_cursor {
-        line = pad_line_to_width(&line, line_width, Style::default().bg(theme.cursor_bg));
-    }
-    line
+    )
 }
