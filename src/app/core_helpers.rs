@@ -481,6 +481,7 @@ pub(super) fn push_comment_lines(
 ) {
     let age = comment_age(comment, now_ts);
     let location = comment_location_label(comment);
+    let sanitized_comment_text = sanitize_terminal_text(&comment.text);
     rendered.push(RenderedDiffLine {
         line: Line::from(vec![
             Span::styled(
@@ -499,12 +500,12 @@ pub(super) fn push_comment_lines(
             Span::raw(" "),
             Span::styled("[e edit | D delete]", Style::default().fg(theme.dimmed)),
         ]),
-        raw_text: format!("#{} {}", comment.id, comment.text),
+        raw_text: format!("#{} {}", comment.id, sanitized_comment_text),
         anchor: None,
         comment_id: Some(comment.id),
     });
 
-    for text in comment.text.lines() {
+    for text in sanitized_comment_text.lines() {
         rendered.push(RenderedDiffLine {
             line: Line::from(vec![
                 Span::styled("       ", Style::default().fg(theme.dimmed)),

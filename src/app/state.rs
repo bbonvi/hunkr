@@ -335,15 +335,13 @@ impl App {
             };
             if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
                 let age = format_relative_time(hunk.commit_timestamp, now_ts);
+                let commit_summary = sanitize_terminal_text(&hunk.commit_summary);
                 let (commit_line, line) = if hunk.commit_short.is_empty() {
                     (
-                        format!("---- {} ({})", hunk.commit_summary, age),
+                        format!("---- {commit_summary} ({age})"),
                         Line::from(vec![
                             Span::styled("---- ", Style::default().fg(theme.dimmed)),
-                            Span::styled(
-                                hunk.commit_summary.clone(),
-                                Style::default().fg(theme.text),
-                            ),
+                            Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
                             Span::raw(" "),
                             Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
                         ]),
@@ -352,7 +350,7 @@ impl App {
                     (
                         format!(
                             "---- commit {} {} ({})",
-                            hunk.commit_short, hunk.commit_summary, age
+                            hunk.commit_short, commit_summary, age
                         ),
                         Line::from(vec![
                             Span::styled("---- ", Style::default().fg(theme.dimmed)),
@@ -364,10 +362,7 @@ impl App {
                                     .add_modifier(Modifier::BOLD),
                             ),
                             Span::raw(" "),
-                            Span::styled(
-                                hunk.commit_summary.clone(),
-                                Style::default().fg(theme.text),
-                            ),
+                            Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
                             Span::raw(" "),
                             Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
                         ]),
@@ -414,11 +409,12 @@ impl App {
                 old_lineno: Some(hunk.old_start),
                 new_lineno: Some(hunk.new_start),
             };
-            let hunk_label = format!("@@ {}", hunk.header);
+            let hunk_header = sanitize_terminal_text(&hunk.header);
+            let hunk_label = format!("@@ {hunk_header}");
             rendered.push(RenderedDiffLine {
                 line: Line::from(vec![
                     Span::styled("@@ ", Style::default().fg(theme.muted)),
-                    Span::styled(hunk.header.clone(), Style::default().fg(theme.diff_header)),
+                    Span::styled(hunk_header.clone(), Style::default().fg(theme.diff_header)),
                 ]),
                 raw_text: hunk_label,
                 anchor: Some(CommentAnchor {
@@ -799,8 +795,10 @@ pub(super) fn rendered_file_header_line(
     nerd_fonts: bool,
     nerd_font_theme: &NerdFontTheme,
 ) -> RenderedDiffLine {
-    let raw_text = format!("==== file {file_index}/{total_files}: {path} ====");
-    let display_path = format_path_with_icon(path, nerd_fonts, nerd_font_theme);
+    let display_path =
+        sanitize_terminal_text(&format_path_with_icon(path, nerd_fonts, nerd_font_theme));
+    let sanitized_path = sanitize_terminal_text(path);
+    let raw_text = format!("==== file {file_index}/{total_files}: {sanitized_path} ====");
     RenderedDiffLine {
         line: Line::from(vec![
             Span::styled("==== ", Style::default().fg(theme.dimmed)),

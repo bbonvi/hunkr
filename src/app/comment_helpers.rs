@@ -59,18 +59,18 @@ pub(super) fn comment_modal_lines(
             let is_cursor = cursor_on_line && idx == clamped_cursor;
             if is_cursor {
                 spans.push(Span::styled(
-                    fragment.to_owned(),
+                    sanitize_terminal_text(fragment),
                     Style::default()
                         .fg(theme.modal_cursor_fg)
                         .bg(theme.modal_cursor_bg),
                 ));
             } else if is_selected {
                 spans.push(Span::styled(
-                    fragment.to_owned(),
+                    sanitize_terminal_text(fragment),
                     Style::default().bg(theme.visual_bg),
                 ));
             } else {
-                spans.push(Span::raw(fragment.to_owned()));
+                spans.push(Span::raw(sanitize_terminal_text(fragment)));
             }
             idx = next;
         }

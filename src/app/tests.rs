@@ -164,6 +164,45 @@ fn sanitize_terminal_text_removes_other_control_bytes() {
 }
 
 #[test]
+fn compose_commit_line_sanitizes_untrusted_summary_text() {
+    let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
+    row.info.summary = "clean \u{1b}[31mred\u{1b}[0m text".to_owned();
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
+    let rendered = presenter.commit_row_line(&row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("clean red text"));
+    assert!(!flattened.contains('\u{1b}'));
+}
+
+#[test]
+fn file_row_line_sanitizes_untrusted_path_label() {
+    let row = TreeRow {
+        label: "[F] src/\u{1b}[31mapp.rs".to_owned(),
+        path: Some("src/app.rs".to_owned()),
+        depth: 0,
+        selectable: true,
+        modified_ts: Some(0),
+    };
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
+    let rendered = presenter.file_row_line(&row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("[F] src/app.rs"));
+    assert!(!flattened.contains('\u{1b}'));
+}
+
+#[test]
 fn word_boundaries_skip_whitespace_and_symbols() {
     let text = "alpha  + beta";
     let cursor = text.len();
@@ -388,6 +427,25 @@ fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
     assert!(nerd_text.contains(" src/app.rs"));
     assert_eq!(plain.raw_text, "==== file 1/2: src/app.rs ====");
     assert_eq!(nerd.raw_text, plain.raw_text);
+}
+
+#[test]
+fn rendered_file_banner_sanitizes_untrusted_path_text() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let nerd_theme = NerdFontTheme::default();
+    let rendered =
+        state::rendered_file_header_line("src/\u{1b}[31mapp.rs", 1, 1, &theme, false, &nerd_theme);
+    let flattened = rendered
+        .line
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("src/app.rs"));
+    assert!(rendered.raw_text.contains("src/app.rs"));
+    assert!(!flattened.contains('\u{1b}'));
+    assert!(!rendered.raw_text.contains('\u{1b}'));
 }
 
 #[test]
@@ -1663,6 +1721,38 @@ fn push_comment_lines_sets_comment_id_on_each_rendered_row() {
             .iter()
             .all(|line| line.comment_id == Some(comment.id))
     );
+}
+
+#[test]
+fn push_comment_lines_sanitizes_comment_text() {
+    let start = CommentAnchor {
+        commit_id: "abc".to_owned(),
+        commit_summary: "summary".to_owned(),
+        file_path: "src/lib.rs".to_owned(),
+        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+        old_lineno: Some(1),
+        new_lineno: Some(1),
+    };
+    let end = CommentAnchor {
+        old_lineno: Some(2),
+        new_lineno: Some(2),
+        ..start.clone()
+    };
+    let comment = sample_comment(start, end, "one \u{1b}[31mred\u{1b}[0m\nnext\u{0}x");
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let mut rendered = Vec::new();
+
+    push_comment_lines(&mut rendered, &comment, &theme, 0);
+
+    let flattened = rendered
+        .iter()
+        .flat_map(|line| line.line.spans.iter())
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+    assert!(!flattened.contains('\u{1b}'));
+    assert!(!rendered[0].raw_text.contains('\u{1b}'));
+    assert!(flattened.contains("one red"));
+    assert!(flattened.contains("nextx"));
 }
 
 #[test]

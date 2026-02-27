@@ -888,7 +888,10 @@ impl App {
             };
             command_lines.push(Line::from(vec![
                 Span::styled("reverse-search: ", Style::default().fg(theme.dimmed)),
-                Span::styled(search.query.clone(), Style::default().fg(theme.accent)),
+                Span::styled(
+                    sanitize_terminal_text(&search.query),
+                    Style::default().fg(theme.accent),
+                ),
                 Span::raw(" "),
                 Span::styled(format!("({marker})"), Style::default().fg(theme.dimmed)),
             ]));
@@ -902,7 +905,7 @@ impl App {
         } else {
             command_lines.push(Line::from(vec![
                 Span::styled("$ ", Style::default().fg(theme.dimmed)),
-                Span::raw(self.shell_command.buffer.clone()),
+                Span::raw(sanitize_terminal_text(&self.shell_command.buffer)),
             ]));
         }
         frame.render_widget(
@@ -1085,7 +1088,7 @@ impl App {
                             format!(
                                 "{} {} ({span}; {} selected lines)",
                                 target.kind.as_str(),
-                                target.start.file_path,
+                                sanitize_terminal_text(&target.start.file_path),
                                 target.selected_lines.len()
                             ),
                             Style::default().fg(theme.muted),
@@ -1142,7 +1145,10 @@ impl App {
                             Style::default().fg(theme.dimmed)
                         },
                     ),
-                    Span::raw(truncate(&self.rendered_diff[idx].raw_text, 120)),
+                    Span::raw(truncate(
+                        &sanitize_terminal_text(&self.rendered_diff[idx].raw_text),
+                        120,
+                    )),
                 ]));
             }
         }
@@ -1353,7 +1359,7 @@ fn shell_prompt_line(buffer: &str, cursor: usize, theme: &UiTheme) -> Line<'stat
 
     let mut spans = Vec::new();
     spans.push(Span::styled("$ ", Style::default().fg(theme.dimmed)));
-    spans.push(Span::raw(buffer[..clamped].to_owned()));
+    spans.push(Span::raw(sanitize_terminal_text(&buffer[..clamped])));
 
     match cursor_char {
         Some(ch) => spans.push(Span::styled(
@@ -1371,7 +1377,7 @@ fn shell_prompt_line(buffer: &str, cursor: usize, theme: &UiTheme) -> Line<'stat
     }
 
     if cursor_end < buffer.len() {
-        spans.push(Span::raw(buffer[cursor_end..].to_owned()));
+        spans.push(Span::raw(sanitize_terminal_text(&buffer[cursor_end..])));
     }
     Line::from(spans)
 }

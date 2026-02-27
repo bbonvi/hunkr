@@ -9,8 +9,8 @@ use ratatui::{
 
 use super::super::{
     CommitRow, FocusPane, TreeRow, UiTheme, commit_selection_marker, display_width,
-    format_relative_time, list_highlight_symbol, list_highlight_symbol_width, status_short_label,
-    truncate, uncommitted_badge, unpushed_marker,
+    format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
+    sanitize_terminal_text, status_short_label, truncate, uncommitted_badge, unpushed_marker,
 };
 use super::style::{line_with_right, list_content_width, list_row_style, status_style};
 
@@ -90,7 +90,7 @@ impl<'a> ListPaneRenderer<'a> {
                 Style::default().fg(self.theme.muted),
             ),
             Span::styled("filter:", Style::default().fg(self.theme.muted)),
-            Span::styled(search_display.to_owned(), filter_style),
+            Span::styled(sanitize_terminal_text(search_display), filter_style),
         ]);
         let border_style = if self.focused == FocusPane::Files {
             Style::default().fg(self.theme.focus_border)
@@ -174,7 +174,7 @@ impl<'a> ListPaneRenderer<'a> {
                 Style::default().fg(self.theme.muted),
             ),
             Span::styled("filter:", Style::default().fg(self.theme.muted)),
-            Span::styled(search_display.to_owned(), filter_style),
+            Span::styled(sanitize_terminal_text(search_display), filter_style),
         ]);
         let border_style = if self.focused == FocusPane::Commits {
             Style::default().fg(self.theme.focus_border)
@@ -241,13 +241,14 @@ impl<'a> ListLinePresenter<'a> {
     }
 
     pub(in crate::app) fn file_row_line(&self, row: &TreeRow) -> Line<'static> {
+        let label = sanitize_terminal_text(&row.label);
         if row.selectable {
             let right = row
                 .modified_ts
                 .map(|ts| format_relative_time(ts, self.now_ts))
                 .unwrap_or_default();
             line_with_right(
-                row.label.clone(),
+                label,
                 Style::default().fg(self.theme.text),
                 right,
                 Style::default().fg(self.theme.dimmed),
@@ -255,7 +256,7 @@ impl<'a> ListLinePresenter<'a> {
             )
         } else {
             Line::from(Span::styled(
-                row.label.clone(),
+                label,
                 Style::default()
                     .fg(self.theme.dir)
                     .add_modifier(Modifier::BOLD),
@@ -264,9 +265,10 @@ impl<'a> ListLinePresenter<'a> {
     }
 
     pub(in crate::app) fn commit_row_line(&self, row: &CommitRow) -> Line<'static> {
+        let summary = sanitize_terminal_text(&row.info.summary);
         if row.is_uncommitted {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
-            let left = format!("{marker} {} {}", row.info.short_id, row.info.summary);
+            let left = format!("{marker} {} {summary}", row.info.short_id);
             let badge = uncommitted_badge(self.nerd_fonts);
             let right = "draft";
             let reserved = 1 + display_width(badge) + 1 + display_width(right);
@@ -295,7 +297,7 @@ impl<'a> ListLinePresenter<'a> {
         }
 
         let marker = commit_selection_marker(row.selected, self.nerd_fonts);
-        let left = format!("{} {} {}", marker, row.info.short_id, row.info.summary);
+        let left = format!("{marker} {} {summary}", row.info.short_id);
         let status_label = format!("[{}]", status_short_label(row.status));
         let unpushed = if row.info.unpushed {
             unpushed_marker(self.nerd_fonts)
