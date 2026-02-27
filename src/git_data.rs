@@ -1,7 +1,10 @@
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
+    fs,
     path::{Path, PathBuf},
+    process::Command,
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, anyhow};
@@ -17,7 +20,19 @@ use crate::model::{
 pub struct GitService {
     repo: Repository,
     root: PathBuf,
+    main_root: PathBuf,
     branch: String,
+}
+
+/// One worktree discovered through `git worktree list --porcelain -z`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeInfo {
+    pub path: PathBuf,
+    pub head: String,
+    pub latest_commit_ts: Option<i64>,
+    pub branch: Option<String>,
+    pub locked_reason: Option<String>,
+    pub prunable_reason: Option<String>,
 }
 
 impl GitService {
@@ -40,8 +55,18 @@ impl GitService {
             .workdir()
             .map(Path::to_path_buf)
             .ok_or_else(|| anyhow!("repository is bare; workdir is required"))?;
+        let main_root = repo
+            .commondir()
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| root.clone());
         let branch = current_branch_name(&repo)?;
-        Ok(Self { repo, root, branch })
+        Ok(Self {
+            repo,
+            root,
+            main_root,
+            branch,
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -50,6 +75,33 @@ impl GitService {
 
     pub fn branch_name(&self) -> &str {
         &self.branch
+    }
+
+    pub fn list_worktrees(&self) -> anyhow::Result<Vec<WorktreeInfo>> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(["worktree", "list", "--porcelain", "-z"])
+            .output()
+            .context("failed to run `git worktree list --porcelain -z`")?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "`git worktree list --porcelain -z` failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let mut items = parse_worktree_list_porcelain(&output.stdout)?;
+        for entry in &mut items {
+            entry.latest_commit_ts = self.commit_timestamp_for_head(&entry.head);
+        }
+        sort_worktrees(&mut items, &self.main_root);
+        Ok(items)
+    }
+
+    fn commit_timestamp_for_head(&self, head: &str) -> Option<i64> {
+        let oid = Oid::from_str(head).ok()?;
+        let commit = self.repo.find_commit(oid).ok()?;
+        Some(commit.time().seconds())
     }
 
     pub fn load_first_parent_history(&self, max: usize) -> anyhow::Result<Vec<CommitInfo>> {
@@ -485,6 +537,130 @@ fn path_to_string(path: &Path) -> String {
 
 fn short_id(id: &str) -> String {
     id.chars().take(7).collect()
+}
+
+#[derive(Debug, Default)]
+struct WorktreeInfoBuilder {
+    path: Option<PathBuf>,
+    head: Option<String>,
+    branch: Option<String>,
+    locked_reason: Option<String>,
+    prunable_reason: Option<String>,
+}
+
+impl WorktreeInfoBuilder {
+    fn finish(self) -> anyhow::Result<WorktreeInfo> {
+        let path = self
+            .path
+            .ok_or_else(|| anyhow!("malformed `git worktree` output: missing worktree path"))?;
+        Ok(WorktreeInfo {
+            path,
+            head: self.head.unwrap_or_default(),
+            latest_commit_ts: None,
+            branch: self.branch,
+            locked_reason: self.locked_reason,
+            prunable_reason: self.prunable_reason,
+        })
+    }
+}
+
+fn parse_worktree_list_porcelain(payload: &[u8]) -> anyhow::Result<Vec<WorktreeInfo>> {
+    let mut current = WorktreeInfoBuilder::default();
+    let mut items = Vec::<WorktreeInfo>::new();
+
+    for raw in payload.split(|byte| *byte == 0) {
+        if raw.is_empty() {
+            if current.path.is_some() {
+                items.push(current.finish()?);
+                current = WorktreeInfoBuilder::default();
+            }
+            continue;
+        }
+
+        let line = String::from_utf8_lossy(raw);
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if current.path.is_some() {
+                items.push(current.finish()?);
+                current = WorktreeInfoBuilder::default();
+            }
+            current.path = Some(PathBuf::from(path));
+            continue;
+        }
+
+        if current.path.is_none() {
+            return Err(anyhow!(
+                "malformed `git worktree` output: field before worktree path"
+            ));
+        }
+
+        if let Some(head) = line.strip_prefix("HEAD ") {
+            current.head = Some(head.to_owned());
+            continue;
+        }
+        if let Some(branch) = line.strip_prefix("branch ") {
+            let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+            current.branch = Some(branch.to_owned());
+            continue;
+        }
+        if line == "detached" {
+            current.branch = None;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("locked") {
+            current.locked_reason = parse_optional_worktree_message(value);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("prunable") {
+            current.prunable_reason = parse_optional_worktree_message(value);
+            continue;
+        }
+    }
+
+    if current.path.is_some() {
+        items.push(current.finish()?);
+    }
+
+    Ok(items)
+}
+
+fn parse_optional_worktree_message(field_suffix: &str) -> Option<String> {
+    let message = field_suffix.trim_start();
+    (!message.is_empty()).then(|| message.to_owned())
+}
+
+fn sort_worktrees(items: &mut [WorktreeInfo], main_root: &Path) {
+    sort_worktrees_with(items, main_root, worktree_timestamp);
+}
+
+fn sort_worktrees_with<F>(items: &mut [WorktreeInfo], main_root: &Path, mut timestamp_of: F)
+where
+    F: FnMut(&Path) -> Option<i64>,
+{
+    items.sort_by(|left, right| {
+        let left_main = left.path == main_root;
+        let right_main = right.path == main_root;
+        if left_main != right_main {
+            return right_main.cmp(&left_main);
+        }
+
+        let left_ts = left.latest_commit_ts.or_else(|| timestamp_of(&left.path));
+        let right_ts = right.latest_commit_ts.or_else(|| timestamp_of(&right.path));
+        right_ts
+            .cmp(&left_ts)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+}
+
+fn worktree_timestamp(path: &Path) -> Option<i64> {
+    let git_path = path.join(".git");
+    let metadata = fs::metadata(&git_path)
+        .or_else(|_| fs::metadata(path))
+        .ok()?;
+    let modified = metadata.modified().ok()?;
+    modified
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|delta| i64::try_from(delta.as_secs()).ok())
 }
 
 fn selection_line_signatures(lines: &[String]) -> BTreeSet<String> {

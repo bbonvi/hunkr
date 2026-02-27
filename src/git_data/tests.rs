@@ -216,6 +216,89 @@ fn open_at_without_repository_returns_clear_error() {
     );
 }
 
+#[test]
+fn parse_worktree_list_parses_branches_and_flags() {
+    let payload = concat!(
+        "worktree /repo/main\0",
+        "HEAD abc123\0",
+        "branch refs/heads/main\0",
+        "\0",
+        "worktree /tmp/wt-1\0",
+        "HEAD def456\0",
+        "detached\0",
+        "locked by admin\0",
+        "prunable stale\0",
+        "\0",
+    );
+
+    let parsed = parse_worktree_list_porcelain(payload.as_bytes()).expect("parse");
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed[0].path, Path::new("/repo/main"));
+    assert_eq!(parsed[0].head, "abc123");
+    assert_eq!(parsed[0].latest_commit_ts, None);
+    assert_eq!(parsed[0].branch.as_deref(), Some("main"));
+    assert_eq!(parsed[0].locked_reason, None);
+    assert_eq!(parsed[0].prunable_reason, None);
+
+    assert_eq!(parsed[1].path, Path::new("/tmp/wt-1"));
+    assert_eq!(parsed[1].head, "def456");
+    assert_eq!(parsed[1].latest_commit_ts, None);
+    assert_eq!(parsed[1].branch, None);
+    assert_eq!(parsed[1].locked_reason.as_deref(), Some("by admin"));
+    assert_eq!(parsed[1].prunable_reason.as_deref(), Some("stale"));
+}
+
+#[test]
+fn parse_worktree_list_rejects_field_before_worktree() {
+    let err = match parse_worktree_list_porcelain(b"HEAD abc123\0\0") {
+        Ok(_) => panic!("parser should reject malformed payload"),
+        Err(err) => err,
+    };
+
+    assert!(
+        format!("{err:#}").contains("field before worktree path"),
+        "unexpected parse error: {err:#}"
+    );
+}
+
+#[test]
+fn sort_worktrees_keeps_main_first_then_newest_linked_entries() {
+    let main = Path::new("/repo/main").to_path_buf();
+    let older = Path::new("/tmp/wt-old").to_path_buf();
+    let newer = Path::new("/tmp/wt-new").to_path_buf();
+    let mut worktrees = vec![
+        WorktreeInfo {
+            path: older.clone(),
+            head: "a".to_owned(),
+            latest_commit_ts: Some(10),
+            branch: Some("old".to_owned()),
+            locked_reason: None,
+            prunable_reason: None,
+        },
+        WorktreeInfo {
+            path: main.clone(),
+            head: "b".to_owned(),
+            latest_commit_ts: Some(5),
+            branch: Some("main".to_owned()),
+            locked_reason: None,
+            prunable_reason: None,
+        },
+        WorktreeInfo {
+            path: newer.clone(),
+            head: "c".to_owned(),
+            latest_commit_ts: Some(20),
+            branch: Some("new".to_owned()),
+            locked_reason: None,
+            prunable_reason: None,
+        },
+    ];
+    sort_worktrees(&mut worktrees, &main);
+
+    assert_eq!(worktrees[0].path, main);
+    assert_eq!(worktrees[1].path, newer);
+    assert_eq!(worktrees[2].path, older);
+}
+
 fn init_repo(path: &Path) {
     run(Command::new("git")
         .current_dir(path)

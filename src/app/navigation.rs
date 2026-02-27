@@ -206,7 +206,25 @@ impl App {
         self.on_selection_changed_debounced();
     }
 
-    pub(super) fn set_current_commit_status(&mut self, status: ReviewStatus) {
+    /// Apply a status update to the active commit selection, or to the cursor row when no
+    /// explicit selection exists.
+    pub(super) fn set_contextual_commit_status(&mut self, status: ReviewStatus) {
+        let has_selection = self.commits.iter().any(|row| row.selected);
+        if has_selection {
+            let ids = self
+                .commits
+                .iter()
+                .filter(|row| row.selected && !row.is_uncommitted)
+                .map(|row| row.info.id.clone())
+                .collect::<BTreeSet<_>>();
+            if ids.is_empty() {
+                self.runtime.status = "No selected committed revisions".to_owned();
+                return;
+            }
+            self.set_status_for_ids(&ids, status);
+            return;
+        }
+
         let Some(idx) = self.selected_commit_full_index() else {
             return;
         };
@@ -218,20 +236,6 @@ impl App {
             return;
         }
         let ids = BTreeSet::from([row.info.id.clone()]);
-        self.set_status_for_ids(&ids, status);
-    }
-
-    pub(super) fn set_selected_commit_status(&mut self, status: ReviewStatus) {
-        let ids = self
-            .commits
-            .iter()
-            .filter(|row| row.selected && !row.is_uncommitted)
-            .map(|row| row.info.id.clone())
-            .collect::<BTreeSet<_>>();
-        if ids.is_empty() {
-            self.runtime.status = "No selected committed revisions".to_owned();
-            return;
-        }
         self.set_status_for_ids(&ids, status);
     }
 

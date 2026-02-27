@@ -133,6 +133,13 @@ impl App {
                 running: None,
                 finished: None,
             },
+            worktree_switch: WorktreeSwitchState {
+                entries: Vec::new(),
+                list_state: ListState::default(),
+                query: String::new(),
+                search_active: false,
+                viewport_rows: 0,
+            },
             search: SearchState {
                 diff_buffer: String::new(),
                 diff_query: None,
@@ -345,7 +352,7 @@ impl App {
             .constraints([
                 ratatui::layout::Constraint::Length(2),
                 ratatui::layout::Constraint::Min(1),
-                ratatui::layout::Constraint::Length(3),
+                ratatui::layout::Constraint::Length(4),
             ])
             .split(frame.area());
 
@@ -386,6 +393,8 @@ impl App {
             self.render_comment_modal(frame, &theme);
         } else if matches!(self.preferences.input_mode, InputMode::ShellCommand) {
             self.render_shell_command_modal(frame, &theme);
+        } else if matches!(self.preferences.input_mode, InputMode::WorktreeSwitch) {
+            self.render_worktree_switcher_modal(frame, &theme);
         }
     }
 
@@ -463,8 +472,25 @@ impl App {
             return;
         }
 
+        if self.runtime.show_help {
+            if help_overlay_close_key(key) {
+                self.runtime.show_help = false;
+                self.runtime.status = "Help overlay closed".to_owned();
+            }
+            return;
+        }
+
         if !matches!(self.preferences.input_mode, InputMode::Normal) {
             self.handle_non_normal_input(key);
+            return;
+        }
+
+        if theme_toggle_conflicts_with_diff_pending_op(
+            key,
+            self.preferences.focused,
+            self.diff_ui.pending_op,
+        ) {
+            self.dispatch_focus_key(key);
             return;
         }
 
@@ -495,6 +521,9 @@ impl App {
             {
                 self.open_shell_command_modal();
             }
+            KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
+                self.open_worktree_switcher();
+            }
             KeyCode::Char('t') => self.toggle_theme(),
             KeyCode::F(5) => self.refresh_now(),
             KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => self.refresh_now(),
@@ -524,4 +553,20 @@ impl App {
         self.diff_cache.rendered_key = None;
         self.runtime.status = format!("Theme switched to {}", self.preferences.theme_mode.label());
     }
+}
+
+pub(super) fn help_overlay_close_key(key: KeyEvent) -> bool {
+    key.modifiers == KeyModifiers::NONE
+        && matches!(key.code, KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q'))
+}
+
+pub(super) fn theme_toggle_conflicts_with_diff_pending_op(
+    key: KeyEvent,
+    focused: FocusPane,
+    pending_op: Option<DiffPendingOp>,
+) -> bool {
+    key.modifiers == KeyModifiers::NONE
+        && key.code == KeyCode::Char('t')
+        && focused == FocusPane::Diff
+        && matches!(pending_op, Some(DiffPendingOp::Z))
 }

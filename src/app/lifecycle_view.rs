@@ -1,5 +1,6 @@
 //! Render pipeline and modal/footer presentation for the lifecycle flow.
 use super::*;
+use ratatui::widgets::{List, ListItem};
 
 impl App {
     pub(super) fn render_header(
@@ -27,6 +28,10 @@ impl App {
             Span::styled(
                 format!("branch:{} ", self.git.branch_name()),
                 Style::default().fg(theme.text),
+            ),
+            Span::styled(
+                format!("wt:{} ", short_path_label(self.git.root())),
+                Style::default().fg(theme.muted),
             ),
             Span::styled(
                 format!("focus:{} ", focus),
@@ -328,6 +333,35 @@ impl App {
                     ])
                 }
             }
+            InputMode::WorktreeSwitch => {
+                if self.worktree_switch.search_active {
+                    Line::from(vec![
+                        key_chip("Enter", theme),
+                        Span::styled(" defocus ", Style::default().fg(theme.muted)),
+                        key_chip("Esc", theme),
+                        Span::styled(" clear ", Style::default().fg(theme.muted)),
+                        key_chip("Backspace", theme),
+                        Span::styled(" edit ", Style::default().fg(theme.muted)),
+                        key_chip("q", theme),
+                        Span::styled(" close ", Style::default().fg(theme.muted)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        key_chip("Enter", theme),
+                        Span::styled(" switch ", Style::default().fg(theme.muted)),
+                        key_chip("j/k", theme),
+                        Span::styled(" move ", Style::default().fg(theme.muted)),
+                        key_chip("Ctrl-d/u", theme),
+                        Span::styled(" jump ", Style::default().fg(theme.muted)),
+                        key_chip("/", theme),
+                        Span::styled(" search ", Style::default().fg(theme.muted)),
+                        key_chip("r", theme),
+                        Span::styled(" refresh ", Style::default().fg(theme.muted)),
+                        key_chip("Esc/q", theme),
+                        Span::styled(" close", Style::default().fg(theme.muted)),
+                    ])
+                }
+            }
             InputMode::DiffSearch => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" search ", Style::default().fg(theme.muted)),
@@ -357,13 +391,11 @@ impl App {
                     key_chip("space", theme),
                     Span::styled(" select ", Style::default().fg(theme.muted)),
                     key_chip("u/r/i/s", theme),
-                    Span::styled(" current ", Style::default().fg(theme.muted)),
-                    key_chip("U/R/I/S", theme),
-                    Span::styled(" selected ", Style::default().fg(theme.muted)),
+                    Span::styled(" set status ", Style::default().fg(theme.muted)),
                     key_chip("e", theme),
                     Span::styled(" status filter ", Style::default().fg(theme.muted)),
                     key_chip("/", theme),
-                    Span::styled(" search", Style::default().fg(theme.muted)),
+                    Span::styled(" search ", Style::default().fg(theme.muted)),
                 ]),
                 FocusPane::Diff => Line::from(vec![
                     key_chip("v", theme),
@@ -383,7 +415,7 @@ impl App {
                     key_chip("Y", theme),
                     Span::styled(" copy task path ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
-                    Span::styled(" jump", Style::default().fg(theme.muted)),
+                    Span::styled(" jump ", Style::default().fg(theme.muted)),
                 ]),
             },
         };
@@ -391,12 +423,16 @@ impl App {
         let global_line = Line::from(vec![
             key_chip("1/2/3", theme),
             Span::styled(" panes ", Style::default().fg(theme.dimmed)),
-            key_chip("Tab", theme),
-            Span::styled(" cycle all ", Style::default().fg(theme.dimmed)),
+            key_chip("Tab/S-Tab", theme),
+            Span::styled(" cycle ", Style::default().fg(theme.dimmed)),
             key_chip("h/l", theme),
             Span::styled(" prev/next pane ", Style::default().fg(theme.dimmed)),
             key_chip("!", theme),
             Span::styled(" shell ", Style::default().fg(theme.dimmed)),
+            key_chip("w", theme),
+            Span::styled(" worktrees ", Style::default().fg(theme.dimmed)),
+            key_chip("Ctrl-r/F5", theme),
+            Span::styled(" refresh ", Style::default().fg(theme.dimmed)),
             key_chip("t", theme),
             Span::styled(" theme ", Style::default().fg(theme.dimmed)),
             key_chip("?", theme),
@@ -413,7 +449,7 @@ impl App {
         let show_primary_status = !self.runtime.status.is_empty()
             && !matches!(
                 self.preferences.input_mode,
-                InputMode::DiffSearch | InputMode::ListSearch(_)
+                InputMode::DiffSearch | InputMode::ListSearch(_) | InputMode::WorktreeSwitch
             );
         if show_primary_status {
             status.push(Span::raw(" "));
@@ -519,6 +555,29 @@ impl App {
                     Modifier::BOLD,
                 ));
             }
+            InputMode::WorktreeSwitch => {
+                if self.worktree_switch.search_active || !self.worktree_switch.query.is_empty() {
+                    let query = if self.worktree_switch.query.is_empty() {
+                        "/".to_owned()
+                    } else {
+                        format!("/{}", self.worktree_switch.query)
+                    };
+                    status.push(footer_separator(theme));
+                    status.push(footer_chip(
+                        &format!(
+                            "{query} {}/{}",
+                            self.visible_worktree_indices().len(),
+                            self.worktree_switch.entries.len()
+                        ),
+                        Style::default().fg(theme.accent).bg(blend_colors(
+                            theme.panel_title_bg,
+                            theme.border,
+                            176,
+                        )),
+                        Modifier::BOLD,
+                    ));
+                }
+            }
             InputMode::Normal => {}
         }
 
@@ -526,7 +585,7 @@ impl App {
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
                 ratatui::layout::Constraint::Length(1),
-                ratatui::layout::Constraint::Length(2),
+                ratatui::layout::Constraint::Length(3),
             ])
             .split(rect);
 
@@ -637,6 +696,7 @@ impl App {
             InputMode::CommentEdit(_) => " EDIT COMMENT ",
             InputMode::Normal
             | InputMode::ShellCommand
+            | InputMode::WorktreeSwitch
             | InputMode::DiffSearch
             | InputMode::ListSearch(_) => " COMMENT ",
         };
@@ -671,6 +731,7 @@ impl App {
             InputMode::CommentEdit(_) => "edit",
             InputMode::Normal
             | InputMode::ShellCommand
+            | InputMode::WorktreeSwitch
             | InputMode::DiffSearch
             | InputMode::ListSearch(_) => "idle",
         };
@@ -954,7 +1015,8 @@ impl App {
                     let in_visual =
                         visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
                     let is_cursor = idx == self.shell_command.output_cursor;
-                    let base = Line::from(Span::styled(row.clone(), Style::default().fg(theme.text)));
+                    let base =
+                        Line::from(Span::styled(row.clone(), Style::default().fg(theme.text)));
                     apply_row_highlight(
                         &base,
                         output_inner.width,
@@ -1118,6 +1180,7 @@ impl App {
             },
             InputMode::Normal
             | InputMode::ShellCommand
+            | InputMode::WorktreeSwitch
             | InputMode::DiffSearch
             | InputMode::ListSearch(_) => {}
         }
@@ -1244,7 +1307,7 @@ impl App {
             ]),
             Line::from(vec![
                 key_chip("u/r/i/s", theme),
-                Span::raw(" set commit status"),
+                Span::raw(" set status for selected/current commits"),
             ]),
             Line::from(vec![
                 key_chip("m", theme),
@@ -1253,6 +1316,10 @@ impl App {
             Line::from(vec![
                 key_chip("!", theme),
                 Span::raw(" open shell command modal"),
+            ]),
+            Line::from(vec![
+                key_chip("w", theme),
+                Span::raw(" open worktree switcher modal"),
             ]),
             Line::from(vec![
                 key_chip("/", theme),
@@ -1317,6 +1384,10 @@ impl App {
             Line::from(vec![
                 Span::styled("Press ", Style::default().fg(theme.muted)),
                 key_chip("?", theme),
+                Span::styled(" / ", Style::default().fg(theme.muted)),
+                key_chip("q", theme),
+                Span::styled(" / ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
                 Span::styled(" to close", Style::default().fg(theme.muted)),
             ]),
         ];
@@ -1330,6 +1401,160 @@ impl App {
         );
         frame.render_widget(widget, area);
     }
+
+    pub(super) fn render_worktree_switcher_modal(
+        &mut self,
+        frame: &mut Frame<'_>,
+        theme: &UiTheme,
+    ) {
+        let area = centered_rect(82, 66, frame.area());
+        frame.render_widget(Clear, area);
+
+        let shell = Block::default()
+            .title(" Worktrees ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.focus_border))
+            .style(Style::default().bg(theme.modal_bg));
+        frame.render_widget(shell.clone(), area);
+        let inner = shell.inner(area);
+
+        let sections = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Length(2),
+                ratatui::layout::Constraint::Min(5),
+                ratatui::layout::Constraint::Length(2),
+            ])
+            .split(inner);
+
+        let visible = self.visible_worktree_indices();
+        let search = if self.worktree_switch.query.trim().is_empty() {
+            if self.worktree_switch.search_active {
+                "/".to_owned()
+            } else {
+                "off".to_owned()
+            }
+        } else {
+            format!("/{}", self.worktree_switch.query)
+        };
+        let filter_style =
+            if self.worktree_switch.search_active || !self.worktree_switch.query.is_empty() {
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.dimmed)
+            };
+        let selected = self
+            .selected_worktree_full_index()
+            .and_then(|idx| self.worktree_switch.entries.get(idx))
+            .map(|entry| short_path_label(&entry.path))
+            .unwrap_or_else(|| "none".to_owned());
+        let summary = Paragraph::new(Line::from(vec![
+            Span::styled("source: ", Style::default().fg(theme.dimmed)),
+            Span::styled(
+                short_path_label(self.git.root()),
+                Style::default().fg(theme.text),
+            ),
+            Span::raw("  "),
+            Span::styled("shown: ", Style::default().fg(theme.dimmed)),
+            Span::styled(
+                format!("{}/{}", visible.len(), self.worktree_switch.entries.len()),
+                Style::default().fg(theme.text),
+            ),
+            Span::raw("  "),
+            Span::styled("filter: ", Style::default().fg(theme.dimmed)),
+            sanitized_span(&search, Some(filter_style)),
+            Span::raw("  "),
+            Span::styled("selected: ", Style::default().fg(theme.dimmed)),
+            Span::styled(selected, Style::default().fg(theme.text)),
+        ]));
+        frame.render_widget(summary, sections[0]);
+
+        let rows: Vec<ListItem<'static>> = if visible.is_empty() {
+            vec![ListItem::new(Line::from(Span::styled(
+                "No matching worktrees",
+                Style::default().fg(theme.muted),
+            )))]
+        } else {
+            let now_ts = Utc::now().timestamp();
+            visible
+                .iter()
+                .filter_map(|idx| self.worktree_switch.entries.get(*idx))
+                .map(|entry| {
+                    let current = if entry.path == self.git.root() {
+                        "*"
+                    } else {
+                        " "
+                    };
+                    let branch = entry.branch.as_deref().unwrap_or("detached");
+                    let short_head = short_id(&entry.head);
+                    let latest = entry
+                        .latest_commit_ts
+                        .map(|ts| format_relative_time(ts, now_ts))
+                        .unwrap_or_else(|| "unknown".to_owned());
+                    let mut tags = Vec::<&str>::new();
+                    if entry.locked_reason.is_some() {
+                        tags.push("locked");
+                    }
+                    if entry.prunable_reason.is_some() {
+                        tags.push("prunable");
+                    }
+                    let tags = if tags.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [{}]", tags.join(","))
+                    };
+                    let line = format!(
+                        "{current} {}  {latest}  {branch}  {short_head}{tags}",
+                        entry.path.display()
+                    );
+                    ListItem::new(Line::from(sanitized_span(
+                        &line,
+                        Some(Style::default().fg(theme.text)),
+                    )))
+                })
+                .collect()
+        };
+
+        let list = List::new(rows)
+            .block(
+                Block::default()
+                    .title(" available ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border)),
+            )
+            .highlight_style(Style::default().bg(theme.visual_bg))
+            .highlight_symbol(list_highlight_symbol(self.preferences.nerd_fonts));
+        self.worktree_switch.viewport_rows = sections[1].height.saturating_sub(2) as usize;
+        frame.render_stateful_widget(list, sections[1], &mut self.worktree_switch.list_state);
+
+        let footer = if self.worktree_switch.search_active {
+            Paragraph::new(Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" defocus ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" clear ", Style::default().fg(theme.muted)),
+                key_chip("Backspace", theme),
+                Span::styled(" edit ", Style::default().fg(theme.muted)),
+                key_chip("q", theme),
+                Span::styled(" close ", Style::default().fg(theme.muted)),
+            ]))
+        } else {
+            Paragraph::new(Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" switch ", Style::default().fg(theme.muted)),
+                key_chip("/", theme),
+                Span::styled(" search ", Style::default().fg(theme.muted)),
+                key_chip("r", theme),
+                Span::styled(" refresh ", Style::default().fg(theme.muted)),
+                key_chip("Esc/q", theme),
+                Span::styled(" close ", Style::default().fg(theme.muted)),
+            ]))
+        };
+        frame.render_widget(footer, sections[2]);
+    }
 }
 pub(super) fn footer_mode_label(
     input_mode: InputMode,
@@ -1339,10 +1564,15 @@ pub(super) fn footer_mode_label(
     match input_mode {
         InputMode::CommentCreate | InputMode::CommentEdit(_) => "COMMENT",
         InputMode::ShellCommand => "SHELL",
+        InputMode::WorktreeSwitch => "WORKTREE",
         InputMode::DiffSearch | InputMode::ListSearch(_) => "SEARCH",
         InputMode::Normal if commit_visual_active || diff_visual_active => "VISUAL",
         InputMode::Normal => "NORMAL",
     }
+}
+
+fn short_id(id: &str) -> String {
+    id.chars().take(7).collect()
 }
 
 fn shell_prompt_line(buffer: &str, cursor: usize, theme: &UiTheme) -> Line<'static> {

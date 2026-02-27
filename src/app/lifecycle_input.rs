@@ -6,6 +6,7 @@ impl App {
         match self.preferences.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => self.handle_comment_input(key),
             InputMode::ShellCommand => self.handle_shell_command_input(key),
+            InputMode::WorktreeSwitch => self.handle_worktree_switch_input(key),
             InputMode::DiffSearch => self.handle_diff_search_input(key),
             InputMode::ListSearch(pane) => self.handle_list_search_input(pane, key),
             InputMode::Normal => {}
@@ -360,6 +361,7 @@ impl App {
                 }
             }
             InputMode::ShellCommand
+            | InputMode::WorktreeSwitch
             | InputMode::DiffSearch
             | InputMode::ListSearch(_)
             | InputMode::Normal => {}
@@ -679,14 +681,10 @@ impl App {
             KeyCode::Char('e') if key.modifiers == KeyModifiers::NONE => {
                 self.cycle_commit_status_filter();
             }
-            KeyCode::Char('u') => self.set_current_commit_status(ReviewStatus::Unreviewed),
-            KeyCode::Char('r') => self.set_current_commit_status(ReviewStatus::Reviewed),
-            KeyCode::Char('i') => self.set_current_commit_status(ReviewStatus::IssueFound),
-            KeyCode::Char('s') => self.set_current_commit_status(ReviewStatus::Resolved),
-            KeyCode::Char('U') => self.set_selected_commit_status(ReviewStatus::Unreviewed),
-            KeyCode::Char('R') => self.set_selected_commit_status(ReviewStatus::Reviewed),
-            KeyCode::Char('I') => self.set_selected_commit_status(ReviewStatus::IssueFound),
-            KeyCode::Char('S') => self.set_selected_commit_status(ReviewStatus::Resolved),
+            KeyCode::Char('u') => self.set_contextual_commit_status(ReviewStatus::Unreviewed),
+            KeyCode::Char('r') => self.set_contextual_commit_status(ReviewStatus::Reviewed),
+            KeyCode::Char('i') => self.set_contextual_commit_status(ReviewStatus::IssueFound),
+            KeyCode::Char('s') => self.set_contextual_commit_status(ReviewStatus::Resolved),
             _ => {}
         }
     }

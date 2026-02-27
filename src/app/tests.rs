@@ -1,5 +1,7 @@
-use super::lifecycle_render::footer_mode_label;
 use super::lifecycle_input::clear_commit_visual_anchor;
+use super::lifecycle_render::{
+    footer_mode_label, help_overlay_close_key, theme_toggle_conflicts_with_diff_pending_op,
+};
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
@@ -8,6 +10,7 @@ use super::ui::style::{
     pad_line_to_width, resolve_row_background, tint_line_background,
 };
 use super::*;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;
 use tempfile::tempdir;
 
@@ -697,6 +700,59 @@ fn footer_mode_label_prioritizes_modal_states() {
         footer_mode_label(InputMode::ShellCommand, true, true),
         "SHELL"
     );
+    assert_eq!(
+        footer_mode_label(InputMode::WorktreeSwitch, true, true),
+        "WORKTREE"
+    );
+}
+
+#[test]
+fn help_overlay_close_key_matches_modal_close_actions() {
+    assert!(help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('q'),
+        KeyModifiers::NONE
+    )));
+    assert!(help_overlay_close_key(KeyEvent::new(
+        KeyCode::Esc,
+        KeyModifiers::NONE
+    )));
+    assert!(help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('?'),
+        KeyModifiers::NONE
+    )));
+    assert!(!help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('q'),
+        KeyModifiers::CONTROL
+    )));
+    assert!(!help_overlay_close_key(KeyEvent::new(
+        KeyCode::Char('x'),
+        KeyModifiers::NONE
+    )));
+}
+
+#[test]
+fn theme_toggle_conflict_defers_t_to_diff_pending_z_op() {
+    let t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
+    assert!(theme_toggle_conflicts_with_diff_pending_op(
+        t,
+        FocusPane::Diff,
+        Some(DiffPendingOp::Z)
+    ));
+    assert!(!theme_toggle_conflicts_with_diff_pending_op(
+        t,
+        FocusPane::Files,
+        Some(DiffPendingOp::Z)
+    ));
+    assert!(!theme_toggle_conflicts_with_diff_pending_op(
+        t,
+        FocusPane::Diff,
+        None
+    ));
+    assert!(!theme_toggle_conflicts_with_diff_pending_op(
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::SHIFT),
+        FocusPane::Diff,
+        Some(DiffPendingOp::Z)
+    ));
 }
 
 #[test]
@@ -1251,7 +1307,10 @@ fn pad_line_to_width_extends_line_with_matching_style() {
         .collect::<String>();
 
     assert_eq!(flattened, "abc   ");
-    assert_eq!(padded.spans.last().map(|span| span.style.bg), Some(style.bg));
+    assert_eq!(
+        padded.spans.last().map(|span| span.style.bg),
+        Some(style.bg)
+    );
 }
 
 #[test]

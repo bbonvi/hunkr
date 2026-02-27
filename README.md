@@ -12,10 +12,25 @@ It lets you review a selected commit range as one net diff across all changed fi
 - Inline review comments anchored to commit/hunk/line selections
 - Auto-generated review task markdown for agent handoff and follow-up
 - Built-in filters/search for commits and files
-- Neovim-style `!` shell command modal with streamed stdout/stderr, persistent command history, and non-interactive execution (stdin/pager prompts disabled)
-- Terminal-safe rendering for shell/diff text (ANSI/control sequences sanitized) plus `Ctrl-l` hard refresh
+- In-app worktree switcher to move across linked git worktrees without leaving the session
+- Built-in git actions are read-only by product design
+- In-app shell command modal with streamed output and command history
 - Keyboard-first UX with mouse support (drag-select commit ranges with edge auto-scroll, wheel scroll in list panes)
-- Local performance optimizations for large diff sessions (viewport-based rendering and bounded, lazy syntax highlighting cache)
+- Responsive behavior on large diff sessions
+
+## Git Safety Model
+
+`hunkr` keeps built-in repository interactions read-only.
+
+- Built-in flows inspect git state and update local `.hunkr/` review metadata only.
+- Mutating git actions (for example checkout/switch/merge/rebase/reset/prune) are intentionally out of scope for built-in UI actions.
+- Branch switching remains an external git workflow, not a built-in `hunkr` action.
+
+## Worktree Support
+
+- Open the worktree switcher in-app and move between linked worktrees without restarting the session.
+- Worktree entries are ordered by latest commit activity (freshest first) while keeping the main repo worktree pinned at the top.
+- Review metadata remains anchored to the launch workspace `.hunkr/` directory, so commit statuses/comments stay shared inside that session.
 
 ## Local-First Data
 
@@ -25,8 +40,6 @@ All review state stays in your repo under `.hunkr/`:
 - `.hunkr/shell-history.json` for `!` command history
 - `.hunkr/comments/index.json` for comment storage
 - `.hunkr/comments/<branch>-review-tasks.md` for exported review tasks
-
-No remote service is required.
 
 ## Quick Start
 
