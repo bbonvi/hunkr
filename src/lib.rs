@@ -1,6 +1,7 @@
 //! Core modules for hunkr, a terminal multi-commit diff reviewer.
 
 pub mod app;
+mod atomic_write;
 pub mod clipboard;
 pub mod comments;
 pub mod config;

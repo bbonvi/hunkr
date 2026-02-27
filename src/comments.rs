@@ -6,6 +6,7 @@ use std::{
 use anyhow::Context;
 use chrono::Utc;
 
+use crate::atomic_write::atomic_write_text;
 use crate::model::{CommentTarget, ReviewComment, ReviewStatus};
 
 const COMMENTS_DIR: &str = "comments";
@@ -107,7 +108,7 @@ impl CommentStore {
             .with_context(|| format!("failed to create {}", self.root.display()))?;
 
         let report = render_review_tasks_report(&self.branch, &self.comments, status_for_commit);
-        fs::write(&self.report_path, report)
+        atomic_write_text(&self.report_path, &report)
             .with_context(|| format!("failed to write {}", self.report_path.display()))?;
         Ok(self.report_path.clone())
     }
@@ -117,7 +118,7 @@ impl CommentStore {
             .with_context(|| format!("failed to create {}", self.root.display()))?;
         let payload = serde_json::to_string_pretty(&self.comments)
             .context("failed to encode comments index")?;
-        fs::write(&self.index_path, payload)
+        atomic_write_text(&self.index_path, &payload)
             .with_context(|| format!("failed to write {}", self.index_path.display()))?;
         Ok(())
     }

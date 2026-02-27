@@ -7,6 +7,7 @@ use anyhow::Context;
 use chrono::Utc;
 use serde::Deserialize;
 
+use crate::atomic_write::atomic_write_text;
 use crate::model::{CommitStatusEntry, ReviewState, ReviewStatus};
 
 pub const PROJECT_DATA_DIR: &str = ".hunkr";
@@ -71,10 +72,8 @@ impl StateStore {
     }
 
     pub fn save(&self, state: &ReviewState) -> anyhow::Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("failed to create {}", self.root.display()))?;
         let payload = serde_json::to_string_pretty(state).context("failed to encode state json")?;
-        fs::write(&self.state_path, payload)
+        atomic_write_text(&self.state_path, &payload)
             .with_context(|| format!("failed to write {}", self.state_path.display()))?;
         Ok(())
     }
@@ -99,14 +98,12 @@ impl StateStore {
     }
 
     pub fn save_shell_history(&self, commands: &[String]) -> anyhow::Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("failed to create {}", self.root.display()))?;
         let payload = serde_json::to_string_pretty(&ShellHistory {
             version: 1,
             commands: commands.to_vec(),
         })
         .context("failed to encode shell history json")?;
-        fs::write(&self.shell_history_path, payload)
+        atomic_write_text(&self.shell_history_path, &payload)
             .with_context(|| format!("failed to write {}", self.shell_history_path.display()))?;
         Ok(())
     }
