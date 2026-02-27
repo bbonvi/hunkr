@@ -114,6 +114,7 @@ impl App {
                 output_cursor: 0,
                 output_visual_selection: None,
                 output_mouse_anchor: None,
+                output_flash_clear_due: None,
                 output_scroll: 0,
                 output_viewport: 0,
                 output_follow: true,
@@ -279,8 +280,13 @@ impl App {
             self.runtime.last_relative_time_redraw.elapsed(),
             selection_rebuild_in,
         );
-        if self.shell_command.running.is_some() {
+        let timeout = if self.shell_command.running.is_some() {
             timeout.min(SHELL_STREAM_POLL_EVERY)
+        } else {
+            timeout
+        };
+        if let Some(flash_timeout) = self.shell_output_flash_timeout() {
+            timeout.min(flash_timeout)
         } else {
             timeout
         }
@@ -355,6 +361,7 @@ impl App {
             return;
         }
         self.poll_shell_command_stream();
+        self.poll_shell_output_flash();
 
         let now = Instant::now();
         if self

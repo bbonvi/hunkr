@@ -2,6 +2,8 @@
 use super::*;
 use std::sync::mpsc::TryRecvError;
 
+const SHELL_STREAM_MAX_CHUNKS_PER_TICK: usize = 256;
+
 impl App {
     pub(super) fn open_shell_command_modal(&mut self) {
         self.preferences.input_mode = InputMode::ShellCommand;
@@ -223,7 +225,7 @@ impl App {
             }
 
             let mut disconnected = false;
-            loop {
+            for _ in 0..SHELL_STREAM_MAX_CHUNKS_PER_TICK {
                 match running.stream_rx.try_recv() {
                     Ok(chunk) => drained_chunks.push(chunk),
                     Err(TryRecvError::Empty) => break,
@@ -250,6 +252,24 @@ impl App {
         if changed {
             self.runtime.needs_redraw = true;
         }
+    }
+
+    pub(super) fn shell_output_flash_timeout(&self) -> Option<Duration> {
+        self.shell_command
+            .output_flash_clear_due
+            .map(|due| due.saturating_duration_since(Instant::now()))
+    }
+
+    pub(super) fn poll_shell_output_flash(&mut self) {
+        let Some(due) = self.shell_command.output_flash_clear_due else {
+            return;
+        };
+        if Instant::now() < due {
+            return;
+        }
+        self.shell_command.output_flash_clear_due = None;
+        self.clear_shell_output_visual_selection();
+        self.runtime.needs_redraw = true;
     }
 
     pub(super) fn close_shell_command_modal(&mut self) {
@@ -291,11 +311,6 @@ impl App {
         } else {
             None
         }
-    }
-
-    pub(super) fn shell_output_copy_payload(&self) -> Option<String> {
-        let rows = self.shell_output_rows();
-        shell_output_copy_payload_for_rows(&rows, self.shell_output_visual_range())
     }
 
     pub(super) fn shell_output_max_scroll(&self) -> usize {
@@ -374,6 +389,7 @@ impl App {
     fn clear_shell_output_visual_selection(&mut self) {
         self.shell_command.output_visual_selection = None;
         self.shell_command.output_mouse_anchor = None;
+        self.shell_command.output_flash_clear_due = None;
     }
 
     pub(super) fn sync_shell_output_visual_bounds(&mut self) {
@@ -458,7 +474,15 @@ impl App {
 
     fn handle_running_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc => self.close_shell_command_modal(),
+            KeyCode::Esc => {
+                if self.shell_command.output_visual_selection.is_some() {
+                    self.clear_shell_output_visual_selection();
+                    self.runtime.status = "Shell output visual range off".to_owned();
+                } else {
+                    self.interrupt_shell_command();
+                }
+            }
+            KeyCode::Backspace => self.restart_shell_command_modal(),
             KeyCode::Up | KeyCode::Char('k') => self.move_shell_output_cursor(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_shell_output_cursor(1),
             KeyCode::Char('u') | KeyCode::Char('U')
@@ -492,6 +516,7 @@ impl App {
                         anchor: self.shell_command.output_cursor,
                         origin: ShellOutputVisualOrigin::Keyboard,
                     });
+                    self.shell_command.output_flash_clear_due = None;
                     self.runtime.status = "Shell output visual range on".to_owned();
                 }
             }
@@ -503,7 +528,16 @@ impl App {
 
     fn handle_finished_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc | KeyCode::Enter => self.close_shell_command_modal(),
+            KeyCode::Esc => {
+                if self.shell_command.output_visual_selection.is_some() {
+                    self.clear_shell_output_visual_selection();
+                    self.runtime.status = "Shell output visual range off".to_owned();
+                } else {
+                    self.close_shell_command_modal();
+                }
+            }
+            KeyCode::Enter => self.close_shell_command_modal(),
+            KeyCode::Backspace => self.restart_shell_command_modal(),
             KeyCode::Up | KeyCode::Char('k') => self.move_shell_output_cursor(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_shell_output_cursor(1),
             KeyCode::Char('u') | KeyCode::Char('U')
@@ -537,6 +571,7 @@ impl App {
                         anchor: self.shell_command.output_cursor,
                         origin: ShellOutputVisualOrigin::Keyboard,
                     });
+                    self.shell_command.output_flash_clear_due = None;
                     self.runtime.status = "Shell output visual range on".to_owned();
                 }
             }
@@ -790,6 +825,33 @@ impl App {
         }
     }
 
+    fn interrupt_shell_command(&mut self) {
+        let Some(running) = self.shell_command.running.as_mut() else {
+            return;
+        };
+        match running.child.kill() {
+            Ok(()) => {
+                self.runtime.status = "Shell command interrupted".to_owned();
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidInput => {
+                self.runtime.status = "Shell command already exited".to_owned();
+            }
+            Err(err) => {
+                self.runtime.status = format!("Failed to interrupt shell command: {err}");
+            }
+        }
+    }
+
+    fn restart_shell_command_modal(&mut self) {
+        let was_running = self.shell_command.running.is_some();
+        self.stop_shell_process();
+        if was_running {
+            self.reconcile_repository_after_shell_command();
+        }
+        self.reset_shell_command_editor();
+        self.runtime.status = "Shell modal reset".to_owned();
+    }
+
     fn reset_shell_command_editor(&mut self) {
         self.shell_command.buffer.clear();
         self.shell_command.cursor = 0;
@@ -802,6 +864,7 @@ impl App {
         self.shell_command.output_cursor = 0;
         self.shell_command.output_visual_selection = None;
         self.shell_command.output_mouse_anchor = None;
+        self.shell_command.output_flash_clear_due = None;
         self.shell_command.output_scroll = 0;
         self.shell_command.output_follow = true;
         self.shell_command.finished = None;
@@ -833,10 +896,35 @@ impl App {
     }
 
     fn copy_shell_output(&mut self) {
-        let Some(payload) = self.shell_output_copy_payload() else {
+        let rows = self.shell_output_rows();
+        if rows.is_empty() {
+            self.runtime.status = "No shell output to copy".to_owned();
+            return;
+        }
+
+        let had_visual = self.shell_command.output_visual_selection.is_some();
+        let payload = if had_visual {
+            shell_output_copy_payload_for_rows(&rows, self.shell_output_visual_range())
+        } else {
+            shell_output_copy_payload_for_rows(&rows, None)
+        };
+        let Some(payload) = payload else {
             self.runtime.status = "No shell output to copy".to_owned();
             return;
         };
+
+        if !had_visual {
+            self.shell_command.output_visual_selection = Some(ShellOutputVisualSelection {
+                anchor: 0,
+                origin: ShellOutputVisualOrigin::Keyboard,
+            });
+            self.shell_command.output_cursor = rows.len().saturating_sub(1);
+            self.shell_command.output_flash_clear_due =
+                Some(Instant::now() + Duration::from_millis(200));
+            self.ensure_shell_output_cursor_visible();
+            self.runtime.needs_redraw = true;
+        }
+
         let line_count = payload.lines().count().max(1);
         match crate::clipboard::copy_to_clipboard_with_fallbacks(&payload) {
             Ok(backend) => {
@@ -845,6 +933,10 @@ impl App {
             Err(err) => {
                 self.runtime.status = format!("Clipboard unavailable for shell output ({err:#})");
             }
+        }
+
+        if had_visual {
+            self.clear_shell_output_visual_selection();
         }
     }
 
@@ -887,7 +979,7 @@ impl App {
     }
 }
 
-fn shell_output_index_at(
+pub(super) fn shell_output_index_at(
     rect: ratatui::layout::Rect,
     x: u16,
     y: u16,

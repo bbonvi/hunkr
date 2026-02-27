@@ -1,5 +1,5 @@
 use super::lifecycle_render::footer_mode_label;
-use super::shell_command::shell_output_copy_payload_for_rows;
+use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::{scrollbar_thumb, tint_line_background};
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{line_with_right, list_content_width, list_row_style};
@@ -489,6 +489,20 @@ fn shell_output_copy_payload_clamps_out_of_bounds_visual_range() {
     let payload =
         shell_output_copy_payload_for_rows(&rows, Some((1, 99))).expect("clamped payload");
     assert_eq!(payload, "b\nc");
+}
+
+#[test]
+fn shell_output_index_maps_viewport_row_to_scrolled_line() {
+    let rect = ratatui::layout::Rect::new(10, 5, 30, 6);
+    let idx = shell_output_index_at(rect, 12, 7, 20, 100).expect("line index");
+    assert_eq!(idx, 22);
+}
+
+#[test]
+fn shell_output_index_clamps_to_last_line() {
+    let rect = ratatui::layout::Rect::new(10, 5, 30, 6);
+    let idx = shell_output_index_at(rect, 12, 9, 98, 100).expect("line index");
+    assert_eq!(idx, 99);
 }
 
 #[test]

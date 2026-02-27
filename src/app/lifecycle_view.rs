@@ -285,7 +285,7 @@ impl App {
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
             ]),
             InputMode::ShellCommand => {
-                if self.shell_command.running.is_some() || self.shell_command.finished.is_some() {
+                if self.shell_command.running.is_some() {
                     Line::from(vec![
                         key_chip("j/k", theme),
                         Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -296,7 +296,24 @@ impl App {
                         key_chip("y", theme),
                         Span::styled(" copy output ", Style::default().fg(theme.muted)),
                         key_chip("Esc", theme),
-                        Span::styled(" close shell", Style::default().fg(theme.muted)),
+                        Span::styled(" interrupt ", Style::default().fg(theme.muted)),
+                        key_chip("Backspace", theme),
+                        Span::styled(" reset", Style::default().fg(theme.muted)),
+                    ])
+                } else if self.shell_command.finished.is_some() {
+                    Line::from(vec![
+                        key_chip("j/k", theme),
+                        Span::styled(" move ", Style::default().fg(theme.muted)),
+                        key_chip("Ctrl-d/u", theme),
+                        Span::styled(" jump ", Style::default().fg(theme.muted)),
+                        key_chip("v", theme),
+                        Span::styled(" range ", Style::default().fg(theme.muted)),
+                        key_chip("y", theme),
+                        Span::styled(" copy output ", Style::default().fg(theme.muted)),
+                        key_chip("Esc", theme),
+                        Span::styled(" close ", Style::default().fg(theme.muted)),
+                        key_chip("Backspace", theme),
+                        Span::styled(" reset", Style::default().fg(theme.muted)),
                     ])
                 } else {
                     Line::from(vec![
@@ -973,13 +990,15 @@ impl App {
         let footer_text = if self.shell_command.running.is_some() {
             Line::from(vec![
                 key_chip("Esc", theme),
-                Span::styled(" close  ", Style::default().fg(theme.muted)),
+                Span::styled(" interrupt  ", Style::default().fg(theme.muted)),
                 key_chip("Up/Down", theme),
                 Span::styled(" move  ", Style::default().fg(theme.muted)),
                 key_chip("v", theme),
                 Span::styled(" range  ", Style::default().fg(theme.muted)),
                 key_chip("y", theme),
-                Span::styled(" copy output", Style::default().fg(theme.muted)),
+                Span::styled(" copy output  ", Style::default().fg(theme.muted)),
+                key_chip("Backspace", theme),
+                Span::styled(" reset", Style::default().fg(theme.muted)),
             ])
         } else if self.shell_command.finished.is_some() {
             Line::from(vec![
@@ -990,7 +1009,9 @@ impl App {
                 key_chip("v", theme),
                 Span::styled(" range  ", Style::default().fg(theme.muted)),
                 key_chip("y", theme),
-                Span::styled(" copy output", Style::default().fg(theme.muted)),
+                Span::styled(" copy output  ", Style::default().fg(theme.muted)),
+                key_chip("Backspace", theme),
+                Span::styled(" reset", Style::default().fg(theme.muted)),
             ])
         } else {
             Line::from(vec![

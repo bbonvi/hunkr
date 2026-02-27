@@ -419,6 +419,7 @@ struct ShellCommandState {
     output_cursor: usize,
     output_visual_selection: Option<ShellOutputVisualSelection>,
     output_mouse_anchor: Option<usize>,
+    output_flash_clear_due: Option<Instant>,
     output_scroll: usize,
     output_viewport: usize,
     output_follow: bool,
