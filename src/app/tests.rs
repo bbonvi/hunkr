@@ -1,5 +1,5 @@
-use super::lifecycle_render::footer_mode_label;
 use super::lifecycle_input::clear_commit_visual_anchor;
+use super::lifecycle_render::footer_mode_label;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
@@ -697,6 +697,10 @@ fn footer_mode_label_prioritizes_modal_states() {
         footer_mode_label(InputMode::ShellCommand, true, true),
         "SHELL"
     );
+    assert_eq!(
+        footer_mode_label(InputMode::WorktreeSwitch, true, true),
+        "WORKTREE"
+    );
 }
 
 #[test]
@@ -1251,7 +1255,10 @@ fn pad_line_to_width_extends_line_with_matching_style() {
         .collect::<String>();
 
     assert_eq!(flattened, "abc   ");
-    assert_eq!(padded.spans.last().map(|span| span.style.bg), Some(style.bg));
+    assert_eq!(
+        padded.spans.last().map(|span| span.style.bg),
+        Some(style.bg)
+    );
 }
 
 #[test]

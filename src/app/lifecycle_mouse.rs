@@ -18,6 +18,9 @@ impl App {
             self.handle_shell_command_mouse(mouse);
             return;
         }
+        if matches!(self.preferences.input_mode, InputMode::WorktreeSwitch) {
+            return;
+        }
         let x = mouse.column;
         let y = mouse.row;
 

@@ -727,10 +727,8 @@ impl App {
             return;
         };
 
-        state.match_indexes = reverse_search_match_indexes(
-            &self.shell_command.history,
-            &state.query,
-        );
+        state.match_indexes =
+            reverse_search_match_indexes(&self.shell_command.history, &state.query);
 
         if state.match_indexes.is_empty() {
             state.match_cursor = 0;
@@ -1060,36 +1058,14 @@ impl App {
 
     fn reconcile_repository_after_shell_command(&mut self) {
         let previous_branch = self.git.branch_name().to_owned();
-        let reopened = match GitService::open_at(self.git.root()) {
-            Ok(git) => git,
-            Err(err) => {
-                self.runtime.status = format!("shell sync failed to reopen repository: {err:#}");
-                return;
-            }
-        };
-
-        let next_branch = reopened.branch_name().to_owned();
-        self.git = reopened;
-        self.comments = match CommentStore::new(self.store.root_dir(), &next_branch) {
-            Ok(store) => store,
-            Err(err) => {
-                self.runtime.status = format!(
-                    "shell sync failed to reload comments for branch {next_branch}: {err:#}"
-                );
-                return;
-            }
-        };
-
-        if let Err(err) = self.reload_commits(true) {
-            self.runtime.status = format!("shell sync failed to refresh UI: {err:#}");
+        let target = self.git.root().to_path_buf();
+        if let Err(err) = self.switch_repository_context(&target) {
+            self.runtime.status =
+                format!("shell sync failed to refresh repository context: {err:#}");
             return;
         }
 
-        let now = Instant::now();
-        self.runtime.last_refresh = now;
-        self.runtime.last_relative_time_redraw = now;
-        self.runtime.needs_redraw = true;
-
+        let next_branch = self.git.branch_name().to_owned();
         if previous_branch != next_branch {
             self.runtime.status =
                 format!("repository switched: {previous_branch} -> {next_branch}");

@@ -43,6 +43,7 @@ mod state;
 mod text_edit;
 mod tree_highlight;
 mod ui;
+mod worktree_switcher;
 use self::comment_helpers::*;
 use self::core_helpers::*;
 use self::nerd_fonts::{
@@ -60,11 +61,12 @@ use self::ui::diff_pane::{
 };
 use self::ui::list_panes::{CommitPaneModel, FilePaneModel, ListPaneRenderer};
 use self::ui::style::{CursorSelectionPolicy, apply_row_highlight};
+use self::worktree_switcher::short_path_label;
 
 use crate::{
     comments::CommentStore,
     config::StartupTheme,
-    git_data::GitService,
+    git_data::{GitService, WorktreeInfo},
     model::{
         AggregatedDiff, CommentAnchor, CommentTarget, CommentTargetKind, CommitInfo, DiffLineKind,
         FilePatch, HunkLine, ReviewComment, ReviewState, ReviewStatus, UNCOMMITTED_COMMIT_ID,
@@ -97,6 +99,7 @@ enum InputMode {
     CommentCreate,
     CommentEdit(u64),
     ShellCommand,
+    WorktreeSwitch,
     DiffSearch,
     ListSearch(FocusPane),
 }
@@ -450,6 +453,14 @@ struct ShellReverseSearchState {
     draft_buffer: String,
 }
 
+/// Worktree switcher modal state (entries, filter query, cursor).
+struct WorktreeSwitchState {
+    entries: Vec<WorktreeInfo>,
+    list_state: ListState,
+    query: String,
+    viewport_rows: usize,
+}
+
 /// Final shell command result displayed after process exit.
 struct ShellCommandResult {
     exit_status: ExitStatus,
@@ -521,6 +532,7 @@ pub struct App {
     diff_cache: DiffCacheState,
     comment_editor: CommentEditorState,
     shell_command: ShellCommandState,
+    worktree_switch: WorktreeSwitchState,
     search: SearchState,
     runtime: RuntimeState,
 }

@@ -1,6 +1,23 @@
 use super::*;
 
 impl App {
+    pub(super) fn switch_repository_context(&mut self, target: &Path) -> anyhow::Result<()> {
+        let reopened = GitService::open_at(target)
+            .with_context(|| format!("failed to reopen repository at {}", target.display()))?;
+        let branch = reopened.branch_name().to_owned();
+        self.git = reopened;
+        self.comments = CommentStore::new(self.store.root_dir(), &branch)
+            .with_context(|| format!("failed to reload comments for branch {branch}"))?;
+        self.reload_commits(true)
+            .context("failed to refresh commit and diff state")?;
+
+        let now = Instant::now();
+        self.runtime.last_refresh = now;
+        self.runtime.last_relative_time_redraw = now;
+        self.runtime.needs_redraw = true;
+        Ok(())
+    }
+
     pub(super) fn reload_commits(&mut self, preserve_manual_selection: bool) -> anyhow::Result<()> {
         let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
         let default_selected = self.git.default_unpushed_commit_ids()?;

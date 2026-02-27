@@ -133,6 +133,12 @@ impl App {
                 running: None,
                 finished: None,
             },
+            worktree_switch: WorktreeSwitchState {
+                entries: Vec::new(),
+                list_state: ListState::default(),
+                query: String::new(),
+                viewport_rows: 0,
+            },
             search: SearchState {
                 diff_buffer: String::new(),
                 diff_query: None,
@@ -386,6 +392,8 @@ impl App {
             self.render_comment_modal(frame, &theme);
         } else if matches!(self.preferences.input_mode, InputMode::ShellCommand) {
             self.render_shell_command_modal(frame, &theme);
+        } else if matches!(self.preferences.input_mode, InputMode::WorktreeSwitch) {
+            self.render_worktree_switcher_modal(frame, &theme);
         }
     }
 
@@ -494,6 +502,9 @@ impl App {
                 if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
             {
                 self.open_shell_command_modal();
+            }
+            KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
+                self.open_worktree_switcher();
             }
             KeyCode::Char('t') => self.toggle_theme(),
             KeyCode::F(5) => self.refresh_now(),
