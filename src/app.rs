@@ -456,6 +456,7 @@ struct ShellCommandResult {
 /// Process execution state with live stdout/stderr readers.
 struct RunningShellCommand {
     child: Child,
+    process_group_id: Option<u32>,
     stream_rx: mpsc::Receiver<String>,
     stdout_reader: Option<JoinHandle<()>>,
     stderr_reader: Option<JoinHandle<()>>,

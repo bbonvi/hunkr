@@ -849,6 +849,9 @@ impl App {
             return;
         };
 
+        if let Some(pgid) = running.process_group_id {
+            let _ = kill_process_group(pgid);
+        }
         let _ = running.child.kill();
         let _ = running.child.wait();
 
@@ -864,6 +867,20 @@ impl App {
         let Some(running) = self.shell_command.running.as_mut() else {
             return;
         };
+        if let Some(pgid) = running.process_group_id {
+            match kill_process_group(pgid) {
+                Ok(()) => {
+                    self.runtime.status = "Shell command interrupted".to_owned();
+                    return;
+                }
+                Err(err) => {
+                    self.runtime.status = format!(
+                        "Failed to interrupt shell process group: {err}; trying direct kill"
+                    );
+                }
+            }
+        }
+
         match running.child.kill() {
             Ok(()) => {
                 self.runtime.status = "Shell command interrupted".to_owned();
@@ -1051,14 +1068,7 @@ fn spawn_shell_command(command: &str) -> anyhow::Result<RunningShellCommand> {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "/bin/sh".to_owned());
 
-    let mut child = Command::new(&shell)
-        .arg("-lc")
-        .arg(command)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to spawn `{shell} -lc <command>`"))?;
+    let (mut child, process_group_id) = spawn_shell_process(&shell, command)?;
 
     let stdout = child
         .stdout
@@ -1075,11 +1085,40 @@ fn spawn_shell_command(command: &str) -> anyhow::Result<RunningShellCommand> {
 
     Ok(RunningShellCommand {
         child,
+        process_group_id,
         stream_rx: rx,
         stdout_reader,
         stderr_reader,
         exit_status: None,
     })
+}
+
+fn spawn_shell_process(shell: &str, command: &str) -> anyhow::Result<(Child, Option<u32>)> {
+    #[cfg(unix)]
+    {
+        if let Ok(child) = Command::new("setsid")
+            .arg(shell)
+            .arg("-lc")
+            .arg(command)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            let pgid = child.id();
+            return Ok((child, Some(pgid)));
+        }
+    }
+
+    let child = Command::new(shell)
+        .arg("-lc")
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to spawn `{shell} -lc <command>`"))?;
+    Ok((child, None))
 }
 
 fn spawn_shell_pipe_reader<R>(mut reader: R, tx: mpsc::SyncSender<String>) -> JoinHandle<()>
@@ -1106,4 +1145,27 @@ where
             }
         }
     })
+}
+
+#[cfg(unix)]
+fn kill_process_group(process_group_id: u32) -> std::io::Result<()> {
+    let status = Command::new("kill")
+        .arg("-KILL")
+        .arg(format!("-{process_group_id}"))
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "`kill -KILL -{process_group_id}` exited with status {status}"
+        )))
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_process_group_id: u32) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "process-group kill is only supported on unix",
+    ))
 }
