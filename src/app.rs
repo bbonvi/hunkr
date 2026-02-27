@@ -458,6 +458,7 @@ struct WorktreeSwitchState {
     entries: Vec<WorktreeInfo>,
     list_state: ListState,
     query: String,
+    search_active: bool,
     viewport_rows: usize,
 }
 

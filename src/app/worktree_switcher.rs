@@ -3,6 +3,8 @@ use super::*;
 
 impl App {
     pub(super) fn open_worktree_switcher(&mut self) {
+        self.worktree_switch.search_active = false;
+        self.worktree_switch.query.clear();
         match self.refresh_worktree_switch_entries() {
             Ok(()) => {
                 self.preferences.input_mode = InputMode::WorktreeSwitch;
@@ -19,6 +21,11 @@ impl App {
     }
 
     pub(super) fn handle_worktree_switch_input(&mut self, key: KeyEvent) {
+        if self.worktree_switch.search_active {
+            self.handle_worktree_search_input(key);
+            return;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 self.preferences.input_mode = InputMode::Normal;
@@ -37,9 +44,8 @@ impl App {
             KeyCode::PageUp => self.page_worktree_cursor(-1.0),
             KeyCode::Char('g') => self.select_first_worktree(),
             KeyCode::Char('G') => self.select_last_worktree(),
-            KeyCode::Backspace => {
-                self.worktree_switch.query.pop();
-                self.sync_worktree_cursor(None, self.worktree_switch.list_state.selected());
+            KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
+                self.worktree_switch.search_active = true;
                 self.runtime.status = format!("/{}", self.worktree_switch.query);
             }
             KeyCode::Char('r') if key.modifiers == KeyModifiers::NONE => {
@@ -52,14 +58,6 @@ impl App {
                         self.worktree_switch.entries.len()
                     );
                 }
-            }
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    return;
-                }
-                self.worktree_switch.query.push(c);
-                self.sync_worktree_cursor(None, self.worktree_switch.list_state.selected());
-                self.runtime.status = format!("/{}", self.worktree_switch.query);
             }
             _ => {}
         }
@@ -181,6 +179,41 @@ impl App {
             .or_else(|| fallback.map(|idx| idx.min(visible.len().saturating_sub(1))))
             .unwrap_or(0);
         self.worktree_switch.list_state.select(Some(selected));
+    }
+
+    fn handle_worktree_search_input(&mut self, key: KeyEvent) {
+        let fallback_visible_idx = self.worktree_switch.list_state.selected();
+        match key.code {
+            KeyCode::Esc => {
+                self.worktree_switch.search_active = false;
+                self.worktree_switch.query.clear();
+                self.sync_worktree_cursor(None, fallback_visible_idx);
+                self.runtime.status = "Worktree search cleared".to_owned();
+            }
+            KeyCode::Enter => {
+                self.worktree_switch.search_active = false;
+                let query = self.worktree_switch.query.trim();
+                self.runtime.status = if query.is_empty() {
+                    "Worktree search off".to_owned()
+                } else {
+                    format!("Worktree filter: /{query}")
+                };
+            }
+            KeyCode::Backspace => {
+                self.worktree_switch.query.pop();
+                self.sync_worktree_cursor(None, fallback_visible_idx);
+                self.runtime.status = format!("/{}", self.worktree_switch.query);
+            }
+            KeyCode::Char(c) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    return;
+                }
+                self.worktree_switch.query.push(c);
+                self.sync_worktree_cursor(None, fallback_visible_idx);
+                self.runtime.status = format!("/{}", self.worktree_switch.query);
+            }
+            _ => {}
+        }
     }
 }
 

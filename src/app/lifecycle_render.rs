@@ -137,6 +137,7 @@ impl App {
                 entries: Vec::new(),
                 list_state: ListState::default(),
                 query: String::new(),
+                search_active: false,
                 viewport_rows: 0,
             },
             search: SearchState {

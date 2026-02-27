@@ -333,22 +333,33 @@ impl App {
                     ])
                 }
             }
-            InputMode::WorktreeSwitch => Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" switch ", Style::default().fg(theme.muted)),
-                key_chip("j/k", theme),
-                Span::styled(" move ", Style::default().fg(theme.muted)),
-                key_chip("Ctrl-d/u", theme),
-                Span::styled(" jump ", Style::default().fg(theme.muted)),
-                key_chip("type", theme),
-                Span::styled(" filter ", Style::default().fg(theme.muted)),
-                key_chip("Backspace", theme),
-                Span::styled(" edit filter ", Style::default().fg(theme.muted)),
-                key_chip("r", theme),
-                Span::styled(" refresh ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" close", Style::default().fg(theme.muted)),
-            ]),
+            InputMode::WorktreeSwitch => {
+                if self.worktree_switch.search_active {
+                    Line::from(vec![
+                        key_chip("Enter", theme),
+                        Span::styled(" defocus ", Style::default().fg(theme.muted)),
+                        key_chip("Esc", theme),
+                        Span::styled(" clear ", Style::default().fg(theme.muted)),
+                        key_chip("Backspace", theme),
+                        Span::styled(" edit ", Style::default().fg(theme.muted)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        key_chip("Enter", theme),
+                        Span::styled(" switch ", Style::default().fg(theme.muted)),
+                        key_chip("j/k", theme),
+                        Span::styled(" move ", Style::default().fg(theme.muted)),
+                        key_chip("Ctrl-d/u", theme),
+                        Span::styled(" jump ", Style::default().fg(theme.muted)),
+                        key_chip("/", theme),
+                        Span::styled(" search ", Style::default().fg(theme.muted)),
+                        key_chip("r", theme),
+                        Span::styled(" refresh ", Style::default().fg(theme.muted)),
+                        key_chip("Esc", theme),
+                        Span::styled(" close", Style::default().fg(theme.muted)),
+                    ])
+                }
+            }
             InputMode::DiffSearch => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" search ", Style::default().fg(theme.muted)),
@@ -373,6 +384,8 @@ impl App {
                     Span::styled(" filter ", Style::default().fg(theme.muted)),
                     key_chip("Enter", theme),
                     Span::styled(" focus diff", Style::default().fg(theme.muted)),
+                    key_chip("w", theme),
+                    Span::styled(" worktrees", Style::default().fg(theme.muted)),
                 ]),
                 FocusPane::Commits => Line::from(vec![
                     key_chip("space", theme),
@@ -384,7 +397,9 @@ impl App {
                     key_chip("e", theme),
                     Span::styled(" status filter ", Style::default().fg(theme.muted)),
                     key_chip("/", theme),
-                    Span::styled(" search", Style::default().fg(theme.muted)),
+                    Span::styled(" search ", Style::default().fg(theme.muted)),
+                    key_chip("w", theme),
+                    Span::styled(" worktrees", Style::default().fg(theme.muted)),
                 ]),
                 FocusPane::Diff => Line::from(vec![
                     key_chip("v", theme),
@@ -404,7 +419,9 @@ impl App {
                     key_chip("Y", theme),
                     Span::styled(" copy task path ", Style::default().fg(theme.muted)),
                     key_chip("Ctrl-d/u", theme),
-                    Span::styled(" jump", Style::default().fg(theme.muted)),
+                    Span::styled(" jump ", Style::default().fg(theme.muted)),
+                    key_chip("w", theme),
+                    Span::styled(" worktrees", Style::default().fg(theme.muted)),
                 ]),
             },
         };
@@ -543,25 +560,27 @@ impl App {
                 ));
             }
             InputMode::WorktreeSwitch => {
-                let query = if self.worktree_switch.query.is_empty() {
-                    "/".to_owned()
-                } else {
-                    format!("/{}", self.worktree_switch.query)
-                };
-                status.push(footer_separator(theme));
-                status.push(footer_chip(
-                    &format!(
-                        "{query} {}/{}",
-                        self.visible_worktree_indices().len(),
-                        self.worktree_switch.entries.len()
-                    ),
-                    Style::default().fg(theme.accent).bg(blend_colors(
-                        theme.panel_title_bg,
-                        theme.border,
-                        176,
-                    )),
-                    Modifier::BOLD,
-                ));
+                if self.worktree_switch.search_active || !self.worktree_switch.query.is_empty() {
+                    let query = if self.worktree_switch.query.is_empty() {
+                        "/".to_owned()
+                    } else {
+                        format!("/{}", self.worktree_switch.query)
+                    };
+                    status.push(footer_separator(theme));
+                    status.push(footer_chip(
+                        &format!(
+                            "{query} {}/{}",
+                            self.visible_worktree_indices().len(),
+                            self.worktree_switch.entries.len()
+                        ),
+                        Style::default().fg(theme.accent).bg(blend_colors(
+                            theme.panel_title_bg,
+                            theme.border,
+                            176,
+                        )),
+                        Modifier::BOLD,
+                    ));
+                }
             }
             InputMode::Normal => {}
         }
@@ -1411,10 +1430,22 @@ impl App {
 
         let visible = self.visible_worktree_indices();
         let search = if self.worktree_switch.query.trim().is_empty() {
-            "off".to_owned()
+            if self.worktree_switch.search_active {
+                "/".to_owned()
+            } else {
+                "off".to_owned()
+            }
         } else {
             format!("/{}", self.worktree_switch.query)
         };
+        let filter_style =
+            if self.worktree_switch.search_active || !self.worktree_switch.query.is_empty() {
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.dimmed)
+            };
         let selected = self
             .selected_worktree_full_index()
             .and_then(|idx| self.worktree_switch.entries.get(idx))
@@ -1434,14 +1465,7 @@ impl App {
             ),
             Span::raw("  "),
             Span::styled("filter: ", Style::default().fg(theme.dimmed)),
-            sanitized_span(
-                &search,
-                Some(
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ),
+            sanitized_span(&search, Some(filter_style)),
             Span::raw("  "),
             Span::styled("selected: ", Style::default().fg(theme.dimmed)),
             Span::styled(selected, Style::default().fg(theme.text)),
@@ -1501,16 +1525,27 @@ impl App {
         self.worktree_switch.viewport_rows = sections[1].height.saturating_sub(2) as usize;
         frame.render_stateful_widget(list, sections[1], &mut self.worktree_switch.list_state);
 
-        let footer = Paragraph::new(Line::from(vec![
-            key_chip("Enter", theme),
-            Span::styled(" switch ", Style::default().fg(theme.muted)),
-            key_chip("r", theme),
-            Span::styled(" refresh ", Style::default().fg(theme.muted)),
-            key_chip("type", theme),
-            Span::styled(" filter ", Style::default().fg(theme.muted)),
-            key_chip("Esc", theme),
-            Span::styled(" close ", Style::default().fg(theme.muted)),
-        ]));
+        let footer = if self.worktree_switch.search_active {
+            Paragraph::new(Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" defocus ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" clear ", Style::default().fg(theme.muted)),
+                key_chip("Backspace", theme),
+                Span::styled(" edit ", Style::default().fg(theme.muted)),
+            ]))
+        } else {
+            Paragraph::new(Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" switch ", Style::default().fg(theme.muted)),
+                key_chip("/", theme),
+                Span::styled(" search ", Style::default().fg(theme.muted)),
+                key_chip("r", theme),
+                Span::styled(" refresh ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" close ", Style::default().fg(theme.muted)),
+            ]))
+        };
         frame.render_widget(footer, sections[2]);
     }
 }
