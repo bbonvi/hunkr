@@ -1478,6 +1478,7 @@ impl App {
                 Style::default().fg(theme.muted),
             )))]
         } else {
+            let now_ts = Utc::now().timestamp();
             visible
                 .iter()
                 .filter_map(|idx| self.worktree_switch.entries.get(*idx))
@@ -1489,6 +1490,10 @@ impl App {
                     };
                     let branch = entry.branch.as_deref().unwrap_or("detached");
                     let short_head = short_id(&entry.head);
+                    let latest = entry
+                        .latest_commit_ts
+                        .map(|ts| format_relative_time(ts, now_ts))
+                        .unwrap_or_else(|| "unknown".to_owned());
                     let mut tags = Vec::<&str>::new();
                     if entry.locked_reason.is_some() {
                         tags.push("locked");
@@ -1502,7 +1507,7 @@ impl App {
                         format!(" [{}]", tags.join(","))
                     };
                     let line = format!(
-                        "{current} {}  {branch}  {short_head}{tags}",
+                        "{current} {}  {latest}  {branch}  {short_head}{tags}",
                         entry.path.display()
                     );
                     ListItem::new(Line::from(sanitized_span(

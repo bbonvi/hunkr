@@ -29,6 +29,7 @@ pub struct GitService {
 pub struct WorktreeInfo {
     pub path: PathBuf,
     pub head: String,
+    pub latest_commit_ts: Option<i64>,
     pub branch: Option<String>,
     pub locked_reason: Option<String>,
     pub prunable_reason: Option<String>,
@@ -90,8 +91,17 @@ impl GitService {
             ));
         }
         let mut items = parse_worktree_list_porcelain(&output.stdout)?;
+        for entry in &mut items {
+            entry.latest_commit_ts = self.commit_timestamp_for_head(&entry.head);
+        }
         sort_worktrees(&mut items, &self.main_root);
         Ok(items)
+    }
+
+    fn commit_timestamp_for_head(&self, head: &str) -> Option<i64> {
+        let oid = Oid::from_str(head).ok()?;
+        let commit = self.repo.find_commit(oid).ok()?;
+        Some(commit.time().seconds())
     }
 
     pub fn load_first_parent_history(&self, max: usize) -> anyhow::Result<Vec<CommitInfo>> {
@@ -546,6 +556,7 @@ impl WorktreeInfoBuilder {
         Ok(WorktreeInfo {
             path,
             head: self.head.unwrap_or_default(),
+            latest_commit_ts: None,
             branch: self.branch,
             locked_reason: self.locked_reason,
             prunable_reason: self.prunable_reason,
@@ -632,8 +643,8 @@ where
             return right_main.cmp(&left_main);
         }
 
-        let left_ts = timestamp_of(&left.path);
-        let right_ts = timestamp_of(&right.path);
+        let left_ts = left.latest_commit_ts.or_else(|| timestamp_of(&left.path));
+        let right_ts = right.latest_commit_ts.or_else(|| timestamp_of(&right.path));
         right_ts
             .cmp(&left_ts)
             .then_with(|| left.path.cmp(&right.path))
