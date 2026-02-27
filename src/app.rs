@@ -2,8 +2,11 @@ use std::{
     cmp::{max, min},
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     fs,
+    io::Read,
     path::Path,
-    sync::Arc,
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{Arc, mpsc},
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
@@ -35,6 +38,7 @@ mod lifecycle_view;
 mod navigation;
 mod nerd_fonts;
 mod selection_helpers;
+mod shell_command;
 mod state;
 mod text_edit;
 mod tree_highlight;
@@ -52,7 +56,7 @@ use self::tree_highlight::*;
 use self::ui::diff_pane::{
     DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, PendingDiffViewAnchor,
     capture_pending_diff_view_anchor, find_diff_match_from_cursor, find_index_for_line_locator,
-    is_hunk_header_line,
+    is_hunk_header_line, scrollbar_thumb,
 };
 use self::ui::list_panes::{CommitPaneModel, FilePaneModel, ListPaneRenderer};
 
@@ -75,6 +79,8 @@ const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
+const SHELL_HISTORY_LIMIT: usize = 300;
+const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -88,6 +94,7 @@ enum InputMode {
     Normal,
     CommentCreate,
     CommentEdit(u64),
+    ShellCommand,
     DiffSearch,
     ListSearch(FocusPane),
 }
@@ -398,6 +405,47 @@ struct CommentEditorState {
     text_offset: u16,
 }
 
+/// Shell command modal/editor mutable state.
+struct ShellCommandState {
+    buffer: String,
+    cursor: usize,
+    history: VecDeque<String>,
+    history_nav: Option<usize>,
+    history_draft: String,
+    reverse_search: Option<ShellReverseSearchState>,
+    active_command: Option<String>,
+    output_lines: Vec<String>,
+    output_tail: String,
+    output_scroll: usize,
+    output_viewport: usize,
+    output_follow: bool,
+    output_rect: Option<ratatui::layout::Rect>,
+    running: Option<RunningShellCommand>,
+    finished: Option<ShellCommandResult>,
+}
+
+/// Reverse-search state for shell history (`Ctrl-r`).
+struct ShellReverseSearchState {
+    query: String,
+    match_indexes: Vec<usize>,
+    match_cursor: usize,
+    draft_buffer: String,
+}
+
+/// Final shell command result displayed after process exit.
+struct ShellCommandResult {
+    exit_status: ExitStatus,
+}
+
+/// Process execution state with live stdout/stderr readers.
+struct RunningShellCommand {
+    child: Child,
+    stream_rx: mpsc::Receiver<String>,
+    stdout_reader: Option<JoinHandle<()>>,
+    stderr_reader: Option<JoinHandle<()>>,
+    exit_status: Option<ExitStatus>,
+}
+
 /// Search/filter query buffers.
 struct SearchState {
     diff_buffer: String,
@@ -435,6 +483,7 @@ pub struct App {
     diff_ui: DiffUiState,
     diff_cache: DiffCacheState,
     comment_editor: CommentEditorState,
+    shell_command: ShellCommandState,
     search: SearchState,
     runtime: RuntimeState,
 }

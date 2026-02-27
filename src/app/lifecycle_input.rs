@@ -5,6 +5,7 @@ impl App {
     pub(super) fn handle_non_normal_input(&mut self, key: KeyEvent) {
         match self.preferences.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => self.handle_comment_input(key),
+            InputMode::ShellCommand => self.handle_shell_command_input(key),
             InputMode::DiffSearch => self.handle_diff_search_input(key),
             InputMode::ListSearch(pane) => self.handle_list_search_input(pane, key),
             InputMode::Normal => {}
@@ -358,7 +359,10 @@ impl App {
                     }
                 }
             }
-            InputMode::DiffSearch | InputMode::ListSearch(_) | InputMode::Normal => {}
+            InputMode::ShellCommand
+            | InputMode::DiffSearch
+            | InputMode::ListSearch(_)
+            | InputMode::Normal => {}
         }
 
         if close_editor {

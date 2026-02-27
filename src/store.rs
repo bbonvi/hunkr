@@ -11,19 +11,26 @@ use crate::model::{CommitStatusEntry, ReviewState, ReviewStatus};
 
 pub const PROJECT_DATA_DIR: &str = ".hunkr";
 const STATE_FILE: &str = "state.json";
+const SHELL_HISTORY_FILE: &str = "shell-history.json";
 
 /// Project-local persistence manager for review state.
 #[derive(Debug, Clone)]
 pub struct StateStore {
     root: PathBuf,
     state_path: PathBuf,
+    shell_history_path: PathBuf,
 }
 
 impl StateStore {
     pub fn for_project(project_root: &Path) -> Self {
         let root = project_root.join(PROJECT_DATA_DIR);
         let state_path = root.join(STATE_FILE);
-        Self { root, state_path }
+        let shell_history_path = root.join(SHELL_HISTORY_FILE);
+        Self {
+            root,
+            state_path,
+            shell_history_path,
+        }
     }
 
     pub fn root_dir(&self) -> &Path {
@@ -69,6 +76,38 @@ impl StateStore {
         let payload = serde_json::to_string_pretty(state).context("failed to encode state json")?;
         fs::write(&self.state_path, payload)
             .with_context(|| format!("failed to write {}", self.state_path.display()))?;
+        Ok(())
+    }
+
+    pub fn load_shell_history(&self) -> anyhow::Result<Vec<String>> {
+        if !self.shell_history_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let raw = fs::read_to_string(&self.shell_history_path)
+            .with_context(|| format!("failed to read {}", self.shell_history_path.display()))?;
+        if let Ok(history) = serde_json::from_str::<ShellHistory>(&raw) {
+            return Ok(history.commands);
+        }
+        if let Ok(commands) = serde_json::from_str::<Vec<String>>(&raw) {
+            return Ok(commands);
+        }
+        Err(anyhow::anyhow!(
+            "failed to parse {}",
+            self.shell_history_path.display()
+        ))
+    }
+
+    pub fn save_shell_history(&self, commands: &[String]) -> anyhow::Result<()> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("failed to create {}", self.root.display()))?;
+        let payload = serde_json::to_string_pretty(&ShellHistory {
+            version: 1,
+            commands: commands.to_vec(),
+        })
+        .context("failed to encode shell history json")?;
+        fs::write(&self.shell_history_path, payload)
+            .with_context(|| format!("failed to write {}", self.shell_history_path.display()))?;
         Ok(())
     }
 
@@ -128,6 +167,12 @@ struct LegacyApprovalEntry {
 #[derive(Debug, Deserialize)]
 struct LegacyReviewState {
     approvals: std::collections::BTreeMap<String, LegacyApprovalEntry>,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+struct ShellHistory {
+    version: u32,
+    commands: Vec<String>,
 }
 
 #[cfg(test)]

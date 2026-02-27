@@ -14,6 +14,10 @@ impl App {
             self.handle_comment_mouse(mouse);
             return;
         }
+        if matches!(self.preferences.input_mode, InputMode::ShellCommand) {
+            self.handle_shell_command_mouse(mouse);
+            return;
+        }
         let x = mouse.column;
         let y = mouse.row;
 

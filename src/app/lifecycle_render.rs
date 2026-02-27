@@ -41,6 +41,7 @@ impl App {
 
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
         let now = Instant::now();
+        let shell_history = deps.store.load_shell_history().unwrap_or_default();
         Self {
             git: deps.git,
             store: deps.store,
@@ -99,6 +100,23 @@ impl App {
                 line_ranges: Vec::new(),
                 view_start: 0,
                 text_offset: 0,
+            },
+            shell_command: ShellCommandState {
+                buffer: String::new(),
+                cursor: 0,
+                history: shell_history.into_iter().collect(),
+                history_nav: None,
+                history_draft: String::new(),
+                reverse_search: None,
+                active_command: None,
+                output_lines: Vec::new(),
+                output_tail: String::new(),
+                output_scroll: 0,
+                output_viewport: 0,
+                output_follow: true,
+                output_rect: None,
+                running: None,
+                finished: None,
             },
             search: SearchState {
                 diff_buffer: String::new(),
@@ -253,11 +271,16 @@ impl App {
             .runtime
             .selection_rebuild_due
             .map(|due| due.saturating_duration_since(Instant::now()));
-        next_poll_timeout(
+        let timeout = next_poll_timeout(
             self.runtime.last_refresh.elapsed(),
             self.runtime.last_relative_time_redraw.elapsed(),
             selection_rebuild_in,
-        )
+        );
+        if self.shell_command.running.is_some() {
+            timeout.min(SHELL_STREAM_POLL_EVERY)
+        } else {
+            timeout
+        }
     }
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
@@ -272,6 +295,8 @@ impl App {
         self.comment_editor.line_ranges.clear();
         self.comment_editor.view_start = 0;
         self.comment_editor.text_offset = 0;
+        self.shell_command.output_rect = None;
+        self.shell_command.output_viewport = 0;
 
         let root_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -317,6 +342,8 @@ impl App {
             InputMode::CommentCreate | InputMode::CommentEdit(_)
         ) {
             self.render_comment_modal(frame, &theme);
+        } else if matches!(self.preferences.input_mode, InputMode::ShellCommand) {
+            self.render_shell_command_modal(frame, &theme);
         }
     }
 
@@ -324,6 +351,7 @@ impl App {
         if self.onboarding_active() {
             return;
         }
+        self.poll_shell_command_stream();
 
         let now = Instant::now();
         if self
@@ -407,6 +435,11 @@ impl App {
             }
             KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => {
                 self.set_focus(FocusPane::Diff)
+            }
+            KeyCode::Char('!')
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                self.open_shell_command_modal();
             }
             KeyCode::Char('t') => self.toggle_theme(),
             KeyCode::F(5) => self.refresh_now(),

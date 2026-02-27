@@ -84,3 +84,48 @@ fn legacy_state_upgrades_to_reviewed() {
         ReviewStatus::Reviewed
     );
 }
+
+#[test]
+fn shell_history_roundtrip_preserves_order() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+
+    let commands = vec![
+        "git status".to_owned(),
+        "cargo test --lib".to_owned(),
+        "echo done".to_owned(),
+    ];
+    store
+        .save_shell_history(&commands)
+        .expect("save shell history");
+
+    let loaded = store.load_shell_history().expect("load shell history");
+    assert_eq!(loaded, commands);
+}
+
+#[test]
+fn shell_history_missing_file_returns_empty() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+
+    let loaded = store.load_shell_history().expect("load shell history");
+    assert!(loaded.is_empty());
+}
+
+#[test]
+fn shell_history_loads_legacy_array_format() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+    fs::create_dir_all(store.root_dir()).expect("mkdir");
+    fs::write(
+        store.shell_history_path.clone(),
+        r#"["git status", "cargo test"]"#,
+    )
+    .expect("write history");
+
+    let loaded = store.load_shell_history().expect("load shell history");
+    assert_eq!(
+        loaded,
+        vec!["git status".to_owned(), "cargo test".to_owned()]
+    );
+}

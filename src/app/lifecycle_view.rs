@@ -284,6 +284,16 @@ impl App {
                 key_chip("Esc", theme),
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
             ]),
+            InputMode::ShellCommand => Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" run/continue ", Style::default().fg(theme.muted)),
+                key_chip("Ctrl-r", theme),
+                Span::styled(" history search ", Style::default().fg(theme.muted)),
+                key_chip("Up/Down", theme),
+                Span::styled(" history/scroll ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" close shell", Style::default().fg(theme.muted)),
+            ]),
             InputMode::DiffSearch => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" search ", Style::default().fg(theme.muted)),
@@ -349,6 +359,8 @@ impl App {
             Span::styled(" cycle all ", Style::default().fg(theme.dimmed)),
             key_chip("h/l", theme),
             Span::styled(" prev/next pane ", Style::default().fg(theme.dimmed)),
+            key_chip("!", theme),
+            Span::styled(" shell ", Style::default().fg(theme.dimmed)),
             key_chip("t", theme),
             Span::styled(" theme ", Style::default().fg(theme.dimmed)),
             key_chip("?", theme),
@@ -437,6 +449,32 @@ impl App {
                 status.push(footer_separator(theme));
                 status.push(footer_chip(
                     &query,
+                    Style::default().fg(theme.accent).bg(blend_colors(
+                        theme.panel_title_bg,
+                        theme.border,
+                        176,
+                    )),
+                    Modifier::BOLD,
+                ));
+            }
+            InputMode::ShellCommand => {
+                status.push(footer_separator(theme));
+                let command = self
+                    .shell_command
+                    .active_command
+                    .as_deref()
+                    .unwrap_or(self.shell_command.buffer.as_str());
+                let label = if self.shell_command.running.is_some() {
+                    "running"
+                } else if self.shell_command.finished.is_some() {
+                    "done"
+                } else if self.shell_command.reverse_search.is_some() {
+                    "search"
+                } else {
+                    "input"
+                };
+                status.push(footer_chip(
+                    &format!("{label}: {}", truncate(command, 42)),
                     Style::default().fg(theme.accent).bg(blend_colors(
                         theme.panel_title_bg,
                         theme.border,
@@ -561,7 +599,10 @@ impl App {
         let title = match self.preferences.input_mode {
             InputMode::CommentCreate => " NEW COMMENT ",
             InputMode::CommentEdit(_) => " EDIT COMMENT ",
-            InputMode::Normal | InputMode::DiffSearch | InputMode::ListSearch(_) => " COMMENT ",
+            InputMode::Normal
+            | InputMode::ShellCommand
+            | InputMode::DiffSearch
+            | InputMode::ListSearch(_) => " COMMENT ",
         };
         let shell = Block::default()
             .title(Span::styled(
@@ -592,7 +633,10 @@ impl App {
         let mode_badge = match self.preferences.input_mode {
             InputMode::CommentCreate => "create",
             InputMode::CommentEdit(_) => "edit",
-            InputMode::Normal | InputMode::DiffSearch | InputMode::ListSearch(_) => "idle",
+            InputMode::Normal
+            | InputMode::ShellCommand
+            | InputMode::DiffSearch
+            | InputMode::ListSearch(_) => "idle",
         };
         let status_style = if self.runtime.status.contains("Failed")
             || self.runtime.status.contains("failed")
@@ -686,6 +730,236 @@ impl App {
         frame.render_widget(footer, sections[3]);
     }
 
+    pub(super) fn render_shell_command_modal(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {
+        let area = centered_rect(68, 44, frame.area());
+        frame.render_widget(Clear, area);
+
+        let command_failed = self.shell_command.finished.as_ref().is_some_and(|result| {
+            result
+                .exit_status
+                .code()
+                .map(|code| code != 0)
+                .unwrap_or(true)
+        });
+        let border_color = if command_failed {
+            theme.unreviewed
+        } else {
+            theme.focus_border
+        };
+
+        let shell = Block::default()
+            .title(Span::styled(
+                " SHELL COMMAND ",
+                Style::default()
+                    .fg(theme.panel_title_fg)
+                    .bg(theme.panel_title_bg)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .title_alignment(ratatui::layout::Alignment::Center)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .style(Style::default().bg(theme.modal_bg))
+            .border_style(Style::default().fg(border_color));
+        frame.render_widget(shell.clone(), area);
+        let inner = shell.inner(area);
+
+        let sections = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Length(2),
+                ratatui::layout::Constraint::Length(4),
+                ratatui::layout::Constraint::Min(6),
+                ratatui::layout::Constraint::Length(1),
+            ])
+            .split(inner);
+
+        let mode_badge = if self.shell_command.running.is_some() {
+            "running"
+        } else if self.shell_command.finished.is_some() {
+            "done"
+        } else if self.shell_command.reverse_search.is_some() {
+            "search"
+        } else {
+            "input"
+        };
+        let status_text = if let Some(result) = self.shell_command.finished.as_ref() {
+            match result.exit_status.code() {
+                Some(code) => format!("exit code {code}"),
+                None => "process terminated by signal".to_owned(),
+            }
+        } else if self.shell_command.running.is_some() {
+            "streaming output…".to_owned()
+        } else {
+            "ready".to_owned()
+        };
+        let status_style = if command_failed {
+            Style::default().fg(theme.unreviewed)
+        } else {
+            Style::default().fg(theme.muted)
+        };
+
+        let header = Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("mode:", Style::default().fg(theme.dimmed)),
+                Span::styled(
+                    format!(" {mode_badge} "),
+                    Style::default()
+                        .fg(theme.panel_title_fg)
+                        .bg(theme.panel_title_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{} commands", self.shell_command.history.len()),
+                    Style::default().fg(theme.dimmed),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("status: ", Style::default().fg(theme.dimmed)),
+                Span::styled(status_text, status_style),
+            ]),
+        ])
+        .style(Style::default().bg(theme.modal_bg));
+        frame.render_widget(header, sections[0]);
+
+        let command_block = Block::default()
+            .title(" Command ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(theme.modal_bg))
+            .border_style(Style::default().fg(theme.border));
+        let command_inner = command_block.inner(sections[1]);
+        frame.render_widget(command_block, sections[1]);
+
+        let mut command_lines = Vec::new();
+        if let Some(search) = self.shell_command.reverse_search.as_ref() {
+            let match_count = search.match_indexes.len();
+            let marker = if match_count == 0 {
+                "no match".to_owned()
+            } else {
+                format!("{}/{}", search.match_cursor.saturating_add(1), match_count)
+            };
+            command_lines.push(Line::from(vec![
+                Span::styled("reverse-search: ", Style::default().fg(theme.dimmed)),
+                Span::styled(search.query.clone(), Style::default().fg(theme.accent)),
+                Span::raw(" "),
+                Span::styled(format!("({marker})"), Style::default().fg(theme.dimmed)),
+            ]));
+        }
+        command_lines.push(shell_prompt_line(
+            &self.shell_command.buffer,
+            self.shell_command.cursor,
+            theme,
+        ));
+        frame.render_widget(
+            Paragraph::new(command_lines).style(Style::default().fg(theme.text)),
+            command_inner,
+        );
+
+        let output_block = Block::default()
+            .title(" Output ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(theme.modal_editor_bg))
+            .border_style(Style::default().fg(theme.border));
+        let output_inner = output_block.inner(sections[2]);
+        self.shell_command.output_rect = Some(output_inner);
+        self.shell_command.output_viewport = output_inner.height as usize;
+        frame.render_widget(output_block, sections[2]);
+
+        let mut output_rows = Vec::<String>::new();
+        if let Some(command) = self.shell_command.active_command.as_deref() {
+            output_rows.push(format!("$ {command}"));
+        }
+        output_rows.extend(self.shell_command.output_lines.iter().cloned());
+        if !self.shell_command.output_tail.is_empty() {
+            output_rows.push(self.shell_command.output_tail.clone());
+        }
+        if let Some(result) = self.shell_command.finished.as_ref() {
+            output_rows.push(String::new());
+            let prompt = match result.exit_status.code() {
+                Some(0) => "Press Enter to continue".to_owned(),
+                Some(code) => format!("Exit code {code}. Press Enter to continue"),
+                None => "Process terminated. Press Enter to continue".to_owned(),
+            };
+            output_rows.push(prompt);
+        }
+        if output_rows.is_empty() {
+            output_rows.push("Run any shell command and press Enter.".to_owned());
+        }
+
+        if self.shell_command.output_follow {
+            let max_scroll = self.shell_output_max_scroll();
+            self.set_shell_output_scroll(max_scroll);
+        }
+        let max_scroll = self.shell_output_max_scroll();
+        self.shell_command.output_scroll = self.shell_command.output_scroll.min(max_scroll);
+
+        let viewport_rows = output_inner.height.max(1) as usize;
+        let visible_rows = output_rows
+            .iter()
+            .skip(self.shell_command.output_scroll)
+            .take(viewport_rows)
+            .map(|row| Line::from(row.clone()))
+            .collect::<Vec<_>>();
+        frame.render_widget(
+            Paragraph::new(visible_rows).style(Style::default().fg(theme.text)),
+            output_inner,
+        );
+
+        if sections[2].width >= 3 && sections[2].height >= 3 && viewport_rows > 0 {
+            let total_rows = output_rows.len().max(1);
+            let (thumb_start, thumb_len) =
+                scrollbar_thumb(total_rows, viewport_rows, self.shell_command.output_scroll);
+            let x = sections[2]
+                .x
+                .saturating_add(sections[2].width.saturating_sub(2));
+            let y = sections[2].y.saturating_add(1);
+            let track_style = Style::default().fg(theme.dimmed);
+            let thumb_style = Style::default()
+                .fg(theme.muted)
+                .add_modifier(Modifier::BOLD);
+            let buffer = frame.buffer_mut();
+            for row in 0..viewport_rows {
+                buffer.set_string(x, y + row as u16, "│", track_style);
+            }
+            for row in thumb_start..thumb_start.saturating_add(thumb_len) {
+                if row < viewport_rows {
+                    buffer.set_string(x, y + row as u16, "█", thumb_style);
+                }
+            }
+        }
+
+        let footer_text = if self.shell_command.running.is_some() {
+            Line::from(vec![
+                key_chip("Esc", theme),
+                Span::styled(" close  ", Style::default().fg(theme.muted)),
+                key_chip("Up/Down", theme),
+                Span::styled(" scroll output", Style::default().fg(theme.muted)),
+            ])
+        } else if self.shell_command.finished.is_some() {
+            Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" continue  ", Style::default().fg(theme.muted)),
+                key_chip("Esc", theme),
+                Span::styled(" close", Style::default().fg(theme.muted)),
+            ])
+        } else {
+            Line::from(vec![
+                key_chip("Enter", theme),
+                Span::styled(" run  ", Style::default().fg(theme.muted)),
+                key_chip("Ctrl-r", theme),
+                Span::styled(" history search  ", Style::default().fg(theme.muted)),
+                key_chip("Up/Down", theme),
+                Span::styled(" history", Style::default().fg(theme.muted)),
+            ])
+        };
+        frame.render_widget(
+            Paragraph::new(footer_text).style(Style::default().bg(theme.modal_bg)),
+            sections[3],
+        );
+    }
+
     fn comment_context_preview_lines(
         &self,
         max_rows: usize,
@@ -768,7 +1042,10 @@ impl App {
                     ]));
                 }
             },
-            InputMode::Normal | InputMode::DiffSearch | InputMode::ListSearch(_) => {}
+            InputMode::Normal
+            | InputMode::ShellCommand
+            | InputMode::DiffSearch
+            | InputMode::ListSearch(_) => {}
         }
 
         if !has_primary_context && !self.rendered_diff.is_empty() {
@@ -897,6 +1174,10 @@ impl App {
                 Span::raw(" add comment to commit/hunk/range"),
             ]),
             Line::from(vec![
+                key_chip("!", theme),
+                Span::raw(" open shell command modal"),
+            ]),
+            Line::from(vec![
                 key_chip("/", theme),
                 Span::raw(" diff search or live list filter"),
             ]),
@@ -972,10 +1253,43 @@ pub(super) fn footer_mode_label(
 ) -> &'static str {
     match input_mode {
         InputMode::CommentCreate | InputMode::CommentEdit(_) => "COMMENT",
+        InputMode::ShellCommand => "SHELL",
         InputMode::DiffSearch | InputMode::ListSearch(_) => "SEARCH",
         InputMode::Normal if commit_visual_active || diff_visual_active => "VISUAL",
         InputMode::Normal => "NORMAL",
     }
+}
+
+fn shell_prompt_line(buffer: &str, cursor: usize, theme: &UiTheme) -> Line<'static> {
+    let clamped = clamp_char_boundary(buffer, cursor.min(buffer.len()));
+    let cursor_char = buffer[clamped..].chars().next();
+    let cursor_end = cursor_char
+        .map(|ch| clamped.saturating_add(ch.len_utf8()))
+        .unwrap_or(clamped);
+
+    let mut spans = Vec::new();
+    spans.push(Span::styled("$ ", Style::default().fg(theme.dimmed)));
+    spans.push(Span::raw(buffer[..clamped].to_owned()));
+
+    match cursor_char {
+        Some(ch) => spans.push(Span::styled(
+            ch.to_string(),
+            Style::default()
+                .fg(theme.modal_cursor_fg)
+                .bg(theme.modal_cursor_bg),
+        )),
+        None => spans.push(Span::styled(
+            " ",
+            Style::default()
+                .fg(theme.modal_cursor_fg)
+                .bg(theme.modal_cursor_bg),
+        )),
+    }
+
+    if cursor_end < buffer.len() {
+        spans.push(Span::raw(buffer[cursor_end..].to_owned()));
+    }
+    Line::from(spans)
 }
 
 fn footer_visual_scope_label(
@@ -1002,11 +1316,7 @@ fn footer_mode_style(mode: &str, theme: &UiTheme) -> Style {
 }
 
 fn footer_status_style(status: &str, theme: &UiTheme) -> Style {
-    if status.contains("failed") || status.contains("Failed") {
-        Style::default()
-            .fg(theme.unreviewed)
-            .add_modifier(Modifier::BOLD)
-    } else if status.contains("new unreviewed") {
+    if status.contains("failed") || status.contains("Failed") || status.contains("new unreviewed") {
         Style::default()
             .fg(theme.unreviewed)
             .add_modifier(Modifier::BOLD)

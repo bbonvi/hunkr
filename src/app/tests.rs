@@ -513,6 +513,10 @@ fn footer_mode_label_prioritizes_modal_states() {
         footer_mode_label(InputMode::CommentCreate, true, true),
         "COMMENT"
     );
+    assert_eq!(
+        footer_mode_label(InputMode::ShellCommand, true, true),
+        "SHELL"
+    );
 }
 
 #[test]
