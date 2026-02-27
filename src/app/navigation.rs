@@ -771,17 +771,11 @@ impl App {
             .collect::<Vec<_>>()
             .join("\n");
 
-        match crate::clipboard::copy_to_clipboard_with_fallbacks(&payload) {
-            Ok(backend) => {
-                self.runtime.status = format!(
-                    "Copied {} diff line(s) via {backend}",
-                    end.saturating_sub(start) + 1
-                );
-            }
-            Err(err) => {
-                self.runtime.status = format!("Clipboard unavailable for diff selection ({err:#})");
-            }
-        }
+        self.runtime.status = clipboard_copy_status(
+            crate::clipboard::copy_to_clipboard_with_fallbacks(&payload),
+            format!("{} diff line(s)", end.saturating_sub(start) + 1),
+            "diff selection",
+        );
 
         let post_action = selection_copy_post_action(true, None);
         if matches!(post_action, SelectionCopyPostAction::ClearNow) {
@@ -792,16 +786,12 @@ impl App {
     /// Copies the active review-task markdown path to clipboard for quick sharing.
     pub(super) fn copy_review_tasks_path(&mut self) {
         let report_path = format_path_with_home_tilde(self.comments.report_path());
-        match crate::clipboard::copy_to_clipboard_with_fallbacks(&report_path) {
-            Ok(backend) => {
-                self.runtime.status =
-                    format!("Copied review tasks path via {backend}: {report_path}");
-            }
-            Err(err) => {
-                self.runtime.status =
-                    format!("Clipboard unavailable; review tasks path: {report_path} ({err:#})");
-            }
-        }
+        let scope = format!("review tasks path: {report_path}");
+        self.runtime.status = clipboard_copy_status(
+            crate::clipboard::copy_to_clipboard_with_fallbacks(&report_path),
+            &scope,
+            &scope,
+        );
     }
 
     pub(super) fn sync_comment_report(&self) -> anyhow::Result<()> {

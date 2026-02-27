@@ -1051,14 +1051,11 @@ impl App {
         }
 
         let line_count = payload.lines().count().max(1);
-        match crate::clipboard::copy_to_clipboard_with_fallbacks(&payload) {
-            Ok(backend) => {
-                self.runtime.status = format!("Copied {line_count} shell line(s) via {backend}");
-            }
-            Err(err) => {
-                self.runtime.status = format!("Clipboard unavailable for shell output ({err:#})");
-            }
-        }
+        self.runtime.status = clipboard_copy_status(
+            crate::clipboard::copy_to_clipboard_with_fallbacks(&payload),
+            format!("{line_count} shell line(s)"),
+            "shell output",
+        );
 
         if matches!(post_action, SelectionCopyPostAction::ClearNow) {
             self.clear_shell_output_visual_selection();

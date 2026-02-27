@@ -127,6 +127,25 @@ pub(super) fn selection_copy_post_action(
         .unwrap_or(SelectionCopyPostAction::ClearNow)
 }
 
+/// Formats a unified status line for clipboard copy operations.
+pub(super) fn clipboard_copy_status<S, F>(
+    result: anyhow::Result<&'static str>,
+    success_item: S,
+    failure_scope: F,
+) -> String
+where
+    S: AsRef<str>,
+    F: AsRef<str>,
+{
+    match result {
+        Ok(backend) => format!("Copied {} via {backend}", success_item.as_ref()),
+        Err(err) => format!(
+            "Clipboard unavailable for {} ({err:#})",
+            failure_scope.as_ref()
+        ),
+    }
+}
+
 pub(super) fn compose_sticky_banner_indexes(
     sticky_file_idx: Option<usize>,
     sticky_commit_idx: Option<usize>,

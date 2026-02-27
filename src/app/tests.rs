@@ -644,6 +644,19 @@ fn selection_copy_post_action_clears_when_no_visual_flash_policy() {
 }
 
 #[test]
+fn clipboard_copy_status_formats_success_and_failure() {
+    let success = clipboard_copy_status(Ok("xclip"), "2 diff line(s)", "diff selection");
+    assert_eq!(success, "Copied 2 diff line(s) via xclip");
+
+    let failure = clipboard_copy_status(
+        Err(anyhow::anyhow!("no backend available")),
+        "2 diff line(s)",
+        "diff selection",
+    );
+    assert!(failure.starts_with("Clipboard unavailable for diff selection ("));
+}
+
+#[test]
 fn footer_mode_label_uses_visual_when_commit_range_active() {
     assert_eq!(footer_mode_label(InputMode::Normal, true, false), "VISUAL");
 }
