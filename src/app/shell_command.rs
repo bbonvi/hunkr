@@ -358,6 +358,11 @@ impl App {
         self.ensure_shell_output_cursor_visible();
     }
 
+    pub(super) fn page_shell_output(&mut self, direction: isize) {
+        let step = self.shell_command.output_viewport.max(1) as isize;
+        self.move_shell_output_cursor(step.saturating_mul(direction));
+    }
+
     pub(super) fn set_shell_output_cursor(&mut self, idx: usize) {
         let len = self.shell_output_total_lines();
         if len == 0 {
@@ -504,13 +509,13 @@ impl App {
                 self.move_shell_output_cursor(step);
             }
             KeyCode::PageUp => {
-                let step = page_step(self.shell_command.output_viewport as u16 + 2, -1.0);
-                self.move_shell_output_cursor(step);
+                self.page_shell_output(-1);
             }
             KeyCode::PageDown => {
-                let step = page_step(self.shell_command.output_viewport as u16 + 2, 1.0);
-                self.move_shell_output_cursor(step);
+                self.page_shell_output(1);
             }
+            KeyCode::Home => self.set_shell_output_cursor(0),
+            KeyCode::End => self.set_shell_output_cursor(usize::MAX),
             KeyCode::Char('g') => self.set_shell_output_cursor(0),
             KeyCode::Char('G') => self.set_shell_output_cursor(usize::MAX),
             KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers == KeyModifiers::NONE => {
@@ -559,13 +564,13 @@ impl App {
                 self.move_shell_output_cursor(step);
             }
             KeyCode::PageUp => {
-                let step = page_step(self.shell_command.output_viewport as u16 + 2, -1.0);
-                self.move_shell_output_cursor(step);
+                self.page_shell_output(-1);
             }
             KeyCode::PageDown => {
-                let step = page_step(self.shell_command.output_viewport as u16 + 2, 1.0);
-                self.move_shell_output_cursor(step);
+                self.page_shell_output(1);
             }
+            KeyCode::Home => self.set_shell_output_cursor(0),
+            KeyCode::End => self.set_shell_output_cursor(usize::MAX),
             KeyCode::Char('g') => self.set_shell_output_cursor(0),
             KeyCode::Char('G') => self.set_shell_output_cursor(usize::MAX),
             KeyCode::Char('v') | KeyCode::Char('V') if key.modifiers == KeyModifiers::NONE => {
