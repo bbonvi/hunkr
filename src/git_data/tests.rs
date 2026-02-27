@@ -216,6 +216,49 @@ fn open_at_without_repository_returns_clear_error() {
     );
 }
 
+#[test]
+fn parse_worktree_list_parses_branches_and_flags() {
+    let payload = concat!(
+        "worktree /repo/main\0",
+        "HEAD abc123\0",
+        "branch refs/heads/main\0",
+        "\0",
+        "worktree /tmp/wt-1\0",
+        "HEAD def456\0",
+        "detached\0",
+        "locked by admin\0",
+        "prunable stale\0",
+        "\0",
+    );
+
+    let parsed = parse_worktree_list_porcelain(payload.as_bytes()).expect("parse");
+    assert_eq!(parsed.len(), 2);
+    assert_eq!(parsed[0].path, Path::new("/repo/main"));
+    assert_eq!(parsed[0].head, "abc123");
+    assert_eq!(parsed[0].branch.as_deref(), Some("main"));
+    assert_eq!(parsed[0].locked_reason, None);
+    assert_eq!(parsed[0].prunable_reason, None);
+
+    assert_eq!(parsed[1].path, Path::new("/tmp/wt-1"));
+    assert_eq!(parsed[1].head, "def456");
+    assert_eq!(parsed[1].branch, None);
+    assert_eq!(parsed[1].locked_reason.as_deref(), Some("by admin"));
+    assert_eq!(parsed[1].prunable_reason.as_deref(), Some("stale"));
+}
+
+#[test]
+fn parse_worktree_list_rejects_field_before_worktree() {
+    let err = match parse_worktree_list_porcelain(b"HEAD abc123\0\0") {
+        Ok(_) => panic!("parser should reject malformed payload"),
+        Err(err) => err,
+    };
+
+    assert!(
+        format!("{err:#}").contains("field before worktree path"),
+        "unexpected parse error: {err:#}"
+    );
+}
+
 fn init_repo(path: &Path) {
     run(Command::new("git")
         .current_dir(path)

@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use anyhow::{Context, anyhow};
@@ -18,6 +19,16 @@ pub struct GitService {
     repo: Repository,
     root: PathBuf,
     branch: String,
+}
+
+/// One worktree discovered through `git worktree list --porcelain -z`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeInfo {
+    pub path: PathBuf,
+    pub head: String,
+    pub branch: Option<String>,
+    pub locked_reason: Option<String>,
+    pub prunable_reason: Option<String>,
 }
 
 impl GitService {
@@ -50,6 +61,22 @@ impl GitService {
 
     pub fn branch_name(&self) -> &str {
         &self.branch
+    }
+
+    pub fn list_worktrees(&self) -> anyhow::Result<Vec<WorktreeInfo>> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(["worktree", "list", "--porcelain", "-z"])
+            .output()
+            .context("failed to run `git worktree list --porcelain -z`")?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "`git worktree list --porcelain -z` failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        parse_worktree_list_porcelain(&output.stdout)
     }
 
     pub fn load_first_parent_history(&self, max: usize) -> anyhow::Result<Vec<CommitInfo>> {
@@ -485,6 +512,94 @@ fn path_to_string(path: &Path) -> String {
 
 fn short_id(id: &str) -> String {
     id.chars().take(7).collect()
+}
+
+#[derive(Debug, Default)]
+struct WorktreeInfoBuilder {
+    path: Option<PathBuf>,
+    head: Option<String>,
+    branch: Option<String>,
+    locked_reason: Option<String>,
+    prunable_reason: Option<String>,
+}
+
+impl WorktreeInfoBuilder {
+    fn finish(self) -> anyhow::Result<WorktreeInfo> {
+        let path = self
+            .path
+            .ok_or_else(|| anyhow!("malformed `git worktree` output: missing worktree path"))?;
+        Ok(WorktreeInfo {
+            path,
+            head: self.head.unwrap_or_default(),
+            branch: self.branch,
+            locked_reason: self.locked_reason,
+            prunable_reason: self.prunable_reason,
+        })
+    }
+}
+
+fn parse_worktree_list_porcelain(payload: &[u8]) -> anyhow::Result<Vec<WorktreeInfo>> {
+    let mut current = WorktreeInfoBuilder::default();
+    let mut items = Vec::<WorktreeInfo>::new();
+
+    for raw in payload.split(|byte| *byte == 0) {
+        if raw.is_empty() {
+            if current.path.is_some() {
+                items.push(current.finish()?);
+                current = WorktreeInfoBuilder::default();
+            }
+            continue;
+        }
+
+        let line = String::from_utf8_lossy(raw);
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if current.path.is_some() {
+                items.push(current.finish()?);
+                current = WorktreeInfoBuilder::default();
+            }
+            current.path = Some(PathBuf::from(path));
+            continue;
+        }
+
+        if current.path.is_none() {
+            return Err(anyhow!(
+                "malformed `git worktree` output: field before worktree path"
+            ));
+        }
+
+        if let Some(head) = line.strip_prefix("HEAD ") {
+            current.head = Some(head.to_owned());
+            continue;
+        }
+        if let Some(branch) = line.strip_prefix("branch ") {
+            let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+            current.branch = Some(branch.to_owned());
+            continue;
+        }
+        if line == "detached" {
+            current.branch = None;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("locked") {
+            current.locked_reason = parse_optional_worktree_message(value);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("prunable") {
+            current.prunable_reason = parse_optional_worktree_message(value);
+            continue;
+        }
+    }
+
+    if current.path.is_some() {
+        items.push(current.finish()?);
+    }
+
+    Ok(items)
+}
+
+fn parse_optional_worktree_message(field_suffix: &str) -> Option<String> {
+    let message = field_suffix.trim_start();
+    (!message.is_empty()).then(|| message.to_owned())
 }
 
 fn selection_line_signatures(lines: &[String]) -> BTreeSet<String> {
