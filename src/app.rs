@@ -515,4 +515,6 @@ struct RenderedDiffKey {
 }
 
 #[cfg(test)]
+mod shell_output_policy_tests;
+#[cfg(test)]
 mod tests;

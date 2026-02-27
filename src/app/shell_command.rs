@@ -2,10 +2,84 @@
 use super::*;
 use std::sync::mpsc::TryRecvError;
 
-const SHELL_STREAM_MAX_CHUNKS_PER_TICK: usize = 256;
-const SHELL_STREAM_CHANNEL_CAPACITY: usize = 512;
-const SHELL_OUTPUT_MAX_LINES: usize = 1_000;
-const SHELL_OUTPUT_MAX_PARTIAL_LINE_BYTES: usize = 16 * 1024;
+const SHELL_OUTPUT_POLICY: ShellOutputPolicy = ShellOutputPolicy::new(256, 512, 1_000, 16 * 1024);
+
+/// Shared shell stream/buffer policy so limits and trim behavior stay consistent and testable.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ShellOutputPolicy {
+    stream_max_chunks_per_tick: usize,
+    stream_channel_capacity: usize,
+    max_lines: usize,
+    max_partial_line_bytes: usize,
+}
+
+impl ShellOutputPolicy {
+    /// Builds a policy with explicit limits for stream draining and buffered shell output.
+    pub(super) const fn new(
+        stream_max_chunks_per_tick: usize,
+        stream_channel_capacity: usize,
+        max_lines: usize,
+        max_partial_line_bytes: usize,
+    ) -> Self {
+        Self {
+            stream_max_chunks_per_tick,
+            stream_channel_capacity,
+            max_lines,
+            max_partial_line_bytes,
+        }
+    }
+
+    /// Returns how many chunks to drain from the shell stream per poll tick.
+    pub(super) const fn stream_max_chunks_per_tick(self) -> usize {
+        self.stream_max_chunks_per_tick
+    }
+
+    /// Returns the bounded channel capacity used between shell pipe readers and the UI loop.
+    pub(super) const fn stream_channel_capacity(self) -> usize {
+        self.stream_channel_capacity
+    }
+
+    /// Normalizes/sanitizes a shell chunk and enforces line/tail limits.
+    ///
+    /// Returns how many fully buffered lines were trimmed from the front.
+    pub(super) fn append_sanitized_chunk(
+        self,
+        output_lines: &mut Vec<String>,
+        output_tail: &mut String,
+        chunk: &str,
+    ) -> usize {
+        let normalized = chunk.replace("\r\n", "\n").replace('\r', "\n");
+        let sanitized = sanitize_terminal_text(&normalized);
+        output_tail.push_str(&sanitized);
+
+        let mut consumed = 0usize;
+        while let Some(rel_idx) = output_tail[consumed..].find('\n') {
+            let newline_idx = consumed + rel_idx;
+            let line = output_tail[consumed..newline_idx].to_owned();
+            output_lines.push(line);
+            consumed = newline_idx.saturating_add(1);
+        }
+        if consumed > 0 {
+            *output_tail = output_tail[consumed..].to_owned();
+        }
+        if output_tail.len() > self.max_partial_line_bytes {
+            let start = clamp_char_boundary(
+                output_tail,
+                output_tail
+                    .len()
+                    .saturating_sub(self.max_partial_line_bytes),
+            );
+            *output_tail = output_tail[start..].to_owned();
+        }
+
+        if output_lines.len() <= self.max_lines {
+            return 0;
+        }
+        let overflow = output_lines.len() - self.max_lines;
+        output_lines.drain(..overflow);
+        overflow
+    }
+}
 
 impl App {
     pub(super) fn open_shell_command_modal(&mut self) {
@@ -228,7 +302,7 @@ impl App {
             }
 
             let mut disconnected = false;
-            for _ in 0..SHELL_STREAM_MAX_CHUNKS_PER_TICK {
+            for _ in 0..SHELL_OUTPUT_POLICY.stream_max_chunks_per_tick() {
                 match running.stream_rx.try_recv() {
                     Ok(chunk) => drained_chunks.push(chunk),
                     Err(TryRecvError::Empty) => break,
@@ -781,26 +855,12 @@ impl App {
     }
 
     fn append_shell_output_chunk(&mut self, chunk: &str) {
-        let normalized = chunk.replace("\r\n", "\n").replace('\r', "\n");
-        let sanitized = sanitize_terminal_text(&normalized);
-        self.shell_command.output_tail.push_str(&sanitized);
-
-        let mut consumed = 0usize;
-        while let Some(rel_idx) = self.shell_command.output_tail[consumed..].find('\n') {
-            let newline_idx = consumed + rel_idx;
-            let line = self.shell_command.output_tail[consumed..newline_idx].to_owned();
-            self.shell_command.output_lines.push(line);
-            consumed = newline_idx.saturating_add(1);
-        }
-        if consumed > 0 {
-            self.shell_command.output_tail = self.shell_command.output_tail[consumed..].to_owned();
-        }
-        if self.shell_command.output_tail.len() > SHELL_OUTPUT_MAX_PARTIAL_LINE_BYTES {
-            let keep = SHELL_OUTPUT_MAX_PARTIAL_LINE_BYTES;
-            let start = self.shell_command.output_tail.len().saturating_sub(keep);
-            self.shell_command.output_tail = self.shell_command.output_tail[start..].to_owned();
-        }
-        self.trim_shell_output_lines_to_limit();
+        let overflow = SHELL_OUTPUT_POLICY.append_sanitized_chunk(
+            &mut self.shell_command.output_lines,
+            &mut self.shell_command.output_tail,
+            chunk,
+        );
+        self.apply_shell_output_line_overflow(overflow);
 
         if self.shell_command.output_follow {
             self.snap_shell_output_to_bottom();
@@ -808,13 +868,10 @@ impl App {
         self.sync_shell_output_visual_bounds();
     }
 
-    fn trim_shell_output_lines_to_limit(&mut self) {
-        let len = self.shell_command.output_lines.len();
-        if len <= SHELL_OUTPUT_MAX_LINES {
+    fn apply_shell_output_line_overflow(&mut self, overflow: usize) {
+        if overflow == 0 {
             return;
         }
-        let overflow = len - SHELL_OUTPUT_MAX_LINES;
-        self.shell_command.output_lines.drain(..overflow);
         self.shell_command.output_cursor =
             self.shell_command.output_cursor.saturating_sub(overflow);
         self.shell_command.output_scroll =
@@ -1094,7 +1151,7 @@ fn spawn_shell_command(command: &str) -> anyhow::Result<RunningShellCommand> {
         .take()
         .context("failed to capture child stderr")?;
 
-    let (tx, rx) = mpsc::sync_channel::<String>(SHELL_STREAM_CHANNEL_CAPACITY);
+    let (tx, rx) = mpsc::sync_channel::<String>(SHELL_OUTPUT_POLICY.stream_channel_capacity());
     let stdout_reader = Some(spawn_shell_pipe_reader(stdout, tx.clone()));
     let stderr_reader = Some(spawn_shell_pipe_reader(stderr, tx));
 
