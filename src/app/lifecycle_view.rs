@@ -391,9 +391,7 @@ impl App {
                     key_chip("space", theme),
                     Span::styled(" select ", Style::default().fg(theme.muted)),
                     key_chip("u/r/i/s", theme),
-                    Span::styled(" current ", Style::default().fg(theme.muted)),
-                    key_chip("U/R/I/S", theme),
-                    Span::styled(" selected ", Style::default().fg(theme.muted)),
+                    Span::styled(" set status ", Style::default().fg(theme.muted)),
                     key_chip("e", theme),
                     Span::styled(" status filter ", Style::default().fg(theme.muted)),
                     key_chip("/", theme),
@@ -1309,7 +1307,7 @@ impl App {
             ]),
             Line::from(vec![
                 key_chip("u/r/i/s", theme),
-                Span::raw(" set commit status"),
+                Span::raw(" set status for selected/current commits"),
             ]),
             Line::from(vec![
                 key_chip("m", theme),
