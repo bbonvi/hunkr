@@ -623,6 +623,27 @@ fn wheel_clears_only_keyboard_diff_visual_mode() {
 }
 
 #[test]
+fn selection_copy_post_action_clears_when_visual_selection_exists() {
+    let action = selection_copy_post_action(true, Some(Duration::from_millis(100)));
+    assert_eq!(action, SelectionCopyPostAction::ClearNow);
+}
+
+#[test]
+fn selection_copy_post_action_flashes_when_no_visual_selection() {
+    let action = selection_copy_post_action(false, Some(Duration::from_millis(100)));
+    assert_eq!(
+        action,
+        SelectionCopyPostAction::FlashThenClear(Duration::from_millis(100))
+    );
+}
+
+#[test]
+fn selection_copy_post_action_clears_when_no_visual_flash_policy() {
+    let action = selection_copy_post_action(false, None);
+    assert_eq!(action, SelectionCopyPostAction::ClearNow);
+}
+
+#[test]
 fn footer_mode_label_uses_visual_when_commit_range_active() {
     assert_eq!(footer_mode_label(InputMode::Normal, true, false), "VISUAL");
 }

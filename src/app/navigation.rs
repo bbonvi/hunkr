@@ -783,7 +783,10 @@ impl App {
             }
         }
 
-        self.clear_diff_visual_selection();
+        let post_action = selection_copy_post_action(true, None);
+        if matches!(post_action, SelectionCopyPostAction::ClearNow) {
+            self.clear_diff_visual_selection();
+        }
     }
 
     /// Copies the active review-task markdown path to clipboard for quick sharing.

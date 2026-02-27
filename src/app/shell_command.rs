@@ -3,6 +3,7 @@ use super::*;
 use std::sync::mpsc::TryRecvError;
 
 const SHELL_OUTPUT_POLICY: ShellOutputPolicy = ShellOutputPolicy::new(256, 512, 1_000, 16 * 1024);
+const SHELL_COPY_FLASH_DURATION: Duration = Duration::from_millis(100);
 
 /// Shared shell stream/buffer policy so limits and trim behavior stay consistent and testable.
 #[derive(Debug, Clone, Copy)]
@@ -1037,14 +1038,14 @@ impl App {
             return;
         };
 
-        if !had_visual {
+        let post_action = selection_copy_post_action(had_visual, Some(SHELL_COPY_FLASH_DURATION));
+        if let SelectionCopyPostAction::FlashThenClear(duration) = post_action {
             self.shell_command.output_visual_selection = Some(ShellOutputVisualSelection {
                 anchor: 0,
                 origin: ShellOutputVisualOrigin::Keyboard,
             });
             self.shell_command.output_cursor = rows.len().saturating_sub(1);
-            self.shell_command.output_flash_clear_due =
-                Some(Instant::now() + Duration::from_millis(200));
+            self.shell_command.output_flash_clear_due = Some(Instant::now() + duration);
             self.ensure_shell_output_cursor_visible();
             self.runtime.needs_redraw = true;
         }
@@ -1059,7 +1060,7 @@ impl App {
             }
         }
 
-        if had_visual {
+        if matches!(post_action, SelectionCopyPostAction::ClearNow) {
             self.clear_shell_output_visual_selection();
         }
     }

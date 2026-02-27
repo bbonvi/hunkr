@@ -107,6 +107,26 @@ pub(super) fn should_clear_diff_visual_on_wheel(visual: Option<DiffVisualSelecti
     visual.is_some_and(|selection| selection.origin == DiffVisualOrigin::Keyboard)
 }
 
+/// Selection aftermath behavior after a copy action completes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SelectionCopyPostAction {
+    ClearNow,
+    FlashThenClear(Duration),
+}
+
+/// Chooses post-copy selection behavior using one shared policy.
+pub(super) fn selection_copy_post_action(
+    had_visual_selection: bool,
+    flash_without_visual: Option<Duration>,
+) -> SelectionCopyPostAction {
+    if had_visual_selection {
+        return SelectionCopyPostAction::ClearNow;
+    }
+    flash_without_visual
+        .map(SelectionCopyPostAction::FlashThenClear)
+        .unwrap_or(SelectionCopyPostAction::ClearNow)
+}
+
 pub(super) fn compose_sticky_banner_indexes(
     sticky_file_idx: Option<usize>,
     sticky_commit_idx: Option<usize>,
