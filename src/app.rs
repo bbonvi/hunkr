@@ -79,7 +79,7 @@ const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
-const SHELL_HISTORY_LIMIT: usize = 300;
+const SHELL_HISTORY_LIMIT: usize = 1_000;
 const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,6 +3,9 @@ use super::*;
 use std::sync::mpsc::TryRecvError;
 
 const SHELL_STREAM_MAX_CHUNKS_PER_TICK: usize = 256;
+const SHELL_STREAM_CHANNEL_CAPACITY: usize = 512;
+const SHELL_OUTPUT_MAX_LINES: usize = 1_000;
+const SHELL_OUTPUT_MAX_PARTIAL_LINE_BYTES: usize = 16 * 1024;
 
 impl App {
     pub(super) fn open_shell_command_modal(&mut self) {
@@ -767,17 +770,49 @@ impl App {
         let normalized = chunk.replace("\r\n", "\n").replace('\r', "\n");
         self.shell_command.output_tail.push_str(&normalized);
 
-        while let Some(newline_idx) = self.shell_command.output_tail.find('\n') {
-            let line = self.shell_command.output_tail[..newline_idx].to_owned();
+        let mut consumed = 0usize;
+        while let Some(rel_idx) = self.shell_command.output_tail[consumed..].find('\n') {
+            let newline_idx = consumed + rel_idx;
+            let line = self.shell_command.output_tail[consumed..newline_idx].to_owned();
             self.shell_command.output_lines.push(line);
-            let rest = self.shell_command.output_tail[newline_idx + 1..].to_owned();
-            self.shell_command.output_tail = rest;
+            consumed = newline_idx.saturating_add(1);
         }
+        if consumed > 0 {
+            self.shell_command.output_tail = self.shell_command.output_tail[consumed..].to_owned();
+        }
+        if self.shell_command.output_tail.len() > SHELL_OUTPUT_MAX_PARTIAL_LINE_BYTES {
+            let keep = SHELL_OUTPUT_MAX_PARTIAL_LINE_BYTES;
+            let start = self.shell_command.output_tail.len().saturating_sub(keep);
+            self.shell_command.output_tail = self.shell_command.output_tail[start..].to_owned();
+        }
+        self.trim_shell_output_lines_to_limit();
 
         if self.shell_command.output_follow {
             self.snap_shell_output_to_bottom();
         }
         self.sync_shell_output_visual_bounds();
+    }
+
+    fn trim_shell_output_lines_to_limit(&mut self) {
+        let len = self.shell_command.output_lines.len();
+        if len <= SHELL_OUTPUT_MAX_LINES {
+            return;
+        }
+        let overflow = len - SHELL_OUTPUT_MAX_LINES;
+        self.shell_command.output_lines.drain(..overflow);
+        self.shell_command.output_cursor =
+            self.shell_command.output_cursor.saturating_sub(overflow);
+        self.shell_command.output_scroll =
+            self.shell_command.output_scroll.saturating_sub(overflow);
+        if let Some(visual) = self.shell_command.output_visual_selection.as_ref() {
+            self.shell_command.output_visual_selection = Some(ShellOutputVisualSelection {
+                anchor: visual.anchor.saturating_sub(overflow),
+                origin: visual.origin,
+            });
+        }
+        if let Some(anchor) = self.shell_command.output_mouse_anchor {
+            self.shell_command.output_mouse_anchor = Some(anchor.saturating_sub(overflow));
+        }
     }
 
     fn finalize_shell_command(&mut self) {
@@ -1034,7 +1069,7 @@ fn spawn_shell_command(command: &str) -> anyhow::Result<RunningShellCommand> {
         .take()
         .context("failed to capture child stderr")?;
 
-    let (tx, rx) = mpsc::channel::<String>();
+    let (tx, rx) = mpsc::sync_channel::<String>(SHELL_STREAM_CHANNEL_CAPACITY);
     let stdout_reader = Some(spawn_shell_pipe_reader(stdout, tx.clone()));
     let stderr_reader = Some(spawn_shell_pipe_reader(stderr, tx));
 
@@ -1047,7 +1082,7 @@ fn spawn_shell_command(command: &str) -> anyhow::Result<RunningShellCommand> {
     })
 }
 
-fn spawn_shell_pipe_reader<R>(mut reader: R, tx: mpsc::Sender<String>) -> JoinHandle<()>
+fn spawn_shell_pipe_reader<R>(mut reader: R, tx: mpsc::SyncSender<String>) -> JoinHandle<()>
 where
     R: Read + Send + 'static,
 {
