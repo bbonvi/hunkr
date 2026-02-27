@@ -253,7 +253,11 @@ impl App {
     }
 
     pub(super) fn close_shell_command_modal(&mut self) {
+        let was_running = self.shell_command.running.is_some();
         self.stop_shell_process();
+        if was_running {
+            self.reconcile_repository_after_shell_command();
+        }
         self.preferences.input_mode = InputMode::Normal;
         self.reset_shell_command_editor();
     }
@@ -571,6 +575,7 @@ impl App {
         self.shell_command.finished = Some(ShellCommandResult {
             exit_status: status,
         });
+        self.reconcile_repository_after_shell_command();
 
         if self.shell_command.output_follow {
             self.snap_shell_output_to_bottom();
@@ -628,6 +633,44 @@ impl App {
         let max_scroll = self.shell_output_max_scroll();
         self.shell_command.output_scroll = max_scroll;
         self.shell_command.output_follow = true;
+    }
+
+    fn reconcile_repository_after_shell_command(&mut self) {
+        let previous_branch = self.git.branch_name().to_owned();
+        let reopened = match GitService::open_at(self.git.root()) {
+            Ok(git) => git,
+            Err(err) => {
+                self.runtime.status = format!("shell sync failed to reopen repository: {err:#}");
+                return;
+            }
+        };
+
+        let next_branch = reopened.branch_name().to_owned();
+        self.git = reopened;
+        self.comments = match CommentStore::new(self.store.root_dir(), &next_branch) {
+            Ok(store) => store,
+            Err(err) => {
+                self.runtime.status = format!(
+                    "shell sync failed to reload comments for branch {next_branch}: {err:#}"
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = self.reload_commits(true) {
+            self.runtime.status = format!("shell sync failed to refresh UI: {err:#}");
+            return;
+        }
+
+        let now = Instant::now();
+        self.runtime.last_refresh = now;
+        self.runtime.last_relative_time_redraw = now;
+        self.runtime.needs_redraw = true;
+
+        if previous_branch != next_branch {
+            self.runtime.status =
+                format!("repository switched: {previous_branch} -> {next_branch}");
+        }
     }
 }
 
