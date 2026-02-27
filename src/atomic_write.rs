@@ -1,16 +1,13 @@
 use std::{
     collections::hash_map::RandomState,
     fs::{self, OpenOptions},
-    hash::{BuildHasher, Hasher},
+    hash::{BuildHasher, Hash, Hasher},
     io::Write,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
-
-static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Writes a UTF-8 file atomically by writing to a temp file then renaming into place.
 pub(crate) fn atomic_write_text(path: &Path, contents: &str) -> anyhow::Result<()> {
@@ -76,9 +73,11 @@ fn random_id() -> String {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let counter = u128::from(NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed));
+    let mut thread_hasher = RandomState::new().build_hasher();
+    std::thread::current().id().hash(&mut thread_hasher);
+    let thread_entropy = u128::from(thread_hasher.finish());
     let pid = u128::from(std::process::id());
-    let entropy = now ^ (counter << 1) ^ (pid << 33);
+    let entropy = now ^ (thread_entropy << 1) ^ (pid << 33);
 
     let mut hasher = RandomState::new().build_hasher();
     hasher.write_u128(entropy);
