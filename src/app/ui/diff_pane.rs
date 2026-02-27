@@ -469,19 +469,10 @@ fn display_line_with_selection(
     }
     let is_cursor = idx == cursor && focused_diff;
     if is_cursor {
-        line = tint_line_background(&line, theme.cursor_bg, true);
+        line = tint_line_background(&line, theme.cursor_bg, false);
     }
-    if in_visual || is_cursor {
-        let mut row_bg = in_visual.then_some(theme.visual_bg);
-        if is_cursor {
-            row_bg = Some(match row_bg {
-                Some(existing) => blend_colors(existing, theme.cursor_bg, 170),
-                None => theme.cursor_bg,
-            });
-        }
-        if let Some(bg) = row_bg {
-            line = pad_line_to_width(&line, line_width, Style::default().bg(bg));
-        }
+    if is_cursor {
+        line = pad_line_to_width(&line, line_width, Style::default().bg(theme.cursor_bg));
     }
     line
 }

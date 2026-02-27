@@ -958,15 +958,10 @@ impl App {
                         style = style.bg(theme.visual_bg);
                     }
                     if idx == self.shell_command.output_cursor {
-                        let cursor_bg = if in_visual {
-                            blend_colors(theme.visual_bg, theme.cursor_bg, 122)
-                        } else {
-                            theme.cursor_bg
-                        };
-                        style = style.bg(cursor_bg);
+                        style = style.bg(theme.cursor_bg);
                     }
                     let mut line = Line::from(Span::styled(row.clone(), style));
-                    if in_visual || idx == self.shell_command.output_cursor {
+                    if idx == self.shell_command.output_cursor {
                         line = pad_line_to_width(&line, output_inner.width, style);
                     }
                     line

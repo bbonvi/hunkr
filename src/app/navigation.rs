@@ -782,6 +782,8 @@ impl App {
                 self.runtime.status = format!("Clipboard unavailable for diff selection ({err:#})");
             }
         }
+
+        self.clear_diff_visual_selection();
     }
 
     /// Copies the active review-task markdown path to clipboard for quick sharing.
