@@ -1642,6 +1642,29 @@ fn switching_status_filter_deselects_hidden_commits() {
 }
 
 #[test]
+fn selected_rows_hidden_count_tracks_active_filter() {
+    let mut rows = vec![
+        commit_row("a", true, ReviewStatus::Unreviewed),
+        commit_row("b", true, ReviewStatus::Reviewed),
+        commit_row("c", false, ReviewStatus::Resolved),
+    ];
+    rows[2].selected = true;
+
+    assert_eq!(
+        selected_rows_hidden_by_status_filter(&rows, CommitStatusFilter::All),
+        0
+    );
+    assert_eq!(
+        selected_rows_hidden_by_status_filter(&rows, CommitStatusFilter::UnreviewedOrIssueFound),
+        2
+    );
+    assert_eq!(
+        selected_rows_hidden_by_status_filter(&rows, CommitStatusFilter::ReviewedOrResolved),
+        1
+    );
+}
+
+#[test]
 fn relative_time_formats_expected_units() {
     assert_eq!(format_relative_time(100, 130), "30s ago");
     assert_eq!(format_relative_time(100, 220), "2m ago");

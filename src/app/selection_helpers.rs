@@ -120,3 +120,12 @@ pub(super) fn deselect_rows_outside_status_filter(
     }
     deselected
 }
+
+pub(super) fn selected_rows_hidden_by_status_filter(
+    rows: &[CommitRow],
+    status_filter: CommitStatusFilter,
+) -> usize {
+    rows.iter()
+        .filter(|row| row.selected && !status_filter.matches_row(row))
+        .count()
+}

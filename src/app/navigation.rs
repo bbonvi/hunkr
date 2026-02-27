@@ -285,6 +285,13 @@ impl App {
         } else {
             format!("{} commit(s) -> {}", ids.len(), status.as_str())
         };
+        let hidden_selected =
+            selected_rows_hidden_by_status_filter(&self.commits, self.commit_ui.status_filter);
+        if hidden_selected > 0 {
+            status_message.push_str(&format!(
+                ", {hidden_selected} selected hidden by filter"
+            ));
+        }
 
         if status != ReviewStatus::Unreviewed {
             self.commit_ui.visual_anchor = None;
