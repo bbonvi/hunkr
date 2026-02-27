@@ -1110,29 +1110,40 @@ fn spawn_shell_command(command: &str) -> anyhow::Result<RunningShellCommand> {
 fn spawn_shell_process(shell: &str, command: &str) -> anyhow::Result<(Child, Option<u32>)> {
     #[cfg(unix)]
     {
-        if let Ok(child) = Command::new("setsid")
-            .arg(shell)
-            .arg("-lc")
-            .arg(command)
+        let mut command_builder = Command::new("setsid");
+        command_builder.arg(shell).arg("-lc").arg(command);
+        apply_shell_non_interactive_env(&mut command_builder);
+        command_builder
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
+            .stderr(Stdio::piped());
+        if let Ok(child) = command_builder.spawn() {
             let pgid = child.id();
             return Ok((child, Some(pgid)));
         }
     }
 
-    let child = Command::new(shell)
-        .arg("-lc")
-        .arg(command)
+    let mut command_builder = Command::new(shell);
+    command_builder.arg("-lc").arg(command);
+    apply_shell_non_interactive_env(&mut command_builder);
+    let child = command_builder
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("failed to spawn `{shell} -lc <command>`"))?;
     Ok((child, None))
+}
+
+/// Configure child shell environment for deterministic non-interactive execution.
+///
+/// We always run with `stdin` disconnected, so pager/prompt tools must be disabled
+/// to avoid blocking or confusing interactive output modes.
+fn apply_shell_non_interactive_env(command: &mut Command) {
+    command
+        .env("GIT_PAGER", "cat")
+        .env("PAGER", "cat")
+        .env("GIT_TERMINAL_PROMPT", "0");
 }
 
 fn spawn_shell_pipe_reader<R>(mut reader: R, tx: mpsc::SyncSender<String>) -> JoinHandle<()>
@@ -1182,4 +1193,35 @@ fn kill_process_group(_process_group_id: u32) -> std::io::Result<()> {
         std::io::ErrorKind::Unsupported,
         "process-group kill is only supported on unix",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn shell_non_interactive_env_disables_pager_and_terminal_prompts() {
+        let mut command = Command::new("/bin/sh");
+        apply_shell_non_interactive_env(&mut command);
+        let envs = command
+            .get_envs()
+            .map(|(key, value)| (key.to_os_string(), value.map(|v| v.to_os_string())))
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(
+            envs.get(OsStr::new("GIT_PAGER")).and_then(|v| v.as_deref()),
+            Some(OsStr::new("cat"))
+        );
+        assert_eq!(
+            envs.get(OsStr::new("PAGER")).and_then(|v| v.as_deref()),
+            Some(OsStr::new("cat"))
+        );
+        assert_eq!(
+            envs.get(OsStr::new("GIT_TERMINAL_PROMPT"))
+                .and_then(|v| v.as_deref()),
+            Some(OsStr::new("0"))
+        );
+    }
 }

@@ -855,6 +855,13 @@ impl App {
             Line::from(vec![
                 Span::styled("status: ", Style::default().fg(theme.dimmed)),
                 Span::styled(status_text, status_style),
+                Span::raw("  "),
+                Span::styled(
+                    "non-interactive",
+                    Style::default()
+                        .fg(theme.dimmed)
+                        .add_modifier(Modifier::ITALIC),
+                ),
             ]),
         ])
         .style(Style::default().bg(theme.modal_bg));
