@@ -12,6 +12,7 @@ It lets you review a selected commit range as one net diff across all changed fi
 - Inline review comments anchored to commit/hunk/line selections
 - Auto-generated review task markdown for agent handoff and follow-up
 - Built-in filters/search for commits and files
+- In-app worktree switcher to move across linked git worktrees without leaving the session
 - Neovim-style `!` shell command modal with streamed stdout/stderr, persistent command history, and non-interactive execution (stdin/pager prompts disabled)
 - Terminal-safe rendering for shell/diff text (ANSI/control sequences sanitized) plus `Ctrl-l` hard refresh
 - Keyboard-first UX with mouse support (drag-select commit ranges with edge auto-scroll, wheel scroll in list panes)
@@ -27,6 +28,8 @@ All review state stays in your repo under `.hunkr/`:
 - `.hunkr/comments/<branch>-review-tasks.md` for exported review tasks
 
 No remote service is required.
+
+When switching worktrees inside `hunkr`, review state stays in the launch workspace's `.hunkr/` so commit statuses and comments remain shared within that session.
 
 ## Quick Start
 
