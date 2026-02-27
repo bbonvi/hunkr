@@ -352,7 +352,7 @@ impl App {
             .constraints([
                 ratatui::layout::Constraint::Length(2),
                 ratatui::layout::Constraint::Min(1),
-                ratatui::layout::Constraint::Length(3),
+                ratatui::layout::Constraint::Length(4),
             ])
             .split(frame.area());
 

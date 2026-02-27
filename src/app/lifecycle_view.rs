@@ -342,6 +342,8 @@ impl App {
                         Span::styled(" clear ", Style::default().fg(theme.muted)),
                         key_chip("Backspace", theme),
                         Span::styled(" edit ", Style::default().fg(theme.muted)),
+                        key_chip("q", theme),
+                        Span::styled(" close ", Style::default().fg(theme.muted)),
                     ])
                 } else {
                     Line::from(vec![
@@ -355,7 +357,7 @@ impl App {
                         Span::styled(" search ", Style::default().fg(theme.muted)),
                         key_chip("r", theme),
                         Span::styled(" refresh ", Style::default().fg(theme.muted)),
-                        key_chip("Esc", theme),
+                        key_chip("Esc/q", theme),
                         Span::styled(" close", Style::default().fg(theme.muted)),
                     ])
                 }
@@ -429,14 +431,16 @@ impl App {
         let global_line = Line::from(vec![
             key_chip("1/2/3", theme),
             Span::styled(" panes ", Style::default().fg(theme.dimmed)),
-            key_chip("Tab", theme),
-            Span::styled(" cycle all ", Style::default().fg(theme.dimmed)),
+            key_chip("Tab/S-Tab", theme),
+            Span::styled(" cycle ", Style::default().fg(theme.dimmed)),
             key_chip("h/l", theme),
             Span::styled(" prev/next pane ", Style::default().fg(theme.dimmed)),
             key_chip("!", theme),
             Span::styled(" shell ", Style::default().fg(theme.dimmed)),
             key_chip("w", theme),
             Span::styled(" worktrees ", Style::default().fg(theme.dimmed)),
+            key_chip("Ctrl-r/F5", theme),
+            Span::styled(" refresh ", Style::default().fg(theme.dimmed)),
             key_chip("t", theme),
             Span::styled(" theme ", Style::default().fg(theme.dimmed)),
             key_chip("?", theme),
@@ -589,7 +593,7 @@ impl App {
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
                 ratatui::layout::Constraint::Length(1),
-                ratatui::layout::Constraint::Length(2),
+                ratatui::layout::Constraint::Length(3),
             ])
             .split(rect);
 
@@ -1538,6 +1542,8 @@ impl App {
                 Span::styled(" clear ", Style::default().fg(theme.muted)),
                 key_chip("Backspace", theme),
                 Span::styled(" edit ", Style::default().fg(theme.muted)),
+                key_chip("q", theme),
+                Span::styled(" close ", Style::default().fg(theme.muted)),
             ]))
         } else {
             Paragraph::new(Line::from(vec![
@@ -1547,7 +1553,7 @@ impl App {
                 Span::styled(" search ", Style::default().fg(theme.muted)),
                 key_chip("r", theme),
                 Span::styled(" refresh ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
+                key_chip("Esc/q", theme),
                 Span::styled(" close ", Style::default().fg(theme.muted)),
             ]))
         };
