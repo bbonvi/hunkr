@@ -1,4 +1,6 @@
-use super::lifecycle_input::{clear_commit_visual_anchor, diff_search_repeat_direction};
+use super::lifecycle_input::{
+    clear_commit_selection, clear_commit_visual_anchor, diff_search_repeat_direction,
+};
 use super::lifecycle_render::{
     PaneCycleDirection, footer_mode_label, help_overlay_close_key, pane_focus_cycle_direction,
     theme_toggle_conflicts_with_diff_pending_op,
@@ -720,6 +722,44 @@ fn clear_commit_visual_anchor_noops_when_disabled() {
 
     assert!(!clear_commit_visual_anchor(&mut visual_anchor));
     assert_eq!(visual_anchor, None);
+}
+
+#[test]
+fn clear_commit_selection_clears_rows_and_anchors() {
+    let mut rows = vec![
+        commit_row("a1", true, ReviewStatus::Unreviewed),
+        commit_row("b2", false, ReviewStatus::Reviewed),
+    ];
+    let mut visual_anchor = Some(1);
+    let mut selection_anchor = Some(0);
+
+    assert!(clear_commit_selection(
+        &mut rows,
+        &mut visual_anchor,
+        &mut selection_anchor
+    ));
+    assert!(rows.iter().all(|row| !row.selected));
+    assert_eq!(visual_anchor, None);
+    assert_eq!(selection_anchor, None);
+}
+
+#[test]
+fn clear_commit_selection_noops_when_already_empty() {
+    let mut rows = vec![
+        commit_row("a1", false, ReviewStatus::Unreviewed),
+        commit_row("b2", false, ReviewStatus::Reviewed),
+    ];
+    let mut visual_anchor = None;
+    let mut selection_anchor = None;
+
+    assert!(!clear_commit_selection(
+        &mut rows,
+        &mut visual_anchor,
+        &mut selection_anchor
+    ));
+    assert!(rows.iter().all(|row| !row.selected));
+    assert_eq!(visual_anchor, None);
+    assert_eq!(selection_anchor, None);
 }
 
 #[test]

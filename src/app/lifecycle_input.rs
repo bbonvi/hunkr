@@ -635,9 +635,14 @@ impl App {
 
     pub(super) fn handle_commits_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc => {
-                if clear_commit_visual_anchor(&mut self.commit_ui.visual_anchor) {
-                    self.runtime.status = "Commit visual range off".to_owned();
+            KeyCode::Esc | KeyCode::Char('x') => {
+                if clear_commit_selection(
+                    &mut self.commits,
+                    &mut self.commit_ui.visual_anchor,
+                    &mut self.commit_ui.selection_anchor,
+                ) {
+                    self.runtime.status = "Cleared commit selection".to_owned();
+                    self.on_selection_changed();
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => self.move_commit_cursor(1),
@@ -664,14 +669,6 @@ impl App {
                     self.runtime.status = "Commit visual range on".to_owned();
                     self.apply_commit_visual_range();
                 }
-            }
-            KeyCode::Char('x') => {
-                for row in &mut self.commits {
-                    row.selected = false;
-                }
-                self.commit_ui.visual_anchor = None;
-                self.commit_ui.selection_anchor = None;
-                self.on_selection_changed();
             }
             KeyCode::Char(' ') => {
                 if let Some(idx) = self.selected_commit_full_index()
@@ -914,6 +911,21 @@ impl App {
 
 pub(super) fn clear_commit_visual_anchor(visual_anchor: &mut Option<usize>) -> bool {
     visual_anchor.take().is_some()
+}
+
+pub(super) fn clear_commit_selection(
+    rows: &mut [CommitRow],
+    visual_anchor: &mut Option<usize>,
+    selection_anchor: &mut Option<usize>,
+) -> bool {
+    let mut changed = false;
+    for row in rows {
+        changed |= row.selected;
+        row.selected = false;
+    }
+    changed |= visual_anchor.take().is_some();
+    changed |= selection_anchor.take().is_some();
+    changed
 }
 
 pub(super) fn diff_search_repeat_direction(key: KeyEvent) -> Option<bool> {

@@ -1306,6 +1306,10 @@ impl App {
             ]),
             Line::from(vec![key_chip("space", theme), Span::raw(" select commits")]),
             Line::from(vec![
+                key_chip("Esc", theme),
+                Span::raw(" clear commit selection"),
+            ]),
+            Line::from(vec![
                 key_chip("v", theme),
                 Span::raw(" visual select (commits or diff)"),
             ]),
