@@ -17,6 +17,16 @@ fn classify_char(ch: char) -> WordClass {
     }
 }
 
+fn classify_vim_char(ch: char, big_word: bool) -> WordClass {
+    if ch.is_whitespace() {
+        WordClass::Whitespace
+    } else if big_word {
+        WordClass::Word
+    } else {
+        classify_char(ch)
+    }
+}
+
 pub(super) fn clamp_char_boundary(text: &str, cursor: usize) -> usize {
     let mut idx = cursor.min(text.len());
     while idx > 0 && !text.is_char_boundary(idx) {
@@ -106,6 +116,134 @@ pub(super) fn next_word_boundary(text: &str, cursor: usize) -> usize {
 pub(super) fn word_at_char_column(text: &str, char_column: usize) -> Option<String> {
     let (start, end) = word_byte_range_at_char_column(text, char_column)?;
     Some(text[start..end].to_owned())
+}
+
+/// Returns the last valid visual character column for the line.
+pub(super) fn line_last_char_column(text: &str) -> Option<usize> {
+    text.chars().count().checked_sub(1)
+}
+
+/// Returns the first non-whitespace visual character column.
+///
+/// For all-whitespace lines, returns column 0 to match Vim's `^` fallback.
+pub(super) fn line_first_non_whitespace_column(text: &str) -> Option<usize> {
+    if text.is_empty() {
+        return None;
+    }
+    for (idx, ch) in text.chars().enumerate() {
+        if !ch.is_whitespace() {
+            return Some(idx);
+        }
+    }
+    Some(0)
+}
+
+/// Vim-like `w`/`W`: move to start of next word/WORD.
+pub(super) fn vim_next_word_start_column(
+    text: &str,
+    cursor_col: usize,
+    big_word: bool,
+) -> Option<usize> {
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return None;
+    }
+    let start = cursor_col.min(chars.len() - 1);
+    let mut idx = start;
+    let cls = classify_vim_char(chars[idx], big_word);
+    if cls == WordClass::Whitespace {
+        while idx < chars.len() && classify_vim_char(chars[idx], big_word) == WordClass::Whitespace
+        {
+            idx += 1;
+        }
+    } else {
+        while idx < chars.len() && classify_vim_char(chars[idx], big_word) == cls {
+            idx += 1;
+        }
+        while idx < chars.len() && classify_vim_char(chars[idx], big_word) == WordClass::Whitespace
+        {
+            idx += 1;
+        }
+    }
+    Some(if idx < chars.len() { idx } else { start })
+}
+
+/// Vim-like `b`/`B`: move to start of previous word/WORD.
+pub(super) fn vim_prev_word_start_column(
+    text: &str,
+    cursor_col: usize,
+    big_word: bool,
+) -> Option<usize> {
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return None;
+    }
+    let start = cursor_col.min(chars.len() - 1);
+    if start == 0 {
+        return Some(0);
+    }
+
+    let mut idx = start - 1;
+    while idx > 0 && classify_vim_char(chars[idx], big_word) == WordClass::Whitespace {
+        idx -= 1;
+    }
+    let cls = classify_vim_char(chars[idx], big_word);
+    while idx > 0 && classify_vim_char(chars[idx - 1], big_word) == cls {
+        idx -= 1;
+    }
+    Some(idx)
+}
+
+/// Vim-like `e`/`E`: move to end of current/next word/WORD.
+pub(super) fn vim_next_word_end_column(
+    text: &str,
+    cursor_col: usize,
+    big_word: bool,
+) -> Option<usize> {
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return None;
+    }
+    let start = cursor_col.min(chars.len() - 1);
+    let mut idx = start;
+    let mut cls = classify_vim_char(chars[idx], big_word);
+
+    if cls == WordClass::Whitespace {
+        while idx < chars.len() && classify_vim_char(chars[idx], big_word) == WordClass::Whitespace
+        {
+            idx += 1;
+        }
+        if idx >= chars.len() {
+            return Some(start);
+        }
+        cls = classify_vim_char(chars[idx], big_word);
+        while idx + 1 < chars.len() && classify_vim_char(chars[idx + 1], big_word) == cls {
+            idx += 1;
+        }
+        return Some(idx);
+    }
+
+    while idx + 1 < chars.len() && classify_vim_char(chars[idx + 1], big_word) == cls {
+        idx += 1;
+    }
+    if idx > start {
+        return Some(idx);
+    }
+
+    let mut seek = idx + 1;
+    while seek < chars.len() && classify_vim_char(chars[seek], big_word) == WordClass::Whitespace {
+        seek += 1;
+    }
+    if seek >= chars.len() {
+        return Some(start);
+    }
+
+    cls = classify_vim_char(chars[seek], big_word);
+    idx = seek;
+    while idx + 1 < chars.len() && classify_vim_char(chars[idx + 1], big_word) == cls {
+        idx += 1;
+    }
+    Some(idx)
 }
 
 fn word_byte_range_at_char_column(text: &str, char_column: usize) -> Option<(usize, usize)> {

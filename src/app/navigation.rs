@@ -312,21 +312,122 @@ impl App {
 
     pub(super) fn move_diff_block_cursor(&mut self, delta: isize) {
         if self.rendered_diff.is_empty() {
-            self.diff_ui.block_cursor_col = 0;
-            self.diff_ui.block_cursor_goal = 0;
+            self.reset_diff_block_cursor();
             return;
         }
 
         let line_len = self.current_diff_line_char_len();
         if line_len == 0 {
-            self.diff_ui.block_cursor_col = 0;
-            self.diff_ui.block_cursor_goal = 0;
+            self.reset_diff_block_cursor();
             return;
         }
         let max_col = line_len.saturating_sub(1) as isize;
         let next = (self.diff_ui.block_cursor_col as isize + delta).clamp(0, max_col) as usize;
         self.diff_ui.block_cursor_col = next;
         self.diff_ui.block_cursor_goal = next;
+    }
+
+    pub(super) fn move_diff_block_cursor_next_word_start(&mut self, big_word: bool) {
+        let current_col = self.diff_ui.block_cursor_col;
+        let Some(line) = self.current_diff_line_text() else {
+            self.reset_diff_block_cursor();
+            return;
+        };
+        if let Some(col) = vim_next_word_start_column(line, current_col, big_word)
+            .filter(|col| *col != current_col)
+        {
+            self.set_diff_block_cursor_col(col);
+            return;
+        }
+
+        let at_line_end = match line_last_char_column(line) {
+            Some(last_col) => current_col >= last_col,
+            None => true,
+        };
+        if !at_line_end {
+            return;
+        }
+        let Some(next_row) = self.next_diff_row_with_content(self.diff_position.cursor) else {
+            return;
+        };
+        self.set_diff_cursor(next_row);
+        let Some(next_line) = self.current_diff_line_text() else {
+            self.reset_diff_block_cursor();
+            return;
+        };
+        let next_col = next_line
+            .chars()
+            .position(|ch| !ch.is_whitespace())
+            .unwrap_or(0);
+        self.set_diff_block_cursor_col(next_col);
+    }
+
+    pub(super) fn move_diff_block_cursor_prev_word_start(&mut self, big_word: bool) {
+        let Some(line) = self.current_diff_line_text() else {
+            self.reset_diff_block_cursor();
+            return;
+        };
+        if let Some(col) = vim_prev_word_start_column(line, self.diff_ui.block_cursor_col, big_word)
+        {
+            self.set_diff_block_cursor_col(col);
+        }
+    }
+
+    pub(super) fn move_diff_block_cursor_next_word_end(&mut self, big_word: bool) {
+        let current_col = self.diff_ui.block_cursor_col;
+        let Some(line) = self.current_diff_line_text() else {
+            self.reset_diff_block_cursor();
+            return;
+        };
+        if let Some(col) =
+            vim_next_word_end_column(line, current_col, big_word).filter(|col| *col != current_col)
+        {
+            self.set_diff_block_cursor_col(col);
+            return;
+        }
+
+        let at_line_end = match line_last_char_column(line) {
+            Some(last_col) => current_col >= last_col,
+            None => true,
+        };
+        if !at_line_end {
+            return;
+        }
+        let Some(next_row) = self.next_diff_row_with_content(self.diff_position.cursor) else {
+            return;
+        };
+        self.set_diff_cursor(next_row);
+        let Some(next_line) = self.current_diff_line_text() else {
+            self.reset_diff_block_cursor();
+            return;
+        };
+        let start_col = next_line
+            .chars()
+            .position(|ch| !ch.is_whitespace())
+            .unwrap_or(0);
+        if let Some(col) = vim_next_word_end_column(next_line, start_col, big_word) {
+            self.set_diff_block_cursor_col(col);
+        }
+    }
+
+    pub(super) fn set_diff_block_cursor_to_line_first_non_whitespace(&mut self) {
+        let Some(line) = self.current_diff_line_text() else {
+            self.reset_diff_block_cursor();
+            return;
+        };
+        if let Some(col) = line_first_non_whitespace_column(line) {
+            self.set_diff_block_cursor_col(col);
+        }
+    }
+
+    pub(super) fn set_diff_block_cursor_to_line_end(&mut self) {
+        let Some(line) = self.current_diff_line_text() else {
+            self.reset_diff_block_cursor();
+            return;
+        };
+        if let Some(col) = line_last_char_column(line) {
+            self.set_diff_block_cursor_col(col);
+        }
     }
 
     pub(super) fn set_diff_block_cursor_col(&mut self, col: usize) {
@@ -336,8 +437,7 @@ impl App {
 
     pub(super) fn sync_diff_block_cursor_to_cursor_line(&mut self) {
         if self.rendered_diff.is_empty() {
-            self.diff_ui.block_cursor_col = 0;
-            self.diff_ui.block_cursor_goal = 0;
+            self.reset_diff_block_cursor();
             return;
         }
 
@@ -866,11 +966,26 @@ impl App {
             && row < self.diff_position.scroll.saturating_add(body_rows)
     }
 
+    fn current_diff_line_text(&self) -> Option<&str> {
+        self.rendered_diff
+            .get(self.diff_position.cursor)
+            .map(|line| line.raw_text.as_str())
+    }
+
+    fn next_diff_row_with_content(&self, current_row: usize) -> Option<usize> {
+        let start = current_row.saturating_add(1);
+        (start..self.rendered_diff.len()).find(|idx| !self.rendered_diff[*idx].raw_text.is_empty())
+    }
+
     fn current_diff_line_char_len(&self) -> usize {
-        let Some(line) = self.rendered_diff.get(self.diff_position.cursor) else {
-            return 0;
-        };
-        line.raw_text.chars().count()
+        self.current_diff_line_text()
+            .map(|line| line.chars().count())
+            .unwrap_or(0)
+    }
+
+    fn reset_diff_block_cursor(&mut self) {
+        self.diff_ui.block_cursor_col = 0;
+        self.diff_ui.block_cursor_goal = 0;
     }
 }
 

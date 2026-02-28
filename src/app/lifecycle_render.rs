@@ -530,6 +530,13 @@ impl App {
                 self.open_shell_command_modal();
             }
             KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
+                if self.preferences.focused == FocusPane::Diff {
+                    self.dispatch_focus_key(key);
+                } else {
+                    self.open_worktree_switcher();
+                }
+            }
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.open_worktree_switcher();
             }
             KeyCode::Char('t') => self.toggle_theme(),

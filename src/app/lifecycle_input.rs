@@ -742,6 +742,39 @@ impl App {
             KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
                 self.move_diff_block_cursor(1)
             }
+            KeyCode::Char('0') if key.modifiers == KeyModifiers::NONE => {
+                self.set_diff_block_cursor_col(0)
+            }
+            KeyCode::Char('^') if plain_or_shift(key.modifiers) => {
+                self.set_diff_block_cursor_to_line_first_non_whitespace()
+            }
+            KeyCode::Char('$') if plain_or_shift(key.modifiers) => {
+                self.set_diff_block_cursor_to_line_end()
+            }
+            KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
+                self.move_diff_block_cursor_next_word_start(false)
+            }
+            KeyCode::Char('W') if plain_or_shift(key.modifiers) => {
+                self.move_diff_block_cursor_next_word_start(true)
+            }
+            KeyCode::Char('b') if key.modifiers == KeyModifiers::NONE => {
+                self.move_diff_block_cursor_prev_word_start(false)
+            }
+            KeyCode::Char('B') if plain_or_shift(key.modifiers) => {
+                self.move_diff_block_cursor_prev_word_start(true)
+            }
+            KeyCode::Char('e') if key.modifiers == KeyModifiers::NONE => {
+                self.move_diff_block_cursor_next_word_end(false)
+            }
+            KeyCode::Char('E') if plain_or_shift(key.modifiers) => {
+                self.move_diff_block_cursor_next_word_end(true)
+            }
+            KeyCode::Char('H') if plain_or_shift(key.modifiers) => {
+                self.set_diff_block_cursor_to_line_first_non_whitespace()
+            }
+            KeyCode::Char('L') if plain_or_shift(key.modifiers) => {
+                self.set_diff_block_cursor_to_line_end()
+            }
             KeyCode::Esc => {
                 let had_visual = self.diff_ui.visual_selection.is_some();
                 let had_search = self.clear_diff_search();
@@ -827,7 +860,9 @@ impl App {
                 self.runtime.status =
                     "Comment mode: Enter save, Alt+Enter newline, Esc cancel".to_owned();
             }
-            KeyCode::Char('e') => {
+            KeyCode::Char('e') | KeyCode::Char('E')
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
                 if self.uncommitted_selected() {
                     self.runtime.status =
                         "Comments are disabled for uncommitted changes".to_owned();
@@ -889,4 +924,8 @@ pub(super) fn diff_search_repeat_direction(key: KeyEvent) -> Option<bool> {
         KeyCode::Char('n') if key.modifiers == KeyModifiers::SHIFT => Some(false),
         _ => None,
     }
+}
+
+fn plain_or_shift(modifiers: KeyModifiers) -> bool {
+    modifiers == KeyModifiers::NONE || modifiers == KeyModifiers::SHIFT
 }

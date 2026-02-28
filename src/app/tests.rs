@@ -243,6 +243,33 @@ fn word_at_char_column_returns_word_under_cursor() {
 }
 
 #[test]
+fn vim_word_motions_distinguish_word_and_word_semantics() {
+    let text = "foo::bar baz";
+
+    assert_eq!(vim_next_word_start_column(text, 0, false), Some(3));
+    assert_eq!(vim_next_word_start_column(text, 0, true), Some(9));
+    assert_eq!(vim_next_word_end_column(text, 0, false), Some(2));
+    assert_eq!(vim_next_word_end_column(text, 0, true), Some(7));
+    assert_eq!(vim_prev_word_start_column(text, 9, false), Some(5));
+    assert_eq!(vim_prev_word_start_column(text, 9, true), Some(0));
+}
+
+#[test]
+fn vim_word_end_moves_to_next_word_when_already_on_word_end() {
+    assert_eq!(vim_next_word_end_column("foo bar", 2, false), Some(6));
+    assert_eq!(vim_next_word_end_column("foo", 2, false), Some(2));
+}
+
+#[test]
+fn line_column_helpers_cover_empty_and_whitespace_only_lines() {
+    assert_eq!(line_last_char_column(""), None);
+    assert_eq!(line_last_char_column("abc"), Some(2));
+    assert_eq!(line_first_non_whitespace_column(""), None);
+    assert_eq!(line_first_non_whitespace_column("   abc"), Some(3));
+    assert_eq!(line_first_non_whitespace_column("   "), Some(0));
+}
+
+#[test]
 fn delete_word_operations_respect_cursor() {
     let mut text = "alpha beta gamma".to_owned();
     let mut cursor = text.len();
