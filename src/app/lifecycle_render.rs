@@ -500,10 +500,10 @@ impl App {
             KeyCode::Char('q') => self.runtime.should_quit = true,
             KeyCode::Tab if key.modifiers == KeyModifiers::NONE => self.focus_next(),
             KeyCode::BackTab if key.modifiers == KeyModifiers::NONE => self.focus_prev(),
-            KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
+            KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
                 self.set_focus(focus_with_l(self.preferences.focused))
             }
-            KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
+            KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
                 self.set_focus(focus_with_h(self.preferences.focused))
             }
             KeyCode::Char('1') => self.set_focus(FocusPane::Commits),

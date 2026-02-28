@@ -849,11 +849,28 @@ impl App {
 }
 
 impl App {
+    pub(super) fn diff_row_visible_in_viewport(&self, row: usize) -> bool {
+        if self.rendered_diff.is_empty() {
+            return false;
+        }
+        let viewport_rows = self.diff_ui.pane_rects.diff.height.saturating_sub(2).max(1) as usize;
+        let sticky =
+            self.sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
+        if sticky.contains(&row) {
+            return true;
+        }
+        let body_rows = viewport_rows
+            .saturating_sub(sticky.len().min(viewport_rows.saturating_sub(1)))
+            .max(1);
+        row >= self.diff_position.scroll
+            && row < self.diff_position.scroll.saturating_add(body_rows)
+    }
+
     fn current_diff_line_char_len(&self) -> usize {
         let Some(line) = self.rendered_diff.get(self.diff_position.cursor) else {
             return 0;
         };
-        line_plain_text(&line.line).chars().count()
+        line.raw_text.chars().count()
     }
 }
 

@@ -529,12 +529,17 @@ impl App {
             forward,
             self.diff_position.cursor,
         ) {
+            let crossed_viewport_boundary = !self.diff_row_visible_in_viewport(idx);
             self.set_diff_cursor(idx);
             if let Some(line) = self.rendered_diff.get(idx)
-                && let Some(col) =
-                    first_diff_match_char_column(&line_plain_text(&line.line), normalized)
+                && let Some(col) = first_diff_match_char_column(&line.raw_text, normalized)
             {
                 self.set_diff_block_cursor_col(col);
+            }
+            if crossed_viewport_boundary {
+                let visible = self.visible_diff_rows();
+                let centered_scroll = self.diff_position.cursor.saturating_sub(visible / 2);
+                self.set_diff_scroll(centered_scroll);
             }
             self.runtime.status = format!("/{normalized} -> line {}", idx.saturating_add(1));
         } else {
@@ -733,8 +738,12 @@ impl App {
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_diff_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_diff_cursor(-1),
-            KeyCode::Left => self.move_diff_block_cursor(-1),
-            KeyCode::Right => self.move_diff_block_cursor(1),
+            KeyCode::Char('h') if key.modifiers == KeyModifiers::NONE => {
+                self.move_diff_block_cursor(-1)
+            }
+            KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
+                self.move_diff_block_cursor(1)
+            }
             KeyCode::Esc => {
                 let had_visual = self.diff_ui.visual_selection.is_some();
                 let had_search = self.clear_diff_search();
@@ -782,12 +791,12 @@ impl App {
             KeyCode::Char('*')
                 if key.modifiers == KeyModifiers::SHIFT || key.modifiers == KeyModifiers::NONE =>
             {
-                self.search_word_under_diff_cursor(true);
+                self.search_word_under_diff_cursor();
             }
             KeyCode::Char('#')
                 if key.modifiers == KeyModifiers::SHIFT || key.modifiers == KeyModifiers::NONE =>
             {
-                self.search_word_under_diff_cursor(false);
+                self.search_word_under_diff_cursor();
             }
             KeyCode::Char('v') | KeyCode::Char('V') => {
                 if self.rendered_diff.is_empty() {
@@ -831,6 +840,9 @@ impl App {
             KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => {
                 self.copy_diff_visual_selection();
             }
+            KeyCode::Enter if self.diff_ui.visual_selection.is_some() => {
+                self.copy_diff_visual_selection();
+            }
             KeyCode::Char('Y')
                 if key.modifiers == KeyModifiers::SHIFT || key.modifiers == KeyModifiers::NONE =>
             {
@@ -848,17 +860,17 @@ impl App {
         }
     }
 
-    fn search_word_under_diff_cursor(&mut self, forward: bool) {
+    fn search_word_under_diff_cursor(&mut self) {
         let Some(line) = self.rendered_diff.get(self.diff_position.cursor) else {
             self.runtime.status = "No diff line under cursor".to_owned();
             return;
         };
-        let display_text = line_plain_text(&line.line);
-        let Some(word) = word_at_char_column(&display_text, self.diff_ui.block_cursor_col) else {
+        let Some(word) = word_at_char_column(&line.raw_text, self.diff_ui.block_cursor_col) else {
             self.runtime.status = "No searchable word under diff block cursor".to_owned();
             return;
         };
-        self.execute_diff_search(&word, forward);
+        self.search.diff_query = Some(word.clone());
+        self.runtime.status = format!("/{word}");
     }
 
     fn clear_diff_search(&mut self) -> bool {

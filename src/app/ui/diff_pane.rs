@@ -9,8 +9,8 @@ use ratatui::{
 
 use super::super::{
     CommentAnchor, CursorSelectionPolicy, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine,
-    UiTheme, apply_row_highlight, comment_anchor_matches, format_path_with_icon, is_commit_anchor,
-    line_plain_text, sanitized_span,
+    UiTheme, apply_row_highlight, comment_anchor_matches, display_width, format_path_with_icon,
+    is_commit_anchor, sanitized_span,
 };
 
 #[derive(Debug, Clone)]
@@ -460,58 +460,141 @@ fn display_line_with_selection(
     let line = override_line
         .cloned()
         .unwrap_or_else(|| rendered.line.clone());
-    let display_text = line_plain_text(&line);
+    let layout = diff_payload_layout(rendered, &line);
     let in_visual = selection
         .visual_range
         .is_some_and(|(start, end)| idx >= start && idx <= end);
     let is_cursor = idx == selection.cursor && selection.focused_diff;
-    let mut highlighted = apply_row_highlight(
-        &line,
-        line_width,
-        in_visual,
-        is_cursor,
-        selection.theme.visual_bg,
-        selection.theme.cursor_bg,
-        CursorSelectionPolicy::CursorWins,
-    );
+    let mut highlighted = if layout.highlight_without_line_numbers {
+        apply_row_highlight_without_line_numbers(
+            &line,
+            line_width,
+            in_visual,
+            is_cursor,
+            selection.theme,
+            layout,
+        )
+    } else {
+        apply_row_highlight(
+            &line,
+            line_width,
+            in_visual,
+            is_cursor,
+            selection.theme.visual_bg,
+            selection.theme.cursor_bg,
+            CursorSelectionPolicy::CursorWins,
+        )
+    };
 
     if let Some(query) = selection.search_query {
         highlighted = apply_search_highlights(
             &highlighted,
-            &display_text,
+            &rendered.raw_text,
             query,
             is_cursor,
             selection.block_cursor_col,
             selection.theme,
+            layout,
         );
     }
     if is_cursor {
         highlighted = apply_block_cursor_highlight(
             &highlighted,
-            &display_text,
+            &rendered.raw_text,
             selection.block_cursor_col,
             selection.theme,
+            layout,
         );
     }
 
     highlighted
 }
 
+#[derive(Debug, Clone, Copy)]
+struct DiffPayloadLayout {
+    display_byte_offset: usize,
+    display_cell_offset: u16,
+    insert_space_after_prefix: bool,
+    highlight_without_line_numbers: bool,
+}
+
+fn diff_payload_layout(rendered: &RenderedDiffLine, line: &Line<'static>) -> DiffPayloadLayout {
+    let looks_like_code_line = rendered
+        .anchor
+        .as_ref()
+        .is_some_and(|anchor| !is_commit_anchor(anchor))
+        && line.spans.len() >= 4
+        && matches!(
+            rendered.raw_text.chars().next(),
+            Some('+') | Some('-') | Some(' ') | Some('~')
+        );
+    if !looks_like_code_line {
+        return DiffPayloadLayout {
+            display_byte_offset: 0,
+            display_cell_offset: 0,
+            insert_space_after_prefix: false,
+            highlight_without_line_numbers: false,
+        };
+    }
+
+    let prefix = line
+        .spans
+        .first()
+        .map(|span| span.content.as_ref())
+        .unwrap_or("");
+    DiffPayloadLayout {
+        display_byte_offset: prefix.len(),
+        display_cell_offset: display_width(prefix).min(u16::MAX as usize) as u16,
+        insert_space_after_prefix: true,
+        highlight_without_line_numbers: true,
+    }
+}
+
+fn apply_row_highlight_without_line_numbers(
+    line: &Line<'static>,
+    line_width: u16,
+    in_visual: bool,
+    is_cursor: bool,
+    theme: &UiTheme,
+    layout: DiffPayloadLayout,
+) -> Line<'static> {
+    let Some(prefix_span) = line.spans.first() else {
+        return line.clone();
+    };
+    let payload = Line::from(line.spans.iter().skip(1).cloned().collect::<Vec<_>>());
+    let payload_width = line_width.saturating_sub(layout.display_cell_offset);
+    let highlighted_payload = apply_row_highlight(
+        &payload,
+        payload_width,
+        in_visual,
+        is_cursor,
+        theme.visual_bg,
+        theme.cursor_bg,
+        CursorSelectionPolicy::CursorWins,
+    );
+
+    let mut spans = Vec::with_capacity(1 + highlighted_payload.spans.len());
+    spans.push(prefix_span.clone());
+    spans.extend(highlighted_payload.spans);
+    Line::from(spans)
+}
+
 fn apply_search_highlights(
     line: &Line<'static>,
-    text: &str,
+    raw_text: &str,
     query: &str,
     cursor_on_line: bool,
     block_cursor_col: usize,
     theme: &UiTheme,
+    layout: DiffPayloadLayout,
 ) -> Line<'static> {
-    let ranges = find_case_insensitive_ranges(text, query);
+    let ranges = find_case_insensitive_ranges(raw_text, query);
     if ranges.is_empty() {
         return line.clone();
     }
 
     let cursor_range = cursor_on_line.then(|| {
-        let cursor_byte = byte_index_for_char_column(text, block_cursor_col)?;
+        let cursor_byte = byte_index_for_char_column(raw_text, block_cursor_col)?;
         ranges
             .iter()
             .copied()
@@ -530,30 +613,40 @@ fn apply_search_highlights(
                 .fg(theme.search_match_fg)
                 .bg(theme.search_match_bg)
         };
-        patched = patch_line_byte_range(&patched, start, end, style);
+        let (display_start, display_end) = map_raw_range_to_display((start, end), layout);
+        patched = patch_line_byte_range(&patched, display_start, display_end, style);
     }
     patched
 }
 
 fn apply_block_cursor_highlight(
     line: &Line<'static>,
-    text: &str,
+    raw_text: &str,
     char_col: usize,
     theme: &UiTheme,
+    layout: DiffPayloadLayout,
 ) -> Line<'static> {
-    let Some((start, end)) = byte_range_for_char_column(text, char_col) else {
+    let Some((start, end)) = byte_range_for_char_column(raw_text, char_col) else {
         return line.clone();
     };
+    let (display_start, display_end) = map_raw_range_to_display((start, end), layout);
 
     patch_line_byte_range(
         line,
-        start,
-        end,
+        display_start,
+        display_end,
         Style::default()
             .fg(theme.block_cursor_fg)
             .bg(theme.block_cursor_bg)
             .add_modifier(Modifier::BOLD),
     )
+}
+
+fn map_raw_range_to_display(range: (usize, usize), layout: DiffPayloadLayout) -> (usize, usize) {
+    let map_idx = |idx: usize| {
+        layout.display_byte_offset + idx + usize::from(layout.insert_space_after_prefix && idx > 0)
+    };
+    (map_idx(range.0), map_idx(range.1))
 }
 
 fn find_case_insensitive_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
