@@ -1864,6 +1864,20 @@ fn viewport_scroll_clamps_at_bottom_and_content_end() {
 }
 
 #[test]
+fn list_scroll_preserves_cursor_row_after_filter_mutation() {
+    let next_top =
+        list_scroll_preserving_cursor_to_top_offset(Some(14), 10, Some(7)).expect("top offset");
+    assert_eq!(next_top, 3);
+}
+
+#[test]
+fn list_scroll_preservation_clamps_to_top_when_next_cursor_is_near_start() {
+    let next_top =
+        list_scroll_preserving_cursor_to_top_offset(Some(6), 3, Some(2)).expect("top offset");
+    assert_eq!(next_top, 0);
+}
+
+#[test]
 fn commit_banner_renders_only_when_commit_changes() {
     let commits = ["a", "a", "b", "b", "a"];
     let mut previous: Option<&str> = None;

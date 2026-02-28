@@ -240,7 +240,8 @@ impl App {
     }
 
     pub(super) fn cycle_commit_status_filter(&mut self) {
-        let preferred_commit_id = self.selected_commit_id();
+        let prior_selected = self.commit_ui.list_state.selected();
+        let prior_top = self.commit_ui.list_state.offset();
         let fallback_visible_idx = self.commit_ui.list_state.selected();
         self.commit_ui.status_filter = self.commit_ui.status_filter.next();
         let deselected =
@@ -252,7 +253,14 @@ impl App {
                 return;
             }
         }
-        self.sync_commit_cursor_for_filters(preferred_commit_id.as_deref(), fallback_visible_idx);
+        self.sync_commit_cursor_for_filters(None, fallback_visible_idx);
+        if let Some(next_top) = list_scroll_preserving_cursor_to_top_offset(
+            prior_selected,
+            prior_top,
+            self.commit_ui.list_state.selected(),
+        ) {
+            *self.commit_ui.list_state.offset_mut() = next_top;
+        }
         self.runtime.status = if deselected == 0 {
             format!(
                 "Commit status filter: {}",

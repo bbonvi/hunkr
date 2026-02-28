@@ -723,6 +723,19 @@ pub(super) fn scrolled_diff_position_preserving_offset(
     }
 }
 
+/// Computes a list scroll offset that preserves the cursor's viewport row after a list mutation.
+///
+/// `prior_selected` and `prior_top` define the cursor row before mutation. `next_selected` is the
+/// selected row after mutation/clamping. Returns `None` when there was no prior cursor anchor.
+pub(super) fn list_scroll_preserving_cursor_to_top_offset(
+    prior_selected: Option<usize>,
+    prior_top: usize,
+    next_selected: Option<usize>,
+) -> Option<usize> {
+    let cursor_to_top_offset = prior_selected?.saturating_sub(prior_top);
+    Some(next_selected?.saturating_sub(cursor_to_top_offset))
+}
+
 pub(super) fn focus_with_h(current: FocusPane) -> FocusPane {
     match current {
         FocusPane::Commits => FocusPane::Diff,
