@@ -87,6 +87,8 @@ impl App {
             },
             diff_ui: DiffUiState {
                 visual_selection: None,
+                block_cursor_col: 0,
+                block_cursor_goal: 0,
                 mouse_anchor: None,
                 last_list_wheel_event: None,
                 pane_rects: PaneRects::default(),
@@ -557,7 +559,10 @@ impl App {
 
 pub(super) fn help_overlay_close_key(key: KeyEvent) -> bool {
     key.modifiers == KeyModifiers::NONE
-        && matches!(key.code, KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q'))
+        && matches!(
+            key.code,
+            KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
+        )
 }
 
 pub(super) fn theme_toggle_conflicts_with_diff_pending_op(

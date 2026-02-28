@@ -92,6 +92,15 @@ pub(super) fn diff_index_at(
     }
 }
 
+pub(super) fn diff_column_at(mouse_x: u16, rect: ratatui::layout::Rect) -> usize {
+    if rect.width < 3 {
+        return 0;
+    }
+    let content_left = rect.x.saturating_add(1);
+    let max_col = rect.width.saturating_sub(3) as usize;
+    mouse_x.saturating_sub(content_left).min(max_col as u16) as usize
+}
+
 pub(super) fn diff_visual_from_drag_anchor(
     anchor: Option<usize>,
     cursor: usize,

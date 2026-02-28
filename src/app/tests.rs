@@ -1,9 +1,9 @@
-use super::lifecycle_input::clear_commit_visual_anchor;
+use super::lifecycle_input::{clear_commit_visual_anchor, diff_search_repeat_direction};
 use super::lifecycle_render::{
     footer_mode_label, help_overlay_close_key, theme_toggle_conflicts_with_diff_pending_op,
 };
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
-use super::ui::diff_pane::scrollbar_thumb;
+use super::ui::diff_pane::{first_diff_match_char_column, scrollbar_thumb};
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{
     CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
@@ -217,6 +217,23 @@ fn word_boundaries_skip_whitespace_and_symbols() {
     assert_eq!(prev_word_boundary(text, 10), 9);
     assert_eq!(next_word_boundary(text, 0), 5);
     assert_eq!(next_word_boundary(text, 5), 8);
+}
+
+#[test]
+fn word_at_char_column_returns_word_under_cursor() {
+    assert_eq!(
+        word_at_char_column("alpha beta", 2).as_deref(),
+        Some("alpha")
+    );
+    assert_eq!(
+        word_at_char_column("alpha beta", 9).as_deref(),
+        Some("beta")
+    );
+    assert_eq!(
+        word_at_char_column("alpha beta", 99).as_deref(),
+        Some("beta")
+    );
+    assert_eq!(word_at_char_column("alpha + beta", 6), None);
 }
 
 #[test]
@@ -551,6 +568,15 @@ fn diff_index_matches_list_behavior_without_sticky_banner() {
 }
 
 #[test]
+fn diff_column_maps_mouse_to_inner_content_column() {
+    let rect = ratatui::layout::Rect::new(10, 5, 30, 6);
+    assert_eq!(diff_column_at(10, rect), 0);
+    assert_eq!(diff_column_at(11, rect), 0);
+    assert_eq!(diff_column_at(14, rect), 3);
+    assert_eq!(diff_column_at(200, rect), 27);
+}
+
+#[test]
 fn shell_output_copy_payload_uses_visual_range_when_present() {
     let rows = vec![
         "$ git status".to_owned(),
@@ -753,6 +779,22 @@ fn theme_toggle_conflict_defers_t_to_diff_pending_z_op() {
         FocusPane::Diff,
         Some(DiffPendingOp::Z)
     ));
+}
+
+#[test]
+fn diff_search_repeat_direction_accepts_shifted_uppercase_n() {
+    assert_eq!(
+        diff_search_repeat_direction(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
+        Some(true)
+    );
+    assert_eq!(
+        diff_search_repeat_direction(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT)),
+        Some(false)
+    );
+    assert_eq!(
+        diff_search_repeat_direction(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::SHIFT)),
+        Some(false)
+    );
 }
 
 #[test]
@@ -2058,6 +2100,15 @@ fn diff_search_wraps_backward() {
 
     let found = find_diff_match_from_cursor(&lines, "gam", false, 0);
     assert_eq!(found, Some(2));
+}
+
+#[test]
+fn first_diff_match_char_column_returns_first_occurrence_column() {
+    assert_eq!(
+        first_diff_match_char_column("let alpha = alpha + 1;", "alpha"),
+        Some(4)
+    );
+    assert_eq!(first_diff_match_char_column("let alpha = 1;", "beta"), None);
 }
 
 #[test]

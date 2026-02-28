@@ -112,6 +112,10 @@ impl App {
                     self.diff_ui.visual_selection = None;
                     if let Some(row) = resolve_diff_row(self, y) {
                         self.set_diff_cursor(row);
+                        self.set_diff_block_cursor_col(diff_column_at(
+                            x,
+                            self.diff_ui.pane_rects.diff,
+                        ));
                         self.diff_ui.mouse_anchor = Some(self.diff_position.cursor);
                     } else {
                         self.diff_ui.mouse_anchor = None;
@@ -166,6 +170,7 @@ impl App {
             MouseEventKind::Drag(MouseButton::Left) if in_diff => {
                 if let Some(row) = resolve_diff_row(self, y) {
                     self.set_diff_cursor(row);
+                    self.set_diff_block_cursor_col(diff_column_at(x, self.diff_ui.pane_rects.diff));
                     self.diff_ui.visual_selection = diff_visual_from_drag_anchor(
                         self.diff_ui.mouse_anchor,
                         self.diff_position.cursor,
@@ -182,6 +187,10 @@ impl App {
                 if in_diff {
                     if let Some(row) = resolve_diff_row(self, y) {
                         self.set_diff_cursor(row);
+                        self.set_diff_block_cursor_col(diff_column_at(
+                            x,
+                            self.diff_ui.pane_rects.diff,
+                        ));
                     }
                     self.diff_ui.visual_selection = diff_visual_from_drag_anchor(
                         self.diff_ui.mouse_anchor,

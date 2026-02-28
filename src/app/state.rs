@@ -212,6 +212,7 @@ impl App {
             self.diff_cache.file_ranges.clear();
             self.diff_cache.file_range_by_path.clear();
             self.diff_position = DiffPosition::default();
+            self.sync_diff_block_cursor_to_cursor_line();
             return;
         }
 
@@ -233,6 +234,7 @@ impl App {
             self.diff_cache.file_range_by_path.clear();
             self.diff_cache.rendered_key = Some(key);
             self.diff_position = DiffPosition::default();
+            self.sync_diff_block_cursor_to_cursor_line();
             return;
         }
 
@@ -303,6 +305,7 @@ impl App {
     pub(super) fn sync_diff_cursor_to_content_bounds(&mut self) {
         if self.rendered_diff.is_empty() {
             self.diff_position = DiffPosition::default();
+            self.sync_diff_block_cursor_to_cursor_line();
             return;
         }
 
@@ -733,6 +736,8 @@ impl App {
         self.diff_cache.positions.clear();
         self.diff_position = DiffPosition::default();
         self.diff_ui.visual_selection = None;
+        self.diff_ui.block_cursor_col = 0;
+        self.diff_ui.block_cursor_goal = 0;
         self.diff_ui.mouse_anchor = None;
     }
 

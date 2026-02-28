@@ -102,6 +102,55 @@ pub(super) fn next_word_boundary(text: &str, cursor: usize) -> usize {
     idx
 }
 
+/// Returns the word (`[[:alnum:]_]`) under the provided visual char column.
+pub(super) fn word_at_char_column(text: &str, char_column: usize) -> Option<String> {
+    let (start, end) = word_byte_range_at_char_column(text, char_column)?;
+    Some(text[start..end].to_owned())
+}
+
+fn word_byte_range_at_char_column(text: &str, char_column: usize) -> Option<(usize, usize)> {
+    if text.is_empty() {
+        return None;
+    }
+
+    let (mut start, mut end, ch) = char_at_column_or_last(text, char_column)?;
+    if classify_char(ch) != WordClass::Word {
+        return None;
+    }
+
+    while start > 0 {
+        let prev = prev_char_boundary(text, start);
+        let prev_ch = text[prev..start].chars().next().expect("char at boundary");
+        if classify_char(prev_ch) != WordClass::Word {
+            break;
+        }
+        start = prev;
+    }
+    while end < text.len() {
+        let next = next_char_boundary(text, end);
+        let next_ch = text[end..next].chars().next().expect("char at boundary");
+        if classify_char(next_ch) != WordClass::Word {
+            break;
+        }
+        end = next;
+    }
+
+    Some((start, end))
+}
+
+fn char_at_column_or_last(text: &str, char_column: usize) -> Option<(usize, usize, char)> {
+    let mut last = None;
+    for (col, (start, ch)) in text.char_indices().enumerate() {
+        let end = start + ch.len_utf8();
+        let entry = (start, end, ch);
+        if col == char_column {
+            return Some(entry);
+        }
+        last = Some(entry);
+    }
+    last
+}
+
 pub(super) fn insert_char_at_cursor(text: &mut String, cursor: &mut usize, ch: char) {
     let idx = clamp_char_boundary(text, *cursor);
     text.insert(idx, ch);

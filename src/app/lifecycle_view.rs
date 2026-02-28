@@ -207,6 +207,8 @@ impl App {
         let body = DiffPaneBody {
             rendered_diff: &self.rendered_diff,
             diff_position: self.diff_position,
+            block_cursor_col: self.diff_ui.block_cursor_col,
+            search_query: self.search.diff_query.as_deref(),
             visual_range: self.diff_selected_range(),
             sticky_banner_indexes: &sticky_banner_indexes,
             empty_state_message: empty_state_message.as_deref(),
@@ -404,6 +406,10 @@ impl App {
                     Span::styled(" comment ", Style::default().fg(theme.muted)),
                     key_chip("/", theme),
                     Span::styled(" search ", Style::default().fg(theme.muted)),
+                    key_chip("*/#/n/N", theme),
+                    Span::styled(" word next/prev ", Style::default().fg(theme.muted)),
+                    key_chip("Left/Right", theme),
+                    Span::styled(" block ", Style::default().fg(theme.muted)),
                     key_chip("[/]", theme),
                     Span::styled(" hunks ", Style::default().fg(theme.muted)),
                     key_chip("zz/zt/zb", theme),
@@ -1332,6 +1338,14 @@ impl App {
             Line::from(vec![
                 key_chip("n/N", theme),
                 Span::raw(" repeat diff search next/prev"),
+            ]),
+            Line::from(vec![
+                key_chip("*/#", theme),
+                Span::raw(" search word under diff block cursor"),
+            ]),
+            Line::from(vec![
+                key_chip("Left/Right", theme),
+                Span::raw(" move diff block cursor left/right"),
             ]),
             Line::from(vec![
                 key_chip("[/]", theme),

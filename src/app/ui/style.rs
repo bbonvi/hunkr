@@ -45,13 +45,7 @@ pub(in crate::app) fn apply_row_highlight(
     cursor_bg: Color,
     policy: CursorSelectionPolicy,
 ) -> Line<'static> {
-    let row_bg = resolve_row_background(
-        in_selection,
-        is_cursor,
-        selection_bg,
-        cursor_bg,
-        policy,
-    );
+    let row_bg = resolve_row_background(in_selection, is_cursor, selection_bg, cursor_bg, policy);
     let mut highlighted = match row_bg {
         Some(bg) => tint_line_background(line, bg, false),
         None => line.clone(),

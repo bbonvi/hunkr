@@ -288,9 +288,7 @@ impl App {
         let hidden_selected =
             selected_rows_hidden_by_status_filter(&self.commits, self.commit_ui.status_filter);
         if hidden_selected > 0 {
-            status_message.push_str(&format!(
-                ", {hidden_selected} selected hidden by filter"
-            ));
+            status_message.push_str(&format!(", {hidden_selected} selected hidden by filter"));
         }
 
         if status != ReviewStatus::Unreviewed {
@@ -312,9 +310,51 @@ impl App {
         self.ensure_cursor_visible();
     }
 
+    pub(super) fn move_diff_block_cursor(&mut self, delta: isize) {
+        if self.rendered_diff.is_empty() {
+            self.diff_ui.block_cursor_col = 0;
+            self.diff_ui.block_cursor_goal = 0;
+            return;
+        }
+
+        let line_len = self.current_diff_line_char_len();
+        if line_len == 0 {
+            self.diff_ui.block_cursor_col = 0;
+            self.diff_ui.block_cursor_goal = 0;
+            return;
+        }
+        let max_col = line_len.saturating_sub(1) as isize;
+        let next = (self.diff_ui.block_cursor_col as isize + delta).clamp(0, max_col) as usize;
+        self.diff_ui.block_cursor_col = next;
+        self.diff_ui.block_cursor_goal = next;
+    }
+
+    pub(super) fn set_diff_block_cursor_col(&mut self, col: usize) {
+        self.diff_ui.block_cursor_goal = col;
+        self.sync_diff_block_cursor_to_cursor_line();
+    }
+
+    pub(super) fn sync_diff_block_cursor_to_cursor_line(&mut self) {
+        if self.rendered_diff.is_empty() {
+            self.diff_ui.block_cursor_col = 0;
+            self.diff_ui.block_cursor_goal = 0;
+            return;
+        }
+
+        let line_len = self.current_diff_line_char_len();
+        if line_len == 0 {
+            self.diff_ui.block_cursor_col = 0;
+            return;
+        }
+
+        let max_col = line_len.saturating_sub(1);
+        self.diff_ui.block_cursor_col = self.diff_ui.block_cursor_goal.min(max_col);
+    }
+
     pub(super) fn set_diff_cursor(&mut self, absolute_row: usize) {
         if self.rendered_diff.is_empty() {
             self.diff_position = DiffPosition::default();
+            self.sync_diff_block_cursor_to_cursor_line();
             return;
         }
         self.diff_position.cursor = absolute_row.min(self.rendered_diff.len() - 1);
@@ -469,6 +509,7 @@ impl App {
         } else if self.diff_position.cursor >= self.diff_position.scroll + visible {
             self.diff_position.scroll = self.diff_position.cursor + 1 - visible;
         }
+        self.sync_diff_block_cursor_to_cursor_line();
         self.sync_selected_file_to_cursor();
     }
 
@@ -804,6 +845,15 @@ impl App {
             self.store.commit_status(&self.review_state, commit_id)
         })?;
         Ok(())
+    }
+}
+
+impl App {
+    fn current_diff_line_char_len(&self) -> usize {
+        let Some(line) = self.rendered_diff.get(self.diff_position.cursor) else {
+            return 0;
+        };
+        line.raw_text.chars().count()
     }
 }
 

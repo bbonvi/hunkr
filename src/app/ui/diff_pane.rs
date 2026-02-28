@@ -40,6 +40,8 @@ pub(in crate::app) struct DiffPaneTitle<'a> {
 pub(in crate::app) struct DiffPaneBody<'a> {
     pub rendered_diff: &'a [RenderedDiffLine],
     pub diff_position: DiffPosition,
+    pub block_cursor_col: usize,
+    pub search_query: Option<&'a str>,
     pub visual_range: Option<(usize, usize)>,
     pub sticky_banner_indexes: &'a [usize],
     pub empty_state_message: Option<&'a str>,
@@ -50,6 +52,8 @@ pub(in crate::app) struct DiffPaneBody<'a> {
 struct SelectionRenderContext<'a> {
     visual_range: Option<(usize, usize)>,
     cursor: usize,
+    block_cursor_col: usize,
+    search_query: Option<&'a str>,
     focused_diff: bool,
     theme: &'a UiTheme,
 }
@@ -123,6 +127,8 @@ impl<'a> DiffPaneRenderer<'a> {
         let selection = SelectionRenderContext {
             visual_range: body.visual_range,
             cursor: body.diff_position.cursor,
+            block_cursor_col: body.block_cursor_col,
+            search_query: body.search_query,
             focused_diff: self.focused == FocusPane::Diff,
             theme: self.theme,
         };
@@ -296,6 +302,12 @@ pub(in crate::app) fn find_diff_match_from_cursor(
     None
 }
 
+pub(in crate::app) fn first_diff_match_char_column(text: &str, query: &str) -> Option<usize> {
+    find_case_insensitive_ranges(text, query)
+        .first()
+        .map(|(start, _)| text[..*start].chars().count())
+}
+
 pub(in crate::app) fn capture_pending_diff_view_anchor(
     lines: &[RenderedDiffLine],
     diff_position: DiffPosition,
@@ -452,7 +464,7 @@ fn display_line_with_selection(
         .visual_range
         .is_some_and(|(start, end)| idx >= start && idx <= end);
     let is_cursor = idx == selection.cursor && selection.focused_diff;
-    apply_row_highlight(
+    let mut highlighted = apply_row_highlight(
         &line,
         line_width,
         in_visual,
@@ -460,5 +472,169 @@ fn display_line_with_selection(
         selection.theme.visual_bg,
         selection.theme.cursor_bg,
         CursorSelectionPolicy::CursorWins,
+    );
+
+    if let Some(query) = selection.search_query {
+        highlighted = apply_search_highlights(
+            &highlighted,
+            &rendered.raw_text,
+            query,
+            is_cursor,
+            selection.block_cursor_col,
+            selection.theme,
+        );
+    }
+    if is_cursor {
+        highlighted =
+            apply_block_cursor_highlight(&highlighted, selection.block_cursor_col, selection.theme);
+    }
+
+    highlighted
+}
+
+fn apply_search_highlights(
+    line: &Line<'static>,
+    text: &str,
+    query: &str,
+    cursor_on_line: bool,
+    block_cursor_col: usize,
+    theme: &UiTheme,
+) -> Line<'static> {
+    let ranges = find_case_insensitive_ranges(text, query);
+    if ranges.is_empty() {
+        return line.clone();
+    }
+
+    let cursor_range = cursor_on_line.then(|| {
+        let cursor_byte = byte_index_for_char_column(text, block_cursor_col)?;
+        ranges
+            .iter()
+            .copied()
+            .find(|(start, end)| cursor_byte >= *start && cursor_byte < *end)
+    });
+
+    let mut patched = line.clone();
+    for (start, end) in ranges {
+        let style = if cursor_range.flatten() == Some((start, end)) {
+            Style::default()
+                .fg(theme.search_current_fg)
+                .bg(theme.search_current_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(theme.search_match_fg)
+                .bg(theme.search_match_bg)
+        };
+        patched = patch_line_byte_range(&patched, start, end, style);
+    }
+    patched
+}
+
+fn apply_block_cursor_highlight(
+    line: &Line<'static>,
+    char_col: usize,
+    theme: &UiTheme,
+) -> Line<'static> {
+    let text = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    let Some((start, end)) = byte_range_for_char_column(&text, char_col) else {
+        return line.clone();
+    };
+
+    patch_line_byte_range(
+        line,
+        start,
+        end,
+        Style::default()
+            .fg(theme.block_cursor_fg)
+            .bg(theme.block_cursor_bg)
+            .add_modifier(Modifier::BOLD),
     )
+}
+
+fn find_case_insensitive_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let lower_text = text.to_ascii_lowercase();
+    let lower_query = query.to_ascii_lowercase();
+    let mut ranges = Vec::new();
+    let mut search_from = 0usize;
+    while search_from < lower_text.len() {
+        let Some(found) = lower_text[search_from..].find(&lower_query) else {
+            break;
+        };
+        let start = search_from + found;
+        let end = start + lower_query.len();
+        if text.is_char_boundary(start) && text.is_char_boundary(end) {
+            ranges.push((start, end));
+            search_from = end.max(search_from.saturating_add(1));
+        } else {
+            search_from = start.saturating_add(1);
+        }
+    }
+    ranges
+}
+
+fn byte_index_for_char_column(text: &str, char_col: usize) -> Option<usize> {
+    byte_range_for_char_column(text, char_col).map(|(start, _)| start)
+}
+
+fn byte_range_for_char_column(text: &str, char_col: usize) -> Option<(usize, usize)> {
+    let mut last = None;
+    for (col, (idx, ch)) in text.char_indices().enumerate() {
+        let end = idx + ch.len_utf8();
+        if col == char_col {
+            return Some((idx, end));
+        }
+        last = Some((idx, end));
+    }
+    last
+}
+
+fn patch_line_byte_range(
+    line: &Line<'static>,
+    start: usize,
+    end: usize,
+    style_patch: Style,
+) -> Line<'static> {
+    if start >= end {
+        return line.clone();
+    }
+
+    let mut out = Vec::with_capacity(line.spans.len().saturating_add(2));
+    let mut offset = 0usize;
+    for span in &line.spans {
+        let text = span.content.as_ref();
+        let span_start = offset;
+        let span_end = span_start + text.len();
+        offset = span_end;
+
+        if end <= span_start || start >= span_end {
+            out.push(span.clone());
+            continue;
+        }
+
+        let local_start = start.saturating_sub(span_start).min(text.len());
+        let local_end = end.saturating_sub(span_start).min(text.len());
+
+        if local_start > 0 {
+            out.push(Span::styled(text[..local_start].to_owned(), span.style));
+        }
+        if local_end > local_start {
+            out.push(Span::styled(
+                text[local_start..local_end].to_owned(),
+                span.style.patch(style_patch),
+            ));
+        }
+        if local_end < text.len() {
+            out.push(Span::styled(text[local_end..].to_owned(), span.style));
+        }
+    }
+    Line::from(out)
 }

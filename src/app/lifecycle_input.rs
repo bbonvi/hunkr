@@ -386,7 +386,12 @@ impl App {
             KeyCode::Esc => {
                 self.preferences.input_mode = InputMode::Normal;
                 self.search.diff_buffer.clear();
-                self.runtime.status = "Diff search canceled".to_owned();
+                let cleared = self.clear_diff_search();
+                self.runtime.status = if cleared {
+                    "Diff search cleared".to_owned()
+                } else {
+                    "Diff search canceled".to_owned()
+                };
             }
             KeyCode::Enter => {
                 let query = self.search.diff_buffer.trim().to_owned();
@@ -525,6 +530,11 @@ impl App {
             self.diff_position.cursor,
         ) {
             self.set_diff_cursor(idx);
+            if let Some(line) = self.rendered_diff.get(idx)
+                && let Some(col) = first_diff_match_char_column(&line.raw_text, normalized)
+            {
+                self.set_diff_block_cursor_col(col);
+            }
             self.runtime.status = format!("/{normalized} -> line {}", idx.saturating_add(1));
         } else {
             self.runtime.status = format!("/{normalized} -> no match");
@@ -714,13 +724,29 @@ impl App {
             self.diff_ui.pending_op = None;
         }
 
+        if let Some(forward) = diff_search_repeat_direction(key) {
+            self.repeat_diff_search(forward);
+            return;
+        }
+
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_diff_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_diff_cursor(-1),
+            KeyCode::Left => self.move_diff_block_cursor(-1),
+            KeyCode::Right => self.move_diff_block_cursor(1),
             KeyCode::Esc => {
-                if self.diff_ui.visual_selection.is_some() {
+                let had_visual = self.diff_ui.visual_selection.is_some();
+                let had_search = self.clear_diff_search();
+                if had_visual {
                     self.clear_diff_visual_selection();
-                    self.runtime.status = "Diff visual range off".to_owned();
+                }
+                if had_visual || had_search {
+                    self.runtime.status = match (had_visual, had_search) {
+                        (true, true) => "Diff visual range and search cleared".to_owned(),
+                        (true, false) => "Diff visual range off".to_owned(),
+                        (false, true) => "Diff search cleared".to_owned(),
+                        (false, false) => unreachable!("guarded above"),
+                    };
                 }
             }
             KeyCode::Char('g') => {
@@ -752,11 +778,15 @@ impl App {
                 self.diff_ui.pending_op = None;
                 self.runtime.status = "/".to_owned();
             }
-            KeyCode::Char('n') if key.modifiers == KeyModifiers::NONE => {
-                self.repeat_diff_search(true);
+            KeyCode::Char('*')
+                if key.modifiers == KeyModifiers::SHIFT || key.modifiers == KeyModifiers::NONE =>
+            {
+                self.search_word_under_diff_cursor(true);
             }
-            KeyCode::Char('N') if key.modifiers == KeyModifiers::NONE => {
-                self.repeat_diff_search(false);
+            KeyCode::Char('#')
+                if key.modifiers == KeyModifiers::SHIFT || key.modifiers == KeyModifiers::NONE =>
+            {
+                self.search_word_under_diff_cursor(false);
             }
             KeyCode::Char('v') | KeyCode::Char('V') => {
                 if self.rendered_diff.is_empty() {
@@ -816,8 +846,35 @@ impl App {
             _ => {}
         }
     }
+
+    fn search_word_under_diff_cursor(&mut self, forward: bool) {
+        let Some(line) = self.rendered_diff.get(self.diff_position.cursor) else {
+            self.runtime.status = "No diff line under cursor".to_owned();
+            return;
+        };
+        let Some(word) = word_at_char_column(&line.raw_text, self.diff_ui.block_cursor_col) else {
+            self.runtime.status = "No searchable word under diff block cursor".to_owned();
+            return;
+        };
+        self.execute_diff_search(&word, forward);
+    }
+
+    fn clear_diff_search(&mut self) -> bool {
+        self.search.diff_buffer.clear();
+        self.search.diff_query.take().is_some()
+    }
 }
 
 pub(super) fn clear_commit_visual_anchor(visual_anchor: &mut Option<usize>) -> bool {
     visual_anchor.take().is_some()
+}
+
+pub(super) fn diff_search_repeat_direction(key: KeyEvent) -> Option<bool> {
+    match key.code {
+        KeyCode::Char('n') if key.modifiers == KeyModifiers::NONE => Some(true),
+        KeyCode::Char('N') if key.modifiers == KeyModifiers::SHIFT => Some(false),
+        KeyCode::Char('N') if key.modifiers == KeyModifiers::NONE => Some(false),
+        KeyCode::Char('n') if key.modifiers == KeyModifiers::SHIFT => Some(false),
+        _ => None,
+    }
 }
