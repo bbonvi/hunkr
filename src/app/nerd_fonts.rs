@@ -2,6 +2,8 @@ use std::{collections::HashMap, path::Path};
 
 use unicode_width::UnicodeWidthStr;
 
+use crate::model::{FileChangeKind, FileChangeSummary};
+
 const DEFAULT_DIRECTORY_ICON: &str = "";
 const DEFAULT_FILE_ICON: &str = "󰈔";
 const DEFAULT_ENV_ICON: &str = "";
@@ -89,15 +91,19 @@ pub(super) fn format_tree_file_label(
     depth: usize,
     file_name: &str,
     full_path: &str,
+    change: Option<&FileChangeSummary>,
     nerd_fonts: bool,
     theme: &NerdFontTheme,
 ) -> String {
     let indent = "  ".repeat(depth);
+    let suffix = change
+        .map(|summary| format!(" {}", format_file_change_badge(summary, nerd_fonts)))
+        .unwrap_or_default();
     if nerd_fonts {
         let icon = nerd_file_icon_for_path(full_path, theme);
-        format!("{indent}{icon} {file_name}")
+        format!("{indent}{icon} {file_name}{suffix}")
     } else {
-        format!("{indent}[F] {file_name}")
+        format!("{indent}[F] {file_name}{suffix}")
     }
 }
 
@@ -109,6 +115,56 @@ pub(super) fn format_path_with_icon(path: &str, nerd_fonts: bool, theme: &NerdFo
 
     let icon = nerd_file_icon_for_path(path, theme);
     format!("{icon} {path}")
+}
+
+/// Formats an idiomatic git file-change badge (kind + +/- stats) for list/header rows.
+pub(super) fn format_file_change_badge(change: &FileChangeSummary, nerd_fonts: bool) -> String {
+    let kind = file_change_kind_symbol(change.kind, nerd_fonts);
+    let mut parts = Vec::new();
+    if change.additions > 0 {
+        parts.push(format!("+{}", change.additions));
+    }
+    if change.deletions > 0 {
+        parts.push(format!("-{}", change.deletions));
+    }
+    if parts.is_empty() {
+        if nerd_fonts {
+            kind.to_owned()
+        } else {
+            format!("[{kind}]")
+        }
+    } else if nerd_fonts {
+        format!("{kind} {}", parts.join(" "))
+    } else {
+        format!("[{kind} {}]", parts.join(" "))
+    }
+}
+
+fn file_change_kind_symbol(kind: FileChangeKind, nerd_fonts: bool) -> &'static str {
+    if nerd_fonts {
+        return match kind {
+            FileChangeKind::Added => "",
+            FileChangeKind::Modified => "",
+            FileChangeKind::Deleted => "",
+            FileChangeKind::Renamed => "󰁕",
+            FileChangeKind::Copied => "",
+            FileChangeKind::TypeChanged => "󰆩",
+            FileChangeKind::Unmerged => "",
+            FileChangeKind::Untracked => "",
+            FileChangeKind::Unknown => "",
+        };
+    }
+    match kind {
+        FileChangeKind::Added => "A",
+        FileChangeKind::Modified => "M",
+        FileChangeKind::Deleted => "D",
+        FileChangeKind::Renamed => "R",
+        FileChangeKind::Copied => "C",
+        FileChangeKind::TypeChanged => "T",
+        FileChangeKind::Unmerged => "U",
+        FileChangeKind::Untracked => "?",
+        FileChangeKind::Unknown => "X",
+    }
 }
 
 fn nerd_file_icon_for_path<'a>(path: &str, theme: &'a NerdFontTheme) -> &'a str {

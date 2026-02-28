@@ -6,7 +6,7 @@ use super::lifecycle_render::{
     theme_toggle_conflicts_with_diff_pending_op,
 };
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
-use super::state::format_uncommitted_summary;
+use super::state::{format_uncommitted_summary, should_hide_deleted_file_content};
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::{ListLinePresenter, commit_status_filter_spans};
 use super::ui::style::{
@@ -14,6 +14,7 @@ use super::ui::style::{
     pad_line_to_width, resolve_row_background, status_style, tint_line_background,
 };
 use super::*;
+use crate::model::{CommitDecoration, CommitDecorationKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;
 use tempfile::tempdir;
@@ -27,6 +28,7 @@ fn commit_row(id: &str, selected: bool, status: ReviewStatus) -> CommitRow {
             author: "dev".to_owned(),
             timestamp: 0,
             unpushed: true,
+            decorations: Vec::new(),
         },
         selected,
         status,
@@ -42,6 +44,7 @@ fn commit_info(id: &str, unpushed: bool) -> CommitInfo {
         author: "dev".to_owned(),
         timestamp: 0,
         unpushed,
+        decorations: Vec::new(),
     }
 }
 
@@ -189,6 +192,31 @@ fn compose_commit_line_sanitizes_untrusted_summary_text() {
 
     assert!(flattened.contains("clean red text"));
     assert!(!flattened.contains('\u{1b}'));
+}
+
+#[test]
+fn compose_commit_line_renders_git_decorations() {
+    let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
+    row.info.decorations = vec![
+        CommitDecoration {
+            kind: CommitDecorationKind::Head,
+            label: "HEAD -> main".to_owned(),
+        },
+        CommitDecoration {
+            kind: CommitDecorationKind::RemoteBranch,
+            label: "origin/main".to_owned(),
+        },
+    ];
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(120, 3_600, &theme, false);
+    let rendered = presenter.commit_row_line(&row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("(HEAD -> main, origin/main)"));
 }
 
 #[test]
@@ -405,6 +433,28 @@ fn file_tree_uses_file_icons_when_nerd_fonts_enabled() {
 }
 
 #[test]
+fn file_tree_file_labels_include_change_badges_and_line_stats() {
+    let mut tree = FileTree::default();
+    tree.insert_with_change(
+        "src/app.rs",
+        100,
+        Some(FileChangeSummary {
+            kind: FileChangeKind::Modified,
+            old_path: None,
+            additions: 4,
+            deletions: 1,
+        }),
+    );
+    let nerd_theme = NerdFontTheme::default();
+    let rows = tree.flattened_rows(false, &nerd_theme);
+
+    assert!(
+        rows.iter()
+            .any(|r| r.label.contains("[F] app.rs [M +4 -1]"))
+    );
+}
+
+#[test]
 fn file_filter_keeps_parent_directories_for_matching_files() {
     let mut tree = FileTree::default();
     tree.insert("src/app/main.rs", 100);
@@ -466,8 +516,10 @@ fn diff_empty_state_message_is_absent_without_active_file_filter() {
 fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let nerd_theme = NerdFontTheme::default();
-    let plain = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, false, &nerd_theme);
-    let nerd = state::rendered_file_header_line("src/app.rs", 1, 2, &theme, true, &nerd_theme);
+    let plain =
+        state::rendered_file_header_line("src/app.rs", 1, 2, None, &theme, false, &nerd_theme);
+    let nerd =
+        state::rendered_file_header_line("src/app.rs", 1, 2, None, &theme, true, &nerd_theme);
 
     let plain_text = plain
         .line
@@ -492,8 +544,15 @@ fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
 fn rendered_file_banner_sanitizes_untrusted_path_text() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let nerd_theme = NerdFontTheme::default();
-    let rendered =
-        state::rendered_file_header_line("src/\u{1b}[31mapp.rs", 1, 1, &theme, false, &nerd_theme);
+    let rendered = state::rendered_file_header_line(
+        "src/\u{1b}[31mapp.rs",
+        1,
+        1,
+        None,
+        &theme,
+        false,
+        &nerd_theme,
+    );
     let flattened = rendered
         .line
         .spans
@@ -505,6 +564,55 @@ fn rendered_file_banner_sanitizes_untrusted_path_text() {
     assert!(rendered.raw_text.contains("src/app.rs"));
     assert!(!flattened.contains('\u{1b}'));
     assert!(!rendered.raw_text.contains('\u{1b}'));
+}
+
+#[test]
+fn rendered_file_banner_includes_change_badge_and_rename_source() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let nerd_theme = NerdFontTheme::default();
+    let rendered = state::rendered_file_header_line(
+        "src/new.rs",
+        1,
+        1,
+        Some(&FileChangeSummary {
+            kind: FileChangeKind::Renamed,
+            old_path: Some("src/old.rs".to_owned()),
+            additions: 12,
+            deletions: 3,
+        }),
+        &theme,
+        false,
+        &nerd_theme,
+    );
+    let flattened = rendered
+        .line
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("(from src/old.rs)"));
+    assert!(flattened.contains("[R +12 -3]"));
+}
+
+#[test]
+fn deleted_file_content_is_hidden_from_diff_payload() {
+    let deleted = FileChangeSummary {
+        kind: FileChangeKind::Deleted,
+        old_path: None,
+        additions: 0,
+        deletions: 42,
+    };
+    let modified = FileChangeSummary {
+        kind: FileChangeKind::Modified,
+        old_path: None,
+        additions: 1,
+        deletions: 1,
+    };
+
+    assert!(should_hide_deleted_file_content(Some(&deleted)));
+    assert!(!should_hide_deleted_file_content(Some(&modified)));
+    assert!(!should_hide_deleted_file_content(None));
 }
 
 #[test]
@@ -1287,6 +1395,7 @@ fn selected_ids_skip_uncommitted_entry() {
                 author: "local".to_owned(),
                 timestamp: 0,
                 unpushed: false,
+                decorations: Vec::new(),
             },
             selected: true,
             status: ReviewStatus::Unreviewed,
@@ -1298,6 +1407,53 @@ fn selected_ids_skip_uncommitted_entry() {
         selected_ids_oldest_first(&rows),
         vec!["oldest".to_owned(), "newest".to_owned()]
     );
+}
+
+#[test]
+fn merge_aggregate_diff_combines_file_change_metadata_for_same_path() {
+    let mut base = AggregatedDiff {
+        files: BTreeMap::from([(
+            "src/lib.rs".to_owned(),
+            FilePatch {
+                path: "src/lib.rs".to_owned(),
+                hunks: Vec::new(),
+            },
+        )]),
+        file_changes: BTreeMap::from([(
+            "src/lib.rs".to_owned(),
+            FileChangeSummary {
+                kind: FileChangeKind::Renamed,
+                old_path: Some("src/old_lib.rs".to_owned()),
+                additions: 2,
+                deletions: 1,
+            },
+        )]),
+    };
+    let next = AggregatedDiff {
+        files: BTreeMap::from([(
+            "src/lib.rs".to_owned(),
+            FilePatch {
+                path: "src/lib.rs".to_owned(),
+                hunks: Vec::new(),
+            },
+        )]),
+        file_changes: BTreeMap::from([(
+            "src/lib.rs".to_owned(),
+            FileChangeSummary {
+                kind: FileChangeKind::Modified,
+                old_path: None,
+                additions: 3,
+                deletions: 4,
+            },
+        )]),
+    };
+
+    merge_aggregate_diff(&mut base, next);
+    let merged = base.file_changes.get("src/lib.rs").expect("merged change");
+    assert_eq!(merged.kind, FileChangeKind::Renamed);
+    assert_eq!(merged.old_path.as_deref(), Some("src/old_lib.rs"));
+    assert_eq!(merged.additions, 5);
+    assert_eq!(merged.deletions, 5);
 }
 
 #[test]
@@ -1600,6 +1756,7 @@ fn compose_uncommitted_line_uses_nerd_draft_badge() {
             author: "local".to_owned(),
             timestamp: 0,
             unpushed: false,
+            decorations: Vec::new(),
         },
         selected: true,
         status: ReviewStatus::Unreviewed,
@@ -1835,6 +1992,18 @@ fn commit_search_matches_text_and_status_case_insensitively() {
     assert!(commit_row_matches_query(&row, "issue_found"));
     assert!(commit_row_matches_query(&row, "SUMMARY-abc1234"));
     assert!(!commit_row_matches_query(&row, "missing-value"));
+}
+
+#[test]
+fn commit_search_matches_git_decorations() {
+    let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
+    row.info.decorations = vec![CommitDecoration {
+        kind: CommitDecorationKind::RemoteBranch,
+        label: "origin/main".to_owned(),
+    }];
+
+    assert!(commit_row_matches_query(&row, "origin/main"));
+    assert!(commit_row_matches_query(&row, "origin"));
 }
 
 #[test]

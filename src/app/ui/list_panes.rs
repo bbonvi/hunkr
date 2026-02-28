@@ -325,6 +325,7 @@ impl<'a> ListLinePresenter<'a> {
 
     pub(in crate::app) fn commit_row_line(&self, row: &CommitRow) -> Line<'static> {
         let summary = sanitize_terminal_text(&row.info.summary);
+        let decoration_suffix = commit_decoration_suffix(row);
         if row.is_uncommitted {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
             let left = format!("{marker} {} {summary}", row.info.short_id);
@@ -356,7 +357,14 @@ impl<'a> ListLinePresenter<'a> {
         }
 
         let marker = commit_selection_marker(row.selected, self.nerd_fonts);
-        let left = format!("{marker} {} {summary}", row.info.short_id);
+        let left = if decoration_suffix.is_empty() {
+            format!("{marker} {} {summary}", row.info.short_id)
+        } else {
+            format!(
+                "{marker} {} {summary} {decoration_suffix}",
+                row.info.short_id
+            )
+        };
         let status_label = format!("[{}]", status_short_label(row.status));
         let unpushed = if row.info.unpushed {
             unpushed_marker(self.nerd_fonts)
@@ -405,4 +413,18 @@ impl<'a> ListLinePresenter<'a> {
             ),
         ])
     }
+}
+
+fn commit_decoration_suffix(row: &CommitRow) -> String {
+    if row.info.decorations.is_empty() {
+        return String::new();
+    }
+    let labels = row
+        .info
+        .decorations
+        .iter()
+        .map(|item| sanitize_terminal_text(&item.label))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("({labels})")
 }

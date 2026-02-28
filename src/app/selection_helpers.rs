@@ -62,6 +62,12 @@ pub(super) fn restore_list_index_by_commit_id(
 }
 
 pub(super) fn merge_aggregate_diff(base: &mut AggregatedDiff, next: AggregatedDiff) {
+    for (path, change) in next.file_changes {
+        base.file_changes
+            .entry(path)
+            .and_modify(|current| merge_file_change_summary(current, &change))
+            .or_insert(change);
+    }
     for (path, mut patch) in next.files {
         base.files
             .entry(path.clone())
@@ -71,6 +77,27 @@ pub(super) fn merge_aggregate_diff(base: &mut AggregatedDiff, next: AggregatedDi
             })
             .hunks
             .append(&mut patch.hunks);
+    }
+}
+
+fn merge_file_change_summary(current: &mut FileChangeSummary, next: &FileChangeSummary) {
+    current.additions = current.additions.saturating_add(next.additions);
+    current.deletions = current.deletions.saturating_add(next.deletions);
+    if current.old_path.is_none() {
+        current.old_path = next.old_path.clone();
+    }
+    current.kind = merged_change_kind(current.kind, next.kind);
+}
+
+fn merged_change_kind(current: FileChangeKind, next: FileChangeKind) -> FileChangeKind {
+    use FileChangeKind::*;
+    match (current, next) {
+        (_, Unknown) => current,
+        (Unknown, _) => next,
+        (Added, Deleted) | (Deleted, Added) => Modified,
+        // Keep richer upstream classification when the next layer only reports "modified".
+        (Renamed | Copied | TypeChanged, Modified) => current,
+        (_, next) => next,
     }
 }
 

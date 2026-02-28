@@ -77,6 +77,7 @@ impl App {
                     author: "local".to_owned(),
                     timestamp: Utc::now().timestamp(),
                     unpushed: false,
+                    decorations: Vec::new(),
                 },
                 selected: uncommitted_selected,
                 status: ReviewStatus::Unreviewed,
@@ -251,6 +252,7 @@ impl App {
                 path,
                 idx + 1,
                 total_files,
+                self.aggregate.file_changes.get(path),
                 &theme,
                 self.preferences.nerd_fonts,
                 &self.preferences.nerd_font_theme,
@@ -336,6 +338,24 @@ impl App {
         let mut rendered = Vec::new();
         let theme = UiTheme::from_mode(self.preferences.theme_mode);
         let now_ts = Utc::now().timestamp();
+        let hide_deleted_payload =
+            should_hide_deleted_file_content(self.aggregate.file_changes.get(&patch.path));
+        if hide_deleted_payload {
+            rendered.push(RenderedDiffLine {
+                line: Line::from(vec![
+                    Span::styled("~ ", Style::default().fg(theme.diff_meta)),
+                    Span::styled(
+                        "File removed; deleted content hidden",
+                        Style::default()
+                            .fg(theme.issue)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                raw_text: "~ [file removed]".to_owned(),
+                anchor: None,
+                comment_id: None,
+            });
+        }
         let file_comments: Vec<&ReviewComment> = self
             .comments
             .comments()
@@ -457,29 +477,31 @@ impl App {
                 now_ts,
             );
 
-            for line in &hunk.lines {
-                let anchor = CommentAnchor {
-                    commit_id: hunk.commit_id.clone(),
-                    commit_summary: hunk.commit_summary.clone(),
-                    file_path: patch.path.clone(),
-                    hunk_header: hunk.header.clone(),
-                    old_lineno: line.old_lineno,
-                    new_lineno: line.new_lineno,
-                };
-                rendered.push(RenderedDiffLine {
-                    line: self.render_code_line(line, &theme),
-                    raw_text: raw_diff_text(line),
-                    anchor: Some(anchor.clone()),
-                    comment_id: None,
-                });
-                push_comment_lines_for_anchor(
-                    &mut rendered,
-                    &hunk_comments,
-                    &mut injected_comment_ids,
-                    &anchor,
-                    &theme,
-                    now_ts,
-                );
+            if !hide_deleted_payload {
+                for line in &hunk.lines {
+                    let anchor = CommentAnchor {
+                        commit_id: hunk.commit_id.clone(),
+                        commit_summary: hunk.commit_summary.clone(),
+                        file_path: patch.path.clone(),
+                        hunk_header: hunk.header.clone(),
+                        old_lineno: line.old_lineno,
+                        new_lineno: line.new_lineno,
+                    };
+                    rendered.push(RenderedDiffLine {
+                        line: self.render_code_line(line, &theme),
+                        raw_text: raw_diff_text(line),
+                        anchor: Some(anchor.clone()),
+                        comment_id: None,
+                    });
+                    push_comment_lines_for_anchor(
+                        &mut rendered,
+                        &hunk_comments,
+                        &mut injected_comment_ids,
+                        &anchor,
+                        &theme,
+                        now_ts,
+                    );
+                }
             }
 
             for comment in hunk_comments {
@@ -549,7 +571,11 @@ impl App {
                 .map(|h| h.commit_timestamp)
                 .max()
                 .unwrap_or(0);
-            tree.insert(path, modified_ts);
+            tree.insert_with_change(
+                path,
+                modified_ts,
+                self.aggregate.file_changes.get(path).cloned(),
+            );
         }
 
         self.file_rows = tree.flattened_rows(
@@ -815,30 +841,76 @@ pub(super) fn format_uncommitted_summary(file_count: usize) -> String {
     format!("{UNCOMMITTED_COMMIT_SUMMARY} ({file_count} {noun})")
 }
 
+/// Returns whether deleted-file payload should be replaced with a concise removal marker.
+pub(super) fn should_hide_deleted_file_content(file_change: Option<&FileChangeSummary>) -> bool {
+    file_change.is_some_and(|change| change.kind == FileChangeKind::Deleted)
+}
+
 pub(super) fn rendered_file_header_line(
     path: &str,
     file_index: usize,
     total_files: usize,
+    file_change: Option<&FileChangeSummary>,
     theme: &UiTheme,
     nerd_fonts: bool,
     nerd_font_theme: &NerdFontTheme,
 ) -> RenderedDiffLine {
     let display_path = format_path_with_icon(path, nerd_fonts, nerd_font_theme);
     let sanitized_path = sanitize_terminal_text(path);
-    let raw_text = format!("==== file {file_index}/{total_files}: {sanitized_path} ====");
-    RenderedDiffLine {
-        line: Line::from(vec![
-            Span::styled("==== ", Style::default().fg(theme.dimmed)),
-            Span::styled(
-                format!("file {file_index}/{total_files}"),
+    let change_badge = file_change
+        .map(|change| format_file_change_badge(change, nerd_fonts))
+        .unwrap_or_default();
+    let display_badge = if change_badge.is_empty() {
+        String::new()
+    } else if change_badge.starts_with('[') {
+        change_badge.clone()
+    } else {
+        format!("[{change_badge}]")
+    };
+    let raw_change_suffix = if display_badge.is_empty() {
+        String::new()
+    } else {
+        format!(" {display_badge}")
+    };
+    let rename_from = file_change
+        .and_then(|change| change.old_path.as_ref())
+        .map(|from| format!(" (from {})", sanitize_terminal_text(from)))
+        .unwrap_or_default();
+    let raw_text = format!(
+        "==== file {file_index}/{total_files}: {sanitized_path}{rename_from}{raw_change_suffix} ===="
+    );
+    let mut spans = vec![
+        Span::styled("==== ", Style::default().fg(theme.dimmed)),
+        Span::styled(
+            format!("file {file_index}/{total_files}"),
+            Style::default()
+                .fg(theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(": ", Style::default().fg(theme.dimmed)),
+        sanitized_span(&display_path, Some(Style::default().fg(theme.text))),
+    ];
+    if let Some(change) = file_change {
+        if let Some(from) = change.old_path.as_ref() {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("(from {})", sanitize_terminal_text(from)),
+                Style::default().fg(theme.muted),
+            ));
+        }
+        if !display_badge.is_empty() {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                display_badge,
                 Style::default()
-                    .fg(theme.accent)
+                    .fg(theme.focus_border)
                     .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(": ", Style::default().fg(theme.dimmed)),
-            sanitized_span(&display_path, Some(Style::default().fg(theme.text))),
-            Span::styled(" ====", Style::default().fg(theme.dimmed)),
-        ]),
+            ));
+        }
+    }
+    spans.push(Span::styled(" ====", Style::default().fg(theme.dimmed)));
+    RenderedDiffLine {
+        line: Line::from(spans),
         raw_text,
         anchor: None,
         comment_id: None,

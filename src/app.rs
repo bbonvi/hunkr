@@ -47,8 +47,8 @@ mod worktree_switcher;
 use self::comment_helpers::*;
 use self::core_helpers::*;
 use self::nerd_fonts::{
-    NerdFontTheme, app_title_label, commit_selection_marker, format_path_with_icon,
-    format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
+    NerdFontTheme, app_title_label, commit_selection_marker, format_file_change_badge,
+    format_path_with_icon, format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
     list_highlight_symbol_width, uncommitted_badge, unpushed_marker,
 };
 use self::selection_helpers::*;
@@ -69,8 +69,8 @@ use crate::{
     git_data::{GitService, WorktreeInfo},
     model::{
         AggregatedDiff, CommentAnchor, CommentTarget, CommentTargetKind, CommitInfo, DiffLineKind,
-        FilePatch, HunkLine, ReviewComment, ReviewState, ReviewStatus, UNCOMMITTED_COMMIT_ID,
-        UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
+        FileChangeKind, FileChangeSummary, FilePatch, HunkLine, ReviewComment, ReviewState,
+        ReviewStatus, UNCOMMITTED_COMMIT_ID, UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
     },
     store::{InstanceLock, StateStore},
 };

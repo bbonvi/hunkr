@@ -4,11 +4,27 @@ use super::*;
 #[derive(Default)]
 pub(super) struct FileTree {
     dirs: BTreeMap<String, FileTree>,
-    files: BTreeMap<String, i64>,
+    files: BTreeMap<String, FileTreeFile>,
+}
+
+#[derive(Debug, Clone)]
+struct FileTreeFile {
+    modified_ts: i64,
+    change: Option<FileChangeSummary>,
 }
 
 impl FileTree {
+    #[cfg(test)]
     pub(super) fn insert(&mut self, path: &str, modified_ts: i64) {
+        self.insert_with_change(path, modified_ts, None);
+    }
+
+    pub(super) fn insert_with_change(
+        &mut self,
+        path: &str,
+        modified_ts: i64,
+        change: Option<FileChangeSummary>,
+    ) {
         let segments: Vec<&str> = path.split('/').collect();
         if segments.is_empty() {
             return;
@@ -23,8 +39,14 @@ impl FileTree {
             let entry = cursor
                 .files
                 .entry((*name).to_owned())
-                .or_insert(modified_ts);
-            *entry = max(*entry, modified_ts);
+                .or_insert_with(|| FileTreeFile {
+                    modified_ts,
+                    change: change.clone(),
+                });
+            entry.modified_ts = max(entry.modified_ts, modified_ts);
+            if change.is_some() {
+                entry.change = change;
+            }
         }
     }
 
@@ -62,18 +84,25 @@ impl FileTree {
             child.flatten_into(rows, path, depth + 1, nerd_fonts, nerd_font_theme);
         }
 
-        for (file, modified_ts) in &self.files {
+        for (file, meta) in &self.files {
             let full = if prefix.is_empty() {
                 file.clone()
             } else {
                 format!("{prefix}/{file}")
             };
             rows.push(TreeRow {
-                label: format_tree_file_label(depth, file, &full, nerd_fonts, nerd_font_theme),
+                label: format_tree_file_label(
+                    depth,
+                    file,
+                    &full,
+                    meta.change.as_ref(),
+                    nerd_fonts,
+                    nerd_font_theme,
+                ),
                 path: Some(full),
                 depth,
                 selectable: true,
-                modified_ts: Some(*modified_ts),
+                modified_ts: Some(meta.modified_ts),
             });
         }
     }

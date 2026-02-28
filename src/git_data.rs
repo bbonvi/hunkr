@@ -12,7 +12,8 @@ use chrono::Utc;
 use git2::{BranchType, DiffOptions, ErrorCode, Oid, Repository, Sort};
 
 use crate::model::{
-    AggregatedDiff, CommitInfo, DiffLineKind, FilePatch, Hunk, HunkLine, UNCOMMITTED_COMMIT_ID,
+    AggregatedDiff, CommitDecoration, CommitDecorationKind, CommitInfo, DiffLineKind,
+    FileChangeKind, FileChangeSummary, FilePatch, Hunk, HunkLine, UNCOMMITTED_COMMIT_ID,
     UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
 };
 
@@ -112,6 +113,7 @@ impl GitService {
             .context("failed to resolve HEAD")?
             .peel_to_commit()?;
         let unpushed = self.default_unpushed_commit_ids()?;
+        let decorations = self.commit_decorations()?;
 
         loop {
             let id = current.id().to_string();
@@ -132,6 +134,7 @@ impl GitService {
                 author,
                 timestamp: current.time().seconds(),
                 unpushed: unpushed.contains(&id),
+                decorations: decorations.get(&id).cloned().unwrap_or_default(),
             });
 
             if items.len() >= max || current.parent_count() == 0 {
@@ -261,12 +264,13 @@ impl GitService {
 
         let mut opts = DiffOptions::new();
         opts.context_lines(3);
-        let diff = self
+        let mut diff = self
             .repo
             .diff_tree_to_tree(base_tree.as_ref(), Some(&head_tree), Some(&mut opts))
             .with_context(|| {
                 format!("failed to diff selected commit span {oldest_id}..{newest_id}")
             })?;
+        detect_renames_and_copies(&mut diff)?;
 
         let source = DiffSourceMeta {
             commit_id: newest_id.clone(),
@@ -284,26 +288,35 @@ impl GitService {
         };
 
         let mut files = BTreeMap::<String, FilePatch>::new();
-        append_diff_files(&mut files, &diff, &source)
+        let mut file_changes = BTreeMap::<String, FileChangeSummary>::new();
+        append_diff_files(&mut files, &mut file_changes, &diff, &source)
             .context("failed to iterate selected commit span diff")?;
 
-        Ok(AggregatedDiff { files })
+        Ok(AggregatedDiff {
+            files,
+            file_changes,
+        })
     }
 
     pub fn aggregate_uncommitted(&self) -> anyhow::Result<AggregatedDiff> {
-        let diff = self.uncommitted_diff()?;
+        let mut diff = self.uncommitted_diff()?;
+        detect_renames_and_copies(&mut diff)?;
 
         let mut files = BTreeMap::<String, FilePatch>::new();
+        let mut file_changes = BTreeMap::<String, FileChangeSummary>::new();
         let source = DiffSourceMeta {
             commit_id: UNCOMMITTED_COMMIT_ID.to_owned(),
             commit_short: UNCOMMITTED_COMMIT_SHORT.to_owned(),
             commit_summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
             commit_timestamp: Utc::now().timestamp(),
         };
-        append_diff_files(&mut files, &diff, &source)
+        append_diff_files(&mut files, &mut file_changes, &diff, &source)
             .context("failed to iterate uncommitted diff")?;
 
-        Ok(AggregatedDiff { files })
+        Ok(AggregatedDiff {
+            files,
+            file_changes,
+        })
     }
 
     /// Returns the number of changed files in the synthetic uncommitted draft.
@@ -347,10 +360,11 @@ impl GitService {
 
             let mut opts = DiffOptions::new();
             opts.context_lines(3);
-            let diff = self
+            let mut diff = self
                 .repo
                 .diff_tree_to_tree(parent_tree.as_ref(), Some(&current_tree), Some(&mut opts))
                 .with_context(|| format!("failed to diff commit {commit_id}"))?;
+            detect_renames_and_copies(&mut diff)?;
 
             let source = DiffSourceMeta {
                 commit_id: commit_id.clone(),
@@ -362,7 +376,8 @@ impl GitService {
                 commit_timestamp: commit.time().seconds(),
             };
             let mut files = BTreeMap::<String, FilePatch>::new();
-            append_diff_files(&mut files, &diff, &source)
+            let mut file_changes = BTreeMap::<String, FileChangeSummary>::new();
+            append_diff_files(&mut files, &mut file_changes, &diff, &source)
                 .with_context(|| format!("failed to iterate diff for commit {commit_id}"))?;
             let Some(patch) = files.remove(file_path) else {
                 continue;
@@ -387,6 +402,60 @@ impl GitService {
 }
 
 impl GitService {
+    /// Builds `git log --decorate`-like labels for commits visible via references.
+    fn commit_decorations(&self) -> anyhow::Result<BTreeMap<String, Vec<CommitDecoration>>> {
+        let mut decorations = BTreeMap::<String, Vec<CommitDecoration>>::new();
+
+        let head = self.repo.head().context("failed to resolve HEAD")?;
+        if let Some(head_oid) = head.target() {
+            let head_label = if head.is_branch() {
+                let branch = head.shorthand().unwrap_or("HEAD");
+                format!("HEAD -> {branch}")
+            } else {
+                "HEAD".to_owned()
+            };
+            push_decoration(
+                &mut decorations,
+                head_oid,
+                CommitDecoration {
+                    kind: CommitDecorationKind::Head,
+                    label: head_label,
+                },
+            );
+        }
+
+        for reference in self
+            .repo
+            .references()
+            .context("failed to iterate references")?
+        {
+            let reference = reference.context("failed to read git reference")?;
+            let Some(name) = reference.name() else {
+                continue;
+            };
+            let Some((kind, label)) = decoration_from_ref_name(name) else {
+                continue;
+            };
+            let Ok(commit) = reference.peel_to_commit() else {
+                continue;
+            };
+            push_decoration(
+                &mut decorations,
+                commit.id(),
+                CommitDecoration { kind, label },
+            );
+        }
+
+        for refs in decorations.values_mut() {
+            refs.sort_by(|left, right| {
+                left.kind
+                    .cmp(&right.kind)
+                    .then_with(|| left.label.cmp(&right.label))
+            });
+        }
+        Ok(decorations)
+    }
+
     fn uncommitted_diff(&self) -> anyhow::Result<git2::Diff<'_>> {
         let head_tree = self
             .repo
@@ -414,6 +483,7 @@ struct DiffSourceMeta {
 
 fn append_diff_files(
     files: &mut BTreeMap<String, FilePatch>,
+    file_changes: &mut BTreeMap<String, FileChangeSummary>,
     diff: &git2::Diff<'_>,
     source: &DiffSourceMeta,
 ) -> anyhow::Result<()> {
@@ -422,19 +492,25 @@ fn append_diff_files(
     let touched_paths = RefCell::new(BTreeSet::<String>::new());
     let hunked_paths = RefCell::new(BTreeSet::<String>::new());
     let commit_patches = RefCell::new(BTreeMap::<String, Vec<Hunk>>::new());
+    let path_changes = RefCell::new(BTreeMap::<String, FileChangeSummary>::new());
 
     diff.foreach(
         &mut |delta, _| {
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .map(path_to_string)
+            let new_path = delta.new_file().path().map(path_to_string);
+            let old_path = delta.old_file().path().map(path_to_string);
+            let path = new_path
+                .as_ref()
+                .or(old_path.as_ref())
+                .cloned()
                 .unwrap_or_else(|| "(unknown)".to_owned());
             *current_path.borrow_mut() = path.clone();
             *current_hunk_index.borrow_mut() = None;
             touched_paths.borrow_mut().insert(path.clone());
             commit_patches.borrow_mut().entry(path).or_default();
+            let summary = file_change_summary_from_delta(delta, old_path);
+            path_changes
+                .borrow_mut()
+                .insert(current_path.borrow().clone(), summary);
             true
         },
         None,
@@ -461,7 +537,7 @@ fn append_diff_files(
         Some(&mut |_delta, _hunk, line| {
             let path = current_path.borrow().clone();
             let mut patches = commit_patches.borrow_mut();
-            let file = patches.entry(path).or_default();
+            let file = patches.entry(path.clone()).or_default();
             if current_hunk_index.borrow().is_none() {
                 file.push(Hunk {
                     commit_id: source.commit_id.clone(),
@@ -482,6 +558,13 @@ fn append_diff_files(
                 ' ' => DiffLineKind::Context,
                 _ => DiffLineKind::Meta,
             };
+            if let Some(change) = path_changes.borrow_mut().get_mut(&path) {
+                match kind {
+                    DiffLineKind::Add => change.additions = change.additions.saturating_add(1),
+                    DiffLineKind::Remove => change.deletions = change.deletions.saturating_add(1),
+                    DiffLineKind::Context | DiffLineKind::Meta => {}
+                }
+            }
             let text = String::from_utf8_lossy(line.content())
                 .trim_end_matches('\n')
                 .to_owned();
@@ -530,8 +613,19 @@ fn append_diff_files(
             .hunks
             .append(&mut hunks);
     }
+    for (path, change) in path_changes.into_inner() {
+        file_changes.insert(path, change);
+    }
 
     Ok(())
+}
+
+/// Enables rename/copy detection so file metadata and badges can show canonical git status types.
+fn detect_renames_and_copies(diff: &mut git2::Diff<'_>) -> anyhow::Result<()> {
+    let mut opts = git2::DiffFindOptions::new();
+    opts.renames(true).copies(true).all(true);
+    diff.find_similar(Some(&mut opts))
+        .context("failed to detect renames/copies")
 }
 
 fn current_branch_name(repo: &Repository) -> anyhow::Result<String> {
@@ -548,6 +642,63 @@ fn path_to_string(path: &Path) -> String {
 
 fn short_id(id: &str) -> String {
     id.chars().take(7).collect()
+}
+
+fn push_decoration(
+    decorations: &mut BTreeMap<String, Vec<CommitDecoration>>,
+    oid: Oid,
+    decoration: CommitDecoration,
+) {
+    let items = decorations.entry(oid.to_string()).or_default();
+    if items
+        .iter()
+        .any(|existing| existing.label == decoration.label)
+    {
+        return;
+    }
+    items.push(decoration);
+}
+
+fn decoration_from_ref_name(name: &str) -> Option<(CommitDecorationKind, String)> {
+    if let Some(branch) = name.strip_prefix("refs/heads/") {
+        return Some((CommitDecorationKind::LocalBranch, branch.to_owned()));
+    }
+    if let Some(remote_branch) = name.strip_prefix("refs/remotes/") {
+        return Some((CommitDecorationKind::RemoteBranch, remote_branch.to_owned()));
+    }
+    if let Some(tag) = name.strip_prefix("refs/tags/") {
+        return Some((CommitDecorationKind::Tag, format!("tag: {tag}")));
+    }
+    None
+}
+
+fn file_change_summary_from_delta(
+    delta: git2::DiffDelta<'_>,
+    old_path: Option<String>,
+) -> FileChangeSummary {
+    let kind = match delta.status() {
+        git2::Delta::Added => FileChangeKind::Added,
+        git2::Delta::Deleted => FileChangeKind::Deleted,
+        git2::Delta::Modified => FileChangeKind::Modified,
+        git2::Delta::Renamed => FileChangeKind::Renamed,
+        git2::Delta::Copied => FileChangeKind::Copied,
+        git2::Delta::Typechange => FileChangeKind::TypeChanged,
+        git2::Delta::Untracked => FileChangeKind::Untracked,
+        git2::Delta::Conflicted => FileChangeKind::Unmerged,
+        _ => FileChangeKind::Unknown,
+    };
+    let old_path = if matches!(kind, FileChangeKind::Renamed | FileChangeKind::Copied) {
+        old_path
+    } else {
+        None
+    };
+
+    FileChangeSummary {
+        kind,
+        old_path,
+        additions: 0,
+        deletions: 0,
+    }
 }
 
 #[derive(Debug, Default)]

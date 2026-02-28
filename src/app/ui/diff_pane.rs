@@ -8,8 +8,7 @@ use ratatui::{
 };
 
 use super::super::{
-    CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme,
-    blend_colors,
+    CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme, blend_colors,
     comment_anchor_matches, format_path_with_icon, is_commit_anchor, sanitized_span,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};

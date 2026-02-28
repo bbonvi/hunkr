@@ -63,6 +63,23 @@ pub struct CommitInfo {
     pub author: String,
     pub timestamp: i64,
     pub unpushed: bool,
+    pub decorations: Vec<CommitDecoration>,
+}
+
+/// One ref decoration shown next to commit summaries (e.g. `HEAD -> main`, `origin/main`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CommitDecoration {
+    pub kind: CommitDecorationKind,
+    pub label: String,
+}
+
+/// Sorted decoration groups roughly matching `git log --decorate` precedence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CommitDecorationKind {
+    Head,
+    LocalBranch,
+    RemoteBranch,
+    Tag,
 }
 
 /// Type of a line inside a unified diff hunk.
@@ -103,10 +120,35 @@ pub struct FilePatch {
     pub hunks: Vec<Hunk>,
 }
 
+/// Canonical git delta classification for a path in the rendered aggregate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum FileChangeKind {
+    Added,
+    #[default]
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    TypeChanged,
+    Unmerged,
+    Untracked,
+    Unknown,
+}
+
+/// Compact per-file metadata shown across the UI (badges, line stats, rename source).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FileChangeSummary {
+    pub kind: FileChangeKind,
+    pub old_path: Option<String>,
+    pub additions: usize,
+    pub deletions: usize,
+}
+
 /// Diff payload used by UI.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AggregatedDiff {
     pub files: BTreeMap<String, FilePatch>,
+    pub file_changes: BTreeMap<String, FileChangeSummary>,
 }
 
 impl AggregatedDiff {

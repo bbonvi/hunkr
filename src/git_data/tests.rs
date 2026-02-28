@@ -119,6 +119,72 @@ fn aggregate_for_multiple_commits_returns_only_net_changes() {
 }
 
 #[test]
+fn load_first_parent_history_includes_ref_decorations() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "f.txt", "one\n", "first");
+    commit_file(repo_dir.path(), "f.txt", "one\ntwo\n", "second");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["tag", "v0", "HEAD~1"]));
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let head = history.first().expect("head commit");
+    let head_labels = head
+        .decorations
+        .iter()
+        .map(|item| item.label.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(head_labels.contains(&"HEAD -> main"));
+    assert!(head_labels.contains(&"main"));
+
+    let first_id = git_out(
+        Command::new("git")
+            .current_dir(repo_dir.path())
+            .args(["rev-parse", "HEAD~1"]),
+    )
+    .trim()
+    .to_owned();
+    let first = history
+        .iter()
+        .find(|entry| entry.id == first_id)
+        .expect("first commit");
+    assert!(
+        first
+            .decorations
+            .iter()
+            .any(|item| item.kind == CommitDecorationKind::Tag && item.label == "tag: v0")
+    );
+}
+
+#[test]
+fn aggregate_for_single_commit_reports_rename_metadata() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "old.txt", "hello\n", "first");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["mv", "old.txt", "new.txt"]));
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["commit", "-m", "rename"]));
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[0].id.clone()];
+    let aggregate = service.aggregate_for_commits(&selected).expect("aggregate");
+    let change = aggregate
+        .file_changes
+        .get("new.txt")
+        .expect("new path change metadata");
+
+    assert_eq!(change.kind, FileChangeKind::Renamed);
+    assert_eq!(change.old_path.as_deref(), Some("old.txt"));
+}
+
+#[test]
 fn aggregate_uncommitted_includes_untracked_text_file_content() {
     let repo_dir = tempdir().expect("tempdir");
     init_repo(repo_dir.path());
@@ -136,6 +202,35 @@ fn aggregate_uncommitted_includes_untracked_text_file_content() {
             .flat_map(|hunk| hunk.lines.iter())
             .any(|line| line.kind == DiffLineKind::Add && line.text.contains("fn added() {}"))
     );
+}
+
+#[test]
+fn aggregate_uncommitted_records_file_change_kinds() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "tracked.txt", "base\nnext\n", "base");
+    fs::remove_file(repo_dir.path().join("tracked.txt")).expect("remove tracked file");
+    fs::write(repo_dir.path().join("new_file.rs"), "fn added() {}\n").expect("write untracked");
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let aggregate = service.aggregate_uncommitted().expect("aggregate");
+
+    let deleted = aggregate
+        .file_changes
+        .get("tracked.txt")
+        .expect("deleted metadata");
+    assert_eq!(deleted.kind, FileChangeKind::Deleted);
+    assert!(deleted.deletions > 0);
+
+    let added = aggregate
+        .file_changes
+        .get("new_file.rs")
+        .expect("added metadata");
+    assert!(matches!(
+        added.kind,
+        FileChangeKind::Untracked | FileChangeKind::Added
+    ));
+    assert!(added.additions > 0);
 }
 
 #[test]

@@ -217,6 +217,11 @@ pub(super) fn commit_row_matches_query(row: &CommitRow, query: &str) -> bool {
         || contains_case_insensitive(&row.info.id, query)
         || contains_case_insensitive(&row.info.summary, query)
         || contains_case_insensitive(&row.info.author, query)
+        || row
+            .info
+            .decorations
+            .iter()
+            .any(|item| contains_case_insensitive(&item.label, query))
         || contains_case_insensitive(status, query)
 }
 
@@ -501,12 +506,16 @@ pub(super) fn changed_paths_between_aggregates(
     let all_paths = current
         .files
         .keys()
+        .chain(current.file_changes.keys())
         .chain(next.files.keys())
+        .chain(next.file_changes.keys())
         .cloned()
         .collect::<BTreeSet<_>>();
 
     for path in all_paths {
-        if current.files.get(&path) != next.files.get(&path) {
+        if current.files.get(&path) != next.files.get(&path)
+            || current.file_changes.get(&path) != next.file_changes.get(&path)
+        {
             changed.insert(path);
         }
     }
