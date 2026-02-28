@@ -460,7 +460,17 @@ fn display_line_with_selection(
     let line = override_line
         .cloned()
         .unwrap_or_else(|| rendered.line.clone());
+    let display_text = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
     let layout = diff_payload_layout(rendered, &line);
+    let coord_text = if layout.highlight_without_line_numbers {
+        rendered.raw_text.as_str()
+    } else {
+        display_text.as_str()
+    };
     let in_visual = selection
         .visual_range
         .is_some_and(|(start, end)| idx >= start && idx <= end);
@@ -489,7 +499,7 @@ fn display_line_with_selection(
     if let Some(query) = selection.search_query {
         highlighted = apply_search_highlights(
             &highlighted,
-            &rendered.raw_text,
+            coord_text,
             query,
             is_cursor,
             selection.block_cursor_col,
@@ -500,7 +510,7 @@ fn display_line_with_selection(
     if is_cursor {
         highlighted = apply_block_cursor_highlight(
             &highlighted,
-            &rendered.raw_text,
+            coord_text,
             selection.block_cursor_col,
             selection.theme,
             layout,
@@ -581,20 +591,20 @@ fn apply_row_highlight_without_line_numbers(
 
 fn apply_search_highlights(
     line: &Line<'static>,
-    raw_text: &str,
+    coord_text: &str,
     query: &str,
     cursor_on_line: bool,
     block_cursor_col: usize,
     theme: &UiTheme,
     layout: DiffPayloadLayout,
 ) -> Line<'static> {
-    let ranges = find_case_insensitive_ranges(raw_text, query);
+    let ranges = find_case_insensitive_ranges(coord_text, query);
     if ranges.is_empty() {
         return line.clone();
     }
 
     let cursor_range = cursor_on_line.then(|| {
-        let cursor_byte = byte_index_for_char_column(raw_text, block_cursor_col)?;
+        let cursor_byte = byte_index_for_char_column(coord_text, block_cursor_col)?;
         ranges
             .iter()
             .copied()
@@ -621,12 +631,12 @@ fn apply_search_highlights(
 
 fn apply_block_cursor_highlight(
     line: &Line<'static>,
-    raw_text: &str,
+    coord_text: &str,
     char_col: usize,
     theme: &UiTheme,
     layout: DiffPayloadLayout,
 ) -> Line<'static> {
-    let Some((start, end)) = byte_range_for_char_column(raw_text, char_col) else {
+    let Some((start, end)) = byte_range_for_char_column(coord_text, char_col) else {
         return line.clone();
     };
     let (display_start, display_end) = map_raw_range_to_display((start, end), layout);
@@ -714,8 +724,14 @@ fn patch_line_byte_range(
             continue;
         }
 
-        let local_start = start.saturating_sub(span_start).min(text.len());
-        let local_end = end.saturating_sub(span_start).min(text.len());
+        let mut local_start = start.saturating_sub(span_start).min(text.len());
+        let mut local_end = end.saturating_sub(span_start).min(text.len());
+        local_start = floor_char_boundary(text, local_start);
+        local_end = floor_char_boundary(text, local_end);
+        if local_end <= local_start {
+            out.push(span.clone());
+            continue;
+        }
 
         if local_start > 0 {
             out.push(Span::styled(text[..local_start].to_owned(), span.style));
@@ -731,4 +747,29 @@ fn patch_line_byte_range(
         }
     }
     Line::from(out)
+}
+
+fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
+    idx = idx.min(text.len());
+    while idx > 0 && !text.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::patch_line_byte_range;
+    use ratatui::{
+        style::{Color, Style},
+        text::Line,
+    };
+
+    #[test]
+    fn patch_line_byte_range_never_panics_on_non_boundary_offsets() {
+        let line = Line::from(" src/app/ui/diff_pane.rs");
+        let patched = patch_line_byte_range(&line, 1, 4, Style::default().bg(Color::Yellow));
+
+        assert!(!patched.spans.is_empty());
+    }
 }
