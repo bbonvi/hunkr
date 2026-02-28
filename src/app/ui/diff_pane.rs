@@ -13,6 +13,8 @@ use super::super::{
     is_commit_anchor, sanitized_span,
 };
 
+const DIFF_CURSOR_OVER_VISUAL_BLEND_WEIGHT: u8 = 170;
+
 #[derive(Debug, Clone)]
 pub(in crate::app) struct PendingDiffViewAnchor {
     pub cursor_line: DiffLineLocator,
@@ -509,7 +511,9 @@ fn display_line_with_selection(
             is_cursor,
             selection.theme.visual_bg,
             selection.theme.cursor_bg,
-            CursorSelectionPolicy::SelectionWins,
+            CursorSelectionPolicy::BlendCursorOverSelection {
+                weight: DIFF_CURSOR_OVER_VISUAL_BLEND_WEIGHT,
+            },
         )
     };
 
@@ -597,7 +601,9 @@ fn apply_row_highlight_without_line_numbers(
         is_cursor,
         theme.visual_bg,
         theme.cursor_bg,
-        CursorSelectionPolicy::SelectionWins,
+        CursorSelectionPolicy::BlendCursorOverSelection {
+            weight: DIFF_CURSOR_OVER_VISUAL_BLEND_WEIGHT,
+        },
     );
 
     let mut spans = Vec::with_capacity(1 + highlighted_payload.spans.len());
@@ -779,8 +785,12 @@ fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{SelectionRenderContext, display_line_with_selection, patch_line_byte_range};
-    use crate::app::{RenderedDiffLine, ThemeMode, UiTheme};
+    use super::{
+        DIFF_CURSOR_OVER_VISUAL_BLEND_WEIGHT, SelectionRenderContext, display_line_with_selection,
+        patch_line_byte_range,
+    };
+    use crate::app::ui::style::resolve_row_background;
+    use crate::app::{CursorSelectionPolicy, RenderedDiffLine, ThemeMode, UiTheme};
     use crate::model::CommentAnchor;
     use ratatui::{
         style::{Color, Style},
@@ -824,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn visual_highlight_wins_over_cursor_line_highlight() {
+    fn cursor_line_blends_with_visual_selection_highlight() {
         let theme = UiTheme::from_mode(ThemeMode::Dark);
         let rendered = RenderedDiffLine {
             line: Line::from(vec![
@@ -854,21 +864,33 @@ mod tests {
         };
 
         let highlighted = display_line_with_selection(&rendered, None, 0, 120, selection);
+        let blended_bg = resolve_row_background(
+            true,
+            true,
+            theme.visual_bg,
+            theme.cursor_bg,
+            CursorSelectionPolicy::BlendCursorOverSelection {
+                weight: DIFF_CURSOR_OVER_VISUAL_BLEND_WEIGHT,
+            },
+        )
+        .expect("cursor in visual selection should resolve a blended background");
         assert!(
             highlighted
                 .spans
                 .iter()
                 .skip(1)
-                .any(|span| span.style.bg == Some(theme.visual_bg)),
-            "visual selection should remain visible on current line",
+                .any(|span| span.style.bg == Some(blended_bg)),
+            "cursor row should use a blended cursor+visual background",
         );
         assert!(
             highlighted
                 .spans
                 .iter()
                 .skip(1)
-                .all(|span| span.style.bg != Some(theme.cursor_bg)),
-            "cursor line tint should not override visual selection",
+                .all(|span| {
+                    span.style.bg != Some(theme.visual_bg) && span.style.bg != Some(theme.cursor_bg)
+                }),
+            "cursor row should not collapse to only visual or only cursor tint",
         );
     }
 
