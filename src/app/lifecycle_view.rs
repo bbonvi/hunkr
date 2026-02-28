@@ -144,7 +144,7 @@ impl App {
                     selected_total,
                     shown_commits: visible_rows.len(),
                     total_commits: self.commits.len(),
-                    status_filter: self.commit_ui.status_filter.label(),
+                    status_filter: self.commit_ui.status_filter,
                     search_display: &commits_search_display,
                     search_enabled: commits_search_mode || !commit_query.is_empty(),
                     commit_list_state: &mut self.commit_ui.list_state,

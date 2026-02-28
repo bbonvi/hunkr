@@ -8,8 +8,8 @@ use ratatui::{
 };
 
 use super::super::{
-    CommitRow, FocusPane, TreeRow, UiTheme, commit_selection_marker, display_width,
-    format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
+    CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme, commit_selection_marker,
+    display_width, format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
     sanitize_terminal_text, sanitized_span, status_short_label, truncate, uncommitted_badge,
     unpushed_marker,
 };
@@ -42,7 +42,7 @@ pub(in crate::app) struct CommitPaneModel<'a> {
     pub selected_total: usize,
     pub shown_commits: usize,
     pub total_commits: usize,
-    pub status_filter: &'a str,
+    pub status_filter: CommitStatusFilter,
     pub search_display: &'a str,
     pub search_enabled: bool,
     pub commit_list_state: &'a mut ListState,
@@ -169,7 +169,7 @@ impl<'a> ListPaneRenderer<'a> {
         } else {
             Style::default().fg(self.theme.dimmed)
         };
-        let title = Line::from(vec![
+        let mut title_spans = vec![
             Span::styled(
                 " 1 COMMITS ",
                 Style::default()
@@ -180,13 +180,18 @@ impl<'a> ListPaneRenderer<'a> {
             Span::raw(" "),
             Span::styled(
                 format!(
-                    "sel:{selected_total} U:{unreviewed} R:{reviewed} I:{issue_found} Z:{resolved} {shown_commits}/{total_commits} sf:{status_filter} ",
+                    "sel:{selected_total} U:{unreviewed} R:{reviewed} I:{issue_found} Z:{resolved} {shown_commits}/{total_commits} sf:",
                 ),
                 Style::default().fg(self.theme.muted),
             ),
+        ];
+        title_spans.extend(commit_status_filter_spans(status_filter, self.theme));
+        title_spans.extend([
+            Span::raw(" "),
             Span::styled("filter:", Style::default().fg(self.theme.muted)),
             sanitized_span(search_display, Some(filter_style)),
         ]);
+        let title = Line::from(title_spans);
         let border_style = if self.focused == FocusPane::Commits {
             Style::default().fg(self.theme.focus_border)
         } else {
@@ -233,6 +238,41 @@ impl<'a> ListPaneRenderer<'a> {
             .highlight_symbol(highlight_symbol);
 
         frame.render_stateful_widget(list, rect, commit_list_state);
+    }
+}
+
+/// Builds styled `sf:` label tokens for the commits pane title.
+pub(in crate::app) fn commit_status_filter_spans(
+    status_filter: CommitStatusFilter,
+    theme: &UiTheme,
+) -> Vec<Span<'static>> {
+    match status_filter {
+        CommitStatusFilter::All => vec![Span::styled(
+            status_filter.label().to_owned(),
+            Style::default().fg(theme.muted),
+        )],
+        CommitStatusFilter::UnreviewedOrIssueFound => vec![
+            Span::styled(
+                "unreviewed".to_owned(),
+                status_style(ReviewStatus::Unreviewed, theme),
+            ),
+            Span::styled("|", Style::default().fg(theme.muted)),
+            Span::styled(
+                "issue_found".to_owned(),
+                status_style(ReviewStatus::IssueFound, theme),
+            ),
+        ],
+        CommitStatusFilter::ReviewedOrResolved => vec![
+            Span::styled(
+                "reviewed".to_owned(),
+                status_style(ReviewStatus::Reviewed, theme),
+            ),
+            Span::styled("|", Style::default().fg(theme.muted)),
+            Span::styled(
+                "resolved".to_owned(),
+                status_style(ReviewStatus::Resolved, theme),
+            ),
+        ],
     }
 }
 

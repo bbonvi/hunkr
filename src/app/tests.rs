@@ -6,10 +6,10 @@ use super::lifecycle_render::{
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::state::format_uncommitted_summary;
 use super::ui::diff_pane::scrollbar_thumb;
-use super::ui::list_panes::ListLinePresenter;
+use super::ui::list_panes::{ListLinePresenter, commit_status_filter_spans};
 use super::ui::style::{
     CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
-    pad_line_to_width, resolve_row_background, tint_line_background,
+    pad_line_to_width, resolve_row_background, status_style, tint_line_background,
 };
 use super::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -1651,6 +1651,53 @@ fn status_badges_use_exact_workflow_labels() {
     assert_eq!(status_short_label(ReviewStatus::Reviewed), "REVIEWED");
     assert_eq!(status_short_label(ReviewStatus::IssueFound), "ISSUE_FOUND");
     assert_eq!(status_short_label(ReviewStatus::Resolved), "RESOLVED");
+}
+
+#[test]
+fn status_filter_title_spans_keep_all_muted() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let spans = commit_status_filter_spans(CommitStatusFilter::All, &theme);
+
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].content.as_ref(), "all");
+    assert_eq!(spans[0].style, Style::default().fg(theme.muted));
+}
+
+#[test]
+fn status_filter_title_spans_use_status_colors_for_grouped_filters() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+
+    let unreviewed_issue =
+        commit_status_filter_spans(CommitStatusFilter::UnreviewedOrIssueFound, &theme);
+    assert_eq!(unreviewed_issue.len(), 3);
+    assert_eq!(unreviewed_issue[0].content.as_ref(), "unreviewed");
+    assert_eq!(
+        unreviewed_issue[0].style,
+        status_style(ReviewStatus::Unreviewed, &theme)
+    );
+    assert_eq!(unreviewed_issue[1].content.as_ref(), "|");
+    assert_eq!(unreviewed_issue[1].style, Style::default().fg(theme.muted));
+    assert_eq!(unreviewed_issue[2].content.as_ref(), "issue_found");
+    assert_eq!(
+        unreviewed_issue[2].style,
+        status_style(ReviewStatus::IssueFound, &theme)
+    );
+
+    let reviewed_resolved =
+        commit_status_filter_spans(CommitStatusFilter::ReviewedOrResolved, &theme);
+    assert_eq!(reviewed_resolved.len(), 3);
+    assert_eq!(reviewed_resolved[0].content.as_ref(), "reviewed");
+    assert_eq!(
+        reviewed_resolved[0].style,
+        status_style(ReviewStatus::Reviewed, &theme)
+    );
+    assert_eq!(reviewed_resolved[1].content.as_ref(), "|");
+    assert_eq!(reviewed_resolved[1].style, Style::default().fg(theme.muted));
+    assert_eq!(reviewed_resolved[2].content.as_ref(), "resolved");
+    assert_eq!(
+        reviewed_resolved[2].style,
+        status_style(ReviewStatus::Resolved, &theme)
+    );
 }
 
 #[test]
