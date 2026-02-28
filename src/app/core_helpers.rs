@@ -476,6 +476,14 @@ pub(super) fn sanitized_span(text: &str, style: Option<Style>) -> Span<'static> 
     }
 }
 
+/// Flattens a rendered line into plain visible text for cursor/search math.
+pub(super) fn line_plain_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>()
+}
+
 pub(super) fn raw_diff_text(line: &HunkLine) -> String {
     let prefix = match line.kind {
         DiffLineKind::Add => '+',

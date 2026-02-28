@@ -853,7 +853,7 @@ impl App {
         let Some(line) = self.rendered_diff.get(self.diff_position.cursor) else {
             return 0;
         };
-        line.raw_text.chars().count()
+        line_plain_text(&line.line).chars().count()
     }
 }
 

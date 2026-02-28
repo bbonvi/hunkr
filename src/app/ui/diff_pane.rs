@@ -10,7 +10,7 @@ use ratatui::{
 use super::super::{
     CommentAnchor, CursorSelectionPolicy, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine,
     UiTheme, apply_row_highlight, comment_anchor_matches, format_path_with_icon, is_commit_anchor,
-    sanitized_span,
+    line_plain_text, sanitized_span,
 };
 
 #[derive(Debug, Clone)]
@@ -460,6 +460,7 @@ fn display_line_with_selection(
     let line = override_line
         .cloned()
         .unwrap_or_else(|| rendered.line.clone());
+    let display_text = line_plain_text(&line);
     let in_visual = selection
         .visual_range
         .is_some_and(|(start, end)| idx >= start && idx <= end);
@@ -477,7 +478,7 @@ fn display_line_with_selection(
     if let Some(query) = selection.search_query {
         highlighted = apply_search_highlights(
             &highlighted,
-            &rendered.raw_text,
+            &display_text,
             query,
             is_cursor,
             selection.block_cursor_col,
@@ -485,8 +486,12 @@ fn display_line_with_selection(
         );
     }
     if is_cursor {
-        highlighted =
-            apply_block_cursor_highlight(&highlighted, selection.block_cursor_col, selection.theme);
+        highlighted = apply_block_cursor_highlight(
+            &highlighted,
+            &display_text,
+            selection.block_cursor_col,
+            selection.theme,
+        );
     }
 
     highlighted
@@ -532,15 +537,11 @@ fn apply_search_highlights(
 
 fn apply_block_cursor_highlight(
     line: &Line<'static>,
+    text: &str,
     char_col: usize,
     theme: &UiTheme,
 ) -> Line<'static> {
-    let text = line
-        .spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect::<String>();
-    let Some((start, end)) = byte_range_for_char_column(&text, char_col) else {
+    let Some((start, end)) = byte_range_for_char_column(text, char_col) else {
         return line.clone();
     };
 

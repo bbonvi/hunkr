@@ -531,7 +531,8 @@ impl App {
         ) {
             self.set_diff_cursor(idx);
             if let Some(line) = self.rendered_diff.get(idx)
-                && let Some(col) = first_diff_match_char_column(&line.raw_text, normalized)
+                && let Some(col) =
+                    first_diff_match_char_column(&line_plain_text(&line.line), normalized)
             {
                 self.set_diff_block_cursor_col(col);
             }
@@ -852,7 +853,8 @@ impl App {
             self.runtime.status = "No diff line under cursor".to_owned();
             return;
         };
-        let Some(word) = word_at_char_column(&line.raw_text, self.diff_ui.block_cursor_col) else {
+        let display_text = line_plain_text(&line.line);
+        let Some(word) = word_at_char_column(&display_text, self.diff_ui.block_cursor_col) else {
             self.runtime.status = "No searchable word under diff block cursor".to_owned();
             return;
         };

@@ -234,6 +234,10 @@ fn word_at_char_column_returns_word_under_cursor() {
         Some("beta")
     );
     assert_eq!(word_at_char_column("alpha + beta", 6), None);
+    assert_eq!(
+        word_at_char_column("  43 +     pub block_cursor_col: usize,", 20).as_deref(),
+        Some("block_cursor_col")
+    );
 }
 
 #[test]
