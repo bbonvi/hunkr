@@ -9,9 +9,12 @@ use ratatui::{
 
 use super::super::{
     CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme,
-    comment_anchor_matches, display_width, format_path_with_icon, is_commit_anchor, sanitized_span,
+    blend_colors,
+    comment_anchor_matches, format_path_with_icon, is_commit_anchor, sanitized_span,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
+
+const VISUAL_OVER_CURSOR_BLEND_WEIGHT: u8 = 170;
 
 #[derive(Debug, Clone)]
 pub(in crate::app) struct PendingDiffViewAnchor {
@@ -499,7 +502,6 @@ fn display_line_with_selection(
             in_visual,
             is_cursor,
             selection.theme,
-            layout,
         )
     } else {
         apply_row_highlight_with_visual_overlay(
@@ -538,7 +540,6 @@ fn display_line_with_selection(
 #[derive(Debug, Clone, Copy)]
 struct DiffPayloadLayout {
     display_byte_offset: usize,
-    display_cell_offset: u16,
     insert_space_after_prefix: bool,
     highlight_without_line_numbers: bool,
 }
@@ -556,7 +557,6 @@ fn diff_payload_layout(rendered: &RenderedDiffLine, line: &Line<'static>) -> Dif
     if !looks_like_code_line {
         return DiffPayloadLayout {
             display_byte_offset: 0,
-            display_cell_offset: 0,
             insert_space_after_prefix: false,
             highlight_without_line_numbers: false,
         };
@@ -569,7 +569,6 @@ fn diff_payload_layout(rendered: &RenderedDiffLine, line: &Line<'static>) -> Dif
         .unwrap_or("");
     DiffPayloadLayout {
         display_byte_offset: prefix.len(),
-        display_cell_offset: display_width(prefix).min(u16::MAX as usize) as u16,
         insert_space_after_prefix: true,
         highlight_without_line_numbers: true,
     }
@@ -581,25 +580,51 @@ fn apply_row_highlight_without_line_numbers(
     in_visual: bool,
     is_cursor: bool,
     theme: &UiTheme,
-    layout: DiffPayloadLayout,
 ) -> Line<'static> {
-    let Some(prefix_span) = line.spans.first() else {
-        return line.clone();
-    };
-    let payload = Line::from(line.spans.iter().skip(1).cloned().collect::<Vec<_>>());
-    let payload_width = line_width.saturating_sub(layout.display_cell_offset);
-    let highlighted_payload = apply_row_highlight_with_visual_overlay(
-        &payload,
-        payload_width,
-        in_visual,
+    let cursor_line = apply_row_highlight(
+        line,
+        line_width,
+        false,
         is_cursor,
-        theme,
+        theme.visual_bg,
+        theme.cursor_bg,
+        CursorSelectionPolicy::CursorWins,
     );
+    if !in_visual {
+        return cursor_line;
+    }
 
-    let mut spans = Vec::with_capacity(1 + highlighted_payload.spans.len());
-    spans.push(prefix_span.clone());
-    spans.extend(highlighted_payload.spans);
-    Line::from(spans)
+    let Some(prefix_span) = line.spans.first() else {
+        return cursor_line;
+    };
+    let payload_len = line
+        .spans
+        .iter()
+        .skip(1)
+        .map(|span| span.content.len())
+        .sum::<usize>();
+    if payload_len == 0 {
+        return cursor_line;
+    }
+
+    let payload_start = prefix_span.content.len();
+    let payload_end = payload_start.saturating_add(payload_len);
+    let payload_bg = if is_cursor {
+        blend_colors(
+            theme.cursor_bg,
+            theme.visual_bg,
+            VISUAL_OVER_CURSOR_BLEND_WEIGHT,
+        )
+    } else {
+        theme.visual_bg
+    };
+
+    patch_line_byte_range(
+        &cursor_line,
+        payload_start,
+        payload_end,
+        Style::default().bg(payload_bg),
+    )
 }
 
 fn apply_row_highlight_with_visual_overlay(
@@ -799,7 +824,10 @@ fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{SelectionRenderContext, display_line_with_selection, patch_line_byte_range};
+    use super::{
+        SelectionRenderContext, VISUAL_OVER_CURSOR_BLEND_WEIGHT, display_line_with_selection,
+        patch_line_byte_range,
+    };
     use crate::app::{RenderedDiffLine, ThemeMode, UiTheme, blend_colors};
     use crate::model::CommentAnchor;
     use ratatui::{
@@ -874,7 +902,11 @@ mod tests {
         };
 
         let highlighted = display_line_with_selection(&rendered, None, 0, 120, selection);
-        let layered_bg = blend_colors(theme.cursor_bg, theme.visual_bg, 170);
+        let layered_bg = blend_colors(
+            theme.cursor_bg,
+            theme.visual_bg,
+            VISUAL_OVER_CURSOR_BLEND_WEIGHT,
+        );
         assert!(
             highlighted
                 .spans
@@ -887,9 +919,57 @@ mod tests {
             highlighted
                 .spans
                 .iter()
+                .any(|span| span.style.bg == Some(theme.cursor_bg)),
+            "cursor tint should remain visible outside code payload",
+        );
+    }
+
+    #[test]
+    fn cursor_line_uses_plain_cursor_tint_when_visual_mode_is_off() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = RenderedDiffLine {
+            line: Line::from(vec![
+                Span::styled("  43   43 ", Style::default()),
+                Span::styled("+", Style::default()),
+                Span::raw(" "),
+                Span::styled("pub block_cursor_col: usize,", Style::default()),
+            ]),
+            raw_text: "+ pub block_cursor_col: usize,".to_owned(),
+            anchor: Some(CommentAnchor {
+                commit_id: "head".to_owned(),
+                commit_summary: "summary".to_owned(),
+                file_path: "src/app/ui/diff_pane.rs".to_owned(),
+                hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+                old_lineno: Some(43),
+                new_lineno: Some(43),
+            }),
+            comment_id: None,
+        };
+        let selection = SelectionRenderContext {
+            visual_range: None,
+            cursor: 0,
+            block_cursor_col: 200,
+            search_query: None,
+            focused_diff: true,
+            theme: &theme,
+        };
+
+        let highlighted = display_line_with_selection(&rendered, None, 0, 120, selection);
+        assert!(
+            highlighted
+                .spans
+                .iter()
                 .skip(1)
-                .all(|span| span.style.bg != Some(theme.cursor_bg)),
-            "cursor-only tint must be replaced by layered visual+cursor tint",
+                .any(|span| span.style.bg == Some(theme.cursor_bg)),
+            "cursor row should keep cursor tint when visual mode is disabled",
+        );
+        assert!(
+            highlighted
+                .spans
+                .iter()
+                .skip(1)
+                .all(|span| span.style.bg != Some(theme.visual_bg)),
+            "visual tint should not appear when visual mode is disabled",
         );
     }
 

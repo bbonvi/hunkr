@@ -162,6 +162,10 @@ impl App {
             .diff_selected_range()
             .map(|(start, end)| end.saturating_sub(start) + 1)
             .unwrap_or(0);
+        let visual_range = self
+            .diff_ui
+            .visual_selection
+            .and_then(|_| self.diff_selected_range());
         let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
         let sticky_banner_indexes =
             self.sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
@@ -209,7 +213,7 @@ impl App {
             diff_position: self.diff_position,
             block_cursor_col: self.diff_ui.block_cursor_col,
             search_query: self.search.diff_query.as_deref(),
-            visual_range: self.diff_selected_range(),
+            visual_range,
             sticky_banner_indexes: &sticky_banner_indexes,
             empty_state_message: empty_state_message.as_deref(),
             line_overrides: &line_overrides,
