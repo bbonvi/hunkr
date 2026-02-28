@@ -31,6 +31,14 @@ impl App {
             return;
         }
 
+        if let Some(target) = absolute_nav_target(key.code) {
+            match target {
+                AbsoluteNavTarget::Start => self.select_first_worktree(),
+                AbsoluteNavTarget::End => self.select_last_worktree(),
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Esc => self.close_worktree_switcher(),
             KeyCode::Enter => self.switch_to_selected_worktree(),
@@ -44,8 +52,6 @@ impl App {
             }
             KeyCode::PageDown => self.page_worktree_cursor(1.0),
             KeyCode::PageUp => self.page_worktree_cursor(-1.0),
-            KeyCode::Char('g') => self.select_first_worktree(),
-            KeyCode::Char('G') => self.select_last_worktree(),
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.worktree_switch.search_active = true;
                 self.runtime.status = format!("/{}", self.worktree_switch.query);

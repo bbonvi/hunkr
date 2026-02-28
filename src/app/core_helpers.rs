@@ -666,6 +666,22 @@ pub(super) fn page_step(height: u16, multiplier: f32) -> isize {
     (visible * multiplier).round() as isize
 }
 
+/// Absolute jump target shared by list/diff navigation bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AbsoluteNavTarget {
+    Start,
+    End,
+}
+
+/// Maps common absolute-navigation keys (`g/G`, `Home/End`) to a shared target.
+pub(super) fn absolute_nav_target(code: KeyCode) -> Option<AbsoluteNavTarget> {
+    match code {
+        KeyCode::Char('g') | KeyCode::Home => Some(AbsoluteNavTarget::Start),
+        KeyCode::Char('G') | KeyCode::End => Some(AbsoluteNavTarget::End),
+        _ => None,
+    }
+}
+
 pub(super) fn diff_empty_state_message(
     has_rendered_diff: bool,
     changed_files: usize,

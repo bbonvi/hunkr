@@ -898,6 +898,32 @@ fn diff_search_repeat_direction_accepts_shifted_uppercase_n() {
 }
 
 #[test]
+fn absolute_nav_target_accepts_home_end_and_vim_aliases() {
+    assert_eq!(
+        absolute_nav_target(KeyCode::Home),
+        Some(AbsoluteNavTarget::Start)
+    );
+    assert_eq!(
+        absolute_nav_target(KeyCode::End),
+        Some(AbsoluteNavTarget::End)
+    );
+    assert_eq!(
+        absolute_nav_target(KeyCode::Char('g')),
+        Some(AbsoluteNavTarget::Start)
+    );
+    assert_eq!(
+        absolute_nav_target(KeyCode::Char('G')),
+        Some(AbsoluteNavTarget::End)
+    );
+}
+
+#[test]
+fn absolute_nav_target_ignores_paging_keys() {
+    assert_eq!(absolute_nav_target(KeyCode::PageUp), None);
+    assert_eq!(absolute_nav_target(KeyCode::PageDown), None);
+}
+
+#[test]
 fn list_content_width_accounts_for_border_and_highlight_symbol() {
     assert_eq!(list_content_width(20, 3), 15);
     assert_eq!(list_content_width(4, 3), 1);

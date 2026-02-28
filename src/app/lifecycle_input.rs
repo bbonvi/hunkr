@@ -611,6 +611,14 @@ impl App {
     }
 
     pub(super) fn handle_files_key(&mut self, key: KeyEvent) {
+        if let Some(target) = absolute_nav_target(key.code) {
+            match target {
+                AbsoluteNavTarget::Start => self.select_first_file(),
+                AbsoluteNavTarget::End => self.select_last_file(),
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_file_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_file_cursor(-1),
@@ -622,8 +630,6 @@ impl App {
             }
             KeyCode::PageDown => self.page_files(1.0),
             KeyCode::PageUp => self.page_files(-1.0),
-            KeyCode::Char('g') => self.select_first_file(),
-            KeyCode::Char('G') => self.select_last_file(),
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.preferences.input_mode = InputMode::ListSearch(FocusPane::Files);
                 self.runtime.status = format!("/{}", self.search.file_query);
@@ -634,6 +640,14 @@ impl App {
     }
 
     pub(super) fn handle_commits_key(&mut self, key: KeyEvent) {
+        if let Some(target) = absolute_nav_target(key.code) {
+            match target {
+                AbsoluteNavTarget::Start => self.select_first_commit(),
+                AbsoluteNavTarget::End => self.select_last_commit(),
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Char('x') => {
                 if clear_commit_selection(
@@ -655,8 +669,6 @@ impl App {
             }
             KeyCode::PageDown => self.page_commits(1.0),
             KeyCode::PageUp => self.page_commits(-1.0),
-            KeyCode::Char('g') => self.select_first_commit(),
-            KeyCode::Char('G') => self.select_last_commit(),
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.preferences.input_mode = InputMode::ListSearch(FocusPane::Commits);
                 self.runtime.status = format!("/{}", self.search.commit_query);
@@ -730,6 +742,22 @@ impl App {
             return;
         }
 
+        if let Some(target) = absolute_nav_target(key.code) {
+            match target {
+                AbsoluteNavTarget::Start => {
+                    self.diff_position.cursor = 0;
+                    self.ensure_cursor_visible();
+                }
+                AbsoluteNavTarget::End => {
+                    if !self.rendered_diff.is_empty() {
+                        self.diff_position.cursor = self.rendered_diff.len() - 1;
+                        self.ensure_cursor_visible();
+                    }
+                }
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => self.move_diff_cursor(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_diff_cursor(-1),
@@ -785,16 +813,6 @@ impl App {
                         (false, true) => "Diff search cleared".to_owned(),
                         (false, false) => unreachable!("guarded above"),
                     };
-                }
-            }
-            KeyCode::Char('g') => {
-                self.diff_position.cursor = 0;
-                self.ensure_cursor_visible();
-            }
-            KeyCode::Char('G') => {
-                if !self.rendered_diff.is_empty() {
-                    self.diff_position.cursor = self.rendered_diff.len() - 1;
-                    self.ensure_cursor_visible();
                 }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
