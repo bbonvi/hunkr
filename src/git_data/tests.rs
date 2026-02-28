@@ -139,6 +139,22 @@ fn aggregate_uncommitted_includes_untracked_text_file_content() {
 }
 
 #[test]
+fn uncommitted_file_count_includes_tracked_and_untracked_changes() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "tracked.txt", "base\n", "base");
+    fs::write(repo_dir.path().join("new_file.rs"), "fn added() {}\n").expect("write untracked");
+    fs::write(repo_dir.path().join("tracked.txt"), "base\nnext\n").expect("write tracked");
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let file_count = service
+        .uncommitted_file_count()
+        .expect("uncommitted file count");
+
+    assert_eq!(file_count, 2);
+}
+
+#[test]
 fn commits_affecting_selection_matches_only_commits_touching_selected_lines() {
     let repo_dir = tempdir().expect("tempdir");
     init_repo(repo_dir.path());

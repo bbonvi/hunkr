@@ -3,6 +3,7 @@ use super::lifecycle_render::{
     footer_mode_label, help_overlay_close_key, theme_toggle_conflicts_with_diff_pending_op,
 };
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
+use super::state::format_uncommitted_summary;
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{
@@ -1494,6 +1495,13 @@ fn compose_uncommitted_line_uses_nerd_draft_badge() {
 
     assert!(flattened.contains("[ DRAFT]"));
     assert!(flattened.ends_with("draft"));
+}
+
+#[test]
+fn format_uncommitted_summary_includes_file_count() {
+    assert_eq!(format_uncommitted_summary(0), "Uncommitted changes (0 files)");
+    assert_eq!(format_uncommitted_summary(1), "Uncommitted changes (1 file)");
+    assert_eq!(format_uncommitted_summary(7), "Uncommitted changes (7 files)");
 }
 
 #[test]

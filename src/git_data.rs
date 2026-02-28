@@ -291,21 +291,7 @@ impl GitService {
     }
 
     pub fn aggregate_uncommitted(&self) -> anyhow::Result<AggregatedDiff> {
-        let head_tree = self
-            .repo
-            .head()
-            .ok()
-            .and_then(|head| head.peel_to_tree().ok());
-
-        let mut opts = DiffOptions::new();
-        opts.context_lines(3)
-            .include_untracked(true)
-            .show_untracked_content(true)
-            .recurse_untracked_dirs(true);
-        let diff = self
-            .repo
-            .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
-            .context("failed to diff uncommitted worktree/index changes")?;
+        let diff = self.uncommitted_diff()?;
 
         let mut files = BTreeMap::<String, FilePatch>::new();
         let source = DiffSourceMeta {
@@ -318,6 +304,12 @@ impl GitService {
             .context("failed to iterate uncommitted diff")?;
 
         Ok(AggregatedDiff { files })
+    }
+
+    /// Returns the number of changed files in the synthetic uncommitted draft.
+    pub fn uncommitted_file_count(&self) -> anyhow::Result<usize> {
+        let diff = self.uncommitted_diff()?;
+        Ok(diff.deltas().count())
     }
 
     pub fn commits_affecting_selection(
@@ -391,6 +383,25 @@ impl GitService {
         }
 
         Ok(affecting)
+    }
+}
+
+impl GitService {
+    fn uncommitted_diff(&self) -> anyhow::Result<git2::Diff<'_>> {
+        let head_tree = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_tree().ok());
+
+        let mut opts = DiffOptions::new();
+        opts.context_lines(3)
+            .include_untracked(true)
+            .show_untracked_content(true)
+            .recurse_untracked_dirs(true);
+        self.repo
+            .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
+            .context("failed to diff uncommitted worktree/index changes")
     }
 }
 

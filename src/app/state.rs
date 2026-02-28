@@ -64,6 +64,7 @@ impl App {
             })
             .collect();
 
+        let uncommitted_file_count = self.git.uncommitted_file_count()?;
         let uncommitted_selected =
             preserve_manual_selection && old_selected.contains(UNCOMMITTED_COMMIT_ID);
         self.commits.insert(
@@ -72,7 +73,7 @@ impl App {
                 info: CommitInfo {
                     short_id: UNCOMMITTED_COMMIT_SHORT.to_owned(),
                     id: UNCOMMITTED_COMMIT_ID.to_owned(),
-                    summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
+                    summary: format_uncommitted_summary(uncommitted_file_count),
                     author: "local".to_owned(),
                     timestamp: Utc::now().timestamp(),
                     unpushed: false,
@@ -807,6 +808,11 @@ impl App {
             .position(|range| range.path == path)?;
         Some((index + 1, total))
     }
+}
+
+pub(super) fn format_uncommitted_summary(file_count: usize) -> String {
+    let noun = if file_count == 1 { "file" } else { "files" };
+    format!("{UNCOMMITTED_COMMIT_SUMMARY} ({file_count} {noun})")
 }
 
 pub(super) fn rendered_file_header_line(
