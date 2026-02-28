@@ -3,7 +3,7 @@ use super::lifecycle_render::{
     footer_mode_label, help_overlay_close_key, theme_toggle_conflicts_with_diff_pending_op,
 };
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
-use super::ui::diff_pane::{first_diff_match_char_column, scrollbar_thumb};
+use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::ListLinePresenter;
 use super::ui::style::{
     CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
@@ -2075,8 +2075,11 @@ fn diff_search_wraps_forward() {
         },
     ];
 
-    let found = find_diff_match_from_cursor(&lines, "alp", true, 2);
-    assert_eq!(found, Some(0));
+    let found = find_diff_match_from_cursor(&lines, "alp", true, 2, 0);
+    assert_eq!(
+        found.map(|entry| (entry.line_index, entry.char_col)),
+        Some((0, 0))
+    );
 }
 
 #[test]
@@ -2102,17 +2105,49 @@ fn diff_search_wraps_backward() {
         },
     ];
 
-    let found = find_diff_match_from_cursor(&lines, "gam", false, 0);
-    assert_eq!(found, Some(2));
+    let found = find_diff_match_from_cursor(&lines, "gam", false, 0, 0);
+    assert_eq!(
+        found.map(|entry| (entry.line_index, entry.char_col)),
+        Some((2, 0))
+    );
 }
 
 #[test]
-fn first_diff_match_char_column_returns_first_occurrence_column() {
+fn diff_search_steps_between_occurrences_on_same_line() {
+    let lines = vec![RenderedDiffLine {
+        line: Line::from("alpha alpha beta"),
+        raw_text: "alpha alpha beta".to_owned(),
+        anchor: None,
+        comment_id: None,
+    }];
+
+    let found = find_diff_match_from_cursor(&lines, "alpha", true, 0, 0);
     assert_eq!(
-        first_diff_match_char_column("let alpha = alpha + 1;", "alpha"),
-        Some(4)
+        found.map(|entry| (entry.line_index, entry.char_col)),
+        Some((0, 6))
     );
-    assert_eq!(first_diff_match_char_column("let alpha = 1;", "beta"), None);
+
+    let wrapped = find_diff_match_from_cursor(&lines, "alpha", true, 0, 6);
+    assert_eq!(
+        wrapped.map(|entry| (entry.line_index, entry.char_col)),
+        Some((0, 0))
+    );
+}
+
+#[test]
+fn diff_search_steps_backward_between_occurrences_on_same_line() {
+    let lines = vec![RenderedDiffLine {
+        line: Line::from("alpha alpha beta"),
+        raw_text: "alpha alpha beta".to_owned(),
+        anchor: None,
+        comment_id: None,
+    }];
+
+    let found = find_diff_match_from_cursor(&lines, "alpha", false, 0, 6);
+    assert_eq!(
+        found.map(|entry| (entry.line_index, entry.char_col)),
+        Some((0, 0))
+    );
 }
 
 #[test]

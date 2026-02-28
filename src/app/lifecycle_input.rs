@@ -523,19 +523,17 @@ impl App {
         }
 
         self.search.diff_query = Some(normalized.to_owned());
-        if let Some(idx) = find_diff_match_from_cursor(
+        if let Some(found) = find_diff_match_from_cursor(
             &self.rendered_diff,
             normalized,
             forward,
             self.diff_position.cursor,
+            self.diff_ui.block_cursor_col,
         ) {
+            let idx = found.line_index;
             let crossed_viewport_boundary = !self.diff_row_visible_in_viewport(idx);
             self.set_diff_cursor(idx);
-            if let Some(line) = self.rendered_diff.get(idx)
-                && let Some(col) = first_diff_match_char_column(&line.raw_text, normalized)
-            {
-                self.set_diff_block_cursor_col(col);
-            }
+            self.set_diff_block_cursor_col(found.char_col);
             if crossed_viewport_boundary {
                 let visible = self.visible_diff_rows();
                 let centered_scroll = self.diff_position.cursor.saturating_sub(visible / 2);

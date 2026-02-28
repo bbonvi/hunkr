@@ -266,46 +266,63 @@ pub(in crate::app) fn find_diff_match_from_cursor(
     query: &str,
     forward: bool,
     cursor: usize,
-) -> Option<usize> {
+    cursor_col: usize,
+) -> Option<DiffSearchMatch> {
     if lines.is_empty() {
         return None;
     }
-    let query = query.to_ascii_lowercase();
+    let query = query.trim();
     if query.is_empty() {
         return None;
     }
 
-    let current = cursor.min(lines.len().saturating_sub(1));
-    if forward {
-        for (idx, line) in lines.iter().enumerate().skip(current.saturating_add(1)) {
-            if line.raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
-        for (idx, line) in lines.iter().enumerate().take(current + 1) {
-            if line.raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
-    } else {
-        for (idx, line) in lines.iter().enumerate().take(current).rev() {
-            if line.raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
-        for (idx, line) in lines.iter().enumerate().skip(current).rev() {
-            if line.raw_text.to_ascii_lowercase().contains(&query) {
-                return Some(idx);
-            }
-        }
+    let all_matches = collect_diff_search_matches(lines, query);
+    if all_matches.is_empty() {
+        return None;
     }
-    None
+
+    let current_line = cursor.min(lines.len().saturating_sub(1));
+    if forward {
+        all_matches
+            .iter()
+            .copied()
+            .find(|entry| {
+                entry.line_index > current_line
+                    || (entry.line_index == current_line && entry.char_col > cursor_col)
+            })
+            .or_else(|| all_matches.first().copied())
+    } else {
+        all_matches
+            .iter()
+            .rev()
+            .copied()
+            .find(|entry| {
+                entry.line_index < current_line
+                    || (entry.line_index == current_line && entry.char_col < cursor_col)
+            })
+            .or_else(|| all_matches.last().copied())
+    }
 }
 
-pub(in crate::app) fn first_diff_match_char_column(text: &str, query: &str) -> Option<usize> {
-    find_case_insensitive_ranges(text, query)
-        .first()
-        .map(|(start, _)| text[..*start].chars().count())
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) struct DiffSearchMatch {
+    /// Absolute rendered diff row index.
+    pub line_index: usize,
+    /// Character-column start of the matched occurrence in `raw_text`.
+    pub char_col: usize,
+}
+
+fn collect_diff_search_matches(lines: &[RenderedDiffLine], query: &str) -> Vec<DiffSearchMatch> {
+    let mut matches = Vec::new();
+    for (line_index, line) in lines.iter().enumerate() {
+        for (start, _) in find_case_insensitive_ranges(&line.raw_text, query) {
+            matches.push(DiffSearchMatch {
+                line_index,
+                char_col: line.raw_text[..start].chars().count(),
+            });
+        }
+    }
+    matches
 }
 
 pub(in crate::app) fn capture_pending_diff_view_anchor(
