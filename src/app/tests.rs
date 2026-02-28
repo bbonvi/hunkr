@@ -1554,9 +1554,18 @@ fn compose_uncommitted_line_uses_nerd_draft_badge() {
 
 #[test]
 fn format_uncommitted_summary_includes_file_count() {
-    assert_eq!(format_uncommitted_summary(0), "Uncommitted changes (0 files)");
-    assert_eq!(format_uncommitted_summary(1), "Uncommitted changes (1 file)");
-    assert_eq!(format_uncommitted_summary(7), "Uncommitted changes (7 files)");
+    assert_eq!(
+        format_uncommitted_summary(0),
+        "Uncommitted changes (0 files)"
+    );
+    assert_eq!(
+        format_uncommitted_summary(1),
+        "Uncommitted changes (1 file)"
+    );
+    assert_eq!(
+        format_uncommitted_summary(7),
+        "Uncommitted changes (7 files)"
+    );
 }
 
 #[test]
@@ -1703,7 +1712,7 @@ fn commit_status_filter_groups_rows_correctly() {
     assert!(CommitStatusFilter::ReviewedOrResolved.matches_row(&resolved));
     assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&unreviewed));
     assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&issue));
-    assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&draft));
+    assert!(CommitStatusFilter::ReviewedOrResolved.matches_row(&draft));
 }
 
 #[test]
@@ -1744,10 +1753,10 @@ fn switching_status_filter_deselects_hidden_commits() {
 
     let deselected =
         deselect_rows_outside_status_filter(&mut rows, CommitStatusFilter::ReviewedOrResolved);
-    assert_eq!(deselected, 2);
+    assert_eq!(deselected, 1);
     assert!(!rows[0].selected);
     assert!(!rows[1].selected);
-    assert!(!rows[2].selected);
+    assert!(rows[2].selected);
 }
 
 #[test]
@@ -1756,7 +1765,9 @@ fn selected_rows_hidden_count_tracks_active_filter() {
         commit_row("a", true, ReviewStatus::Unreviewed),
         commit_row("b", true, ReviewStatus::Reviewed),
         commit_row("c", false, ReviewStatus::Resolved),
+        commit_row("wip", true, ReviewStatus::Unreviewed),
     ];
+    rows[3].is_uncommitted = true;
     rows[2].selected = true;
 
     assert_eq!(

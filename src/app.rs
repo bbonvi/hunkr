@@ -164,18 +164,20 @@ impl CommitStatusFilter {
     }
 
     fn matches_row(self, row: &CommitRow) -> bool {
+        if row.is_uncommitted {
+            return true;
+        }
+
         match self {
             Self::All => true,
             Self::UnreviewedOrIssueFound => {
-                row.is_uncommitted
-                    || matches!(
-                        row.status,
-                        ReviewStatus::Unreviewed | ReviewStatus::IssueFound
-                    )
+                matches!(
+                    row.status,
+                    ReviewStatus::Unreviewed | ReviewStatus::IssueFound
+                )
             }
             Self::ReviewedOrResolved => {
-                !row.is_uncommitted
-                    && matches!(row.status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
+                matches!(row.status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
             }
         }
     }
