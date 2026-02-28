@@ -1,6 +1,7 @@
 use super::lifecycle_input::{clear_commit_visual_anchor, diff_search_repeat_direction};
 use super::lifecycle_render::{
-    footer_mode_label, help_overlay_close_key, theme_toggle_conflicts_with_diff_pending_op,
+    PaneCycleDirection, footer_mode_label, help_overlay_close_key, pane_focus_cycle_direction,
+    theme_toggle_conflicts_with_diff_pending_op,
 };
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::state::format_uncommitted_summary;
@@ -784,6 +785,33 @@ fn theme_toggle_conflict_defers_t_to_diff_pending_z_op() {
         FocusPane::Diff,
         Some(DiffPendingOp::Z)
     ));
+}
+
+#[test]
+fn pane_focus_cycle_direction_supports_tab_and_shift_tab_variants() {
+    assert_eq!(
+        pane_focus_cycle_direction(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        Some(PaneCycleDirection::Next)
+    );
+    assert_eq!(
+        pane_focus_cycle_direction(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)),
+        Some(PaneCycleDirection::Prev)
+    );
+    assert_eq!(
+        pane_focus_cycle_direction(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE)),
+        Some(PaneCycleDirection::Prev)
+    );
+    assert_eq!(
+        pane_focus_cycle_direction(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+        Some(PaneCycleDirection::Prev)
+    );
+    assert_eq!(
+        pane_focus_cycle_direction(KeyEvent::new(
+            KeyCode::Tab,
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT
+        )),
+        None
+    );
 }
 
 #[test]

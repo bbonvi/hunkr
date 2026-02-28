@@ -496,10 +496,16 @@ impl App {
             return;
         }
 
+        if let Some(direction) = pane_focus_cycle_direction(key) {
+            match direction {
+                PaneCycleDirection::Next => self.focus_next(),
+                PaneCycleDirection::Prev => self.focus_prev(),
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Char('q') => self.runtime.should_quit = true,
-            KeyCode::Tab if key.modifiers == KeyModifiers::NONE => self.focus_next(),
-            KeyCode::BackTab if key.modifiers == KeyModifiers::NONE => self.focus_prev(),
             KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
                 self.set_focus(focus_with_l(self.preferences.focused))
             }
@@ -563,6 +569,24 @@ pub(super) fn help_overlay_close_key(key: KeyEvent) -> bool {
             key.code,
             KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
         )
+}
+
+/// Maps pane-cycle keyboard shortcuts while preserving Ctrl-modified bindings.
+pub(super) fn pane_focus_cycle_direction(key: KeyEvent) -> Option<PaneCycleDirection> {
+    match (key.code, key.modifiers) {
+        (KeyCode::Tab, KeyModifiers::NONE) => Some(PaneCycleDirection::Next),
+        (KeyCode::Tab, KeyModifiers::SHIFT) => Some(PaneCycleDirection::Prev),
+        (KeyCode::BackTab, KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            Some(PaneCycleDirection::Prev)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PaneCycleDirection {
+    Prev,
+    Next,
 }
 
 pub(super) fn theme_toggle_conflicts_with_diff_pending_op(
