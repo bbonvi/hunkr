@@ -14,7 +14,7 @@ use super::super::{
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
 
-const VISUAL_OVER_CURSOR_BLEND_WEIGHT: u8 = 170;
+const VISUAL_OVER_CURSOR_BLEND_WEIGHT: u8 = 230;
 
 #[derive(Debug, Clone)]
 pub(in crate::app) struct PendingDiffViewAnchor {
