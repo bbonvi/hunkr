@@ -12,6 +12,8 @@ use super::super::{UiTheme, blend_colors, display_width, truncate};
 pub(in crate::app) enum CursorSelectionPolicy {
     /// Cursor background fully replaces selection background.
     CursorWins,
+    /// Selection background is preserved when cursor is inside a visual selection.
+    SelectionWins,
     /// Cursor background is blended over selection background.
     BlendCursorOverSelection { weight: u8 },
 }
@@ -28,6 +30,7 @@ pub(in crate::app) fn resolve_row_background(
         return in_selection.then_some(selection_bg);
     }
     Some(match (in_selection, policy) {
+        (true, CursorSelectionPolicy::SelectionWins) => selection_bg,
         (true, CursorSelectionPolicy::BlendCursorOverSelection { weight }) => {
             blend_colors(selection_bg, cursor_bg, weight)
         }
@@ -51,7 +54,8 @@ pub(in crate::app) fn apply_row_highlight(
         None => line.clone(),
     };
     if is_cursor {
-        highlighted = pad_line_to_width(&highlighted, line_width, Style::default().bg(cursor_bg));
+        let pad_bg = row_bg.unwrap_or(cursor_bg);
+        highlighted = pad_line_to_width(&highlighted, line_width, Style::default().bg(pad_bg));
     }
     highlighted
 }

@@ -492,7 +492,7 @@ fn display_line_with_selection(
             is_cursor,
             selection.theme.visual_bg,
             selection.theme.cursor_bg,
-            CursorSelectionPolicy::CursorWins,
+            CursorSelectionPolicy::SelectionWins,
         )
     };
 
@@ -507,7 +507,7 @@ fn display_line_with_selection(
             layout,
         );
     }
-    if is_cursor {
+    if is_cursor && layout.highlight_without_line_numbers {
         highlighted = apply_block_cursor_highlight(
             &highlighted,
             coord_text,
@@ -580,7 +580,7 @@ fn apply_row_highlight_without_line_numbers(
         is_cursor,
         theme.visual_bg,
         theme.cursor_bg,
-        CursorSelectionPolicy::CursorWins,
+        CursorSelectionPolicy::SelectionWins,
     );
 
     let mut spans = Vec::with_capacity(1 + highlighted_payload.spans.len());
@@ -653,10 +653,13 @@ fn apply_block_cursor_highlight(
 }
 
 fn map_raw_range_to_display(range: (usize, usize), layout: DiffPayloadLayout) -> (usize, usize) {
-    let map_idx = |idx: usize| {
-        layout.display_byte_offset + idx + usize::from(layout.insert_space_after_prefix && idx > 0)
+    let map_start = |idx: usize| {
+        layout.display_byte_offset + idx + usize::from(layout.insert_space_after_prefix && idx >= 1)
     };
-    (map_idx(range.0), map_idx(range.1))
+    let map_end = |idx: usize| {
+        layout.display_byte_offset + idx + usize::from(layout.insert_space_after_prefix && idx >= 2)
+    };
+    (map_start(range.0), map_end(range.1))
 }
 
 fn find_case_insensitive_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {
@@ -759,10 +762,12 @@ fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::patch_line_byte_range;
+    use super::{SelectionRenderContext, display_line_with_selection, patch_line_byte_range};
+    use crate::app::{RenderedDiffLine, ThemeMode, UiTheme};
+    use crate::model::CommentAnchor;
     use ratatui::{
         style::{Color, Style},
-        text::Line,
+        text::{Line, Span},
     };
 
     #[test]
@@ -771,5 +776,128 @@ mod tests {
         let patched = patch_line_byte_range(&line, 1, 4, Style::default().bg(Color::Yellow));
 
         assert!(!patched.spans.is_empty());
+    }
+
+    #[test]
+    fn cursor_block_is_not_rendered_on_file_header_rows() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = RenderedDiffLine {
+            line: Line::from("==== file 1/12: src/app/ui/diff_pane.rs ===="),
+            raw_text: "==== file 1/12: src/app/ui/diff_pane.rs ====".to_owned(),
+            anchor: None,
+            comment_id: None,
+        };
+        let selection = SelectionRenderContext {
+            visual_range: None,
+            cursor: 0,
+            block_cursor_col: 5,
+            search_query: None,
+            focused_diff: true,
+            theme: &theme,
+        };
+
+        let highlighted = display_line_with_selection(&rendered, None, 0, 120, selection);
+        assert!(
+            highlighted
+                .spans
+                .iter()
+                .all(|span| span.style.bg != Some(theme.block_cursor_bg)),
+            "header rows should not render block cursor cell",
+        );
+    }
+
+    #[test]
+    fn visual_highlight_wins_over_cursor_line_highlight() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = RenderedDiffLine {
+            line: Line::from(vec![
+                Span::styled("  43   43 ", Style::default()),
+                Span::styled("+", Style::default()),
+                Span::raw(" "),
+                Span::styled("pub block_cursor_col: usize,", Style::default()),
+            ]),
+            raw_text: "+ pub block_cursor_col: usize,".to_owned(),
+            anchor: Some(CommentAnchor {
+                commit_id: "head".to_owned(),
+                commit_summary: "summary".to_owned(),
+                file_path: "src/app/ui/diff_pane.rs".to_owned(),
+                hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+                old_lineno: Some(43),
+                new_lineno: Some(43),
+            }),
+            comment_id: None,
+        };
+        let selection = SelectionRenderContext {
+            visual_range: Some((0, 0)),
+            cursor: 0,
+            block_cursor_col: 200,
+            search_query: None,
+            focused_diff: true,
+            theme: &theme,
+        };
+
+        let highlighted = display_line_with_selection(&rendered, None, 0, 120, selection);
+        assert!(
+            highlighted
+                .spans
+                .iter()
+                .skip(1)
+                .any(|span| span.style.bg == Some(theme.visual_bg)),
+            "visual selection should remain visible on current line",
+        );
+        assert!(
+            highlighted
+                .spans
+                .iter()
+                .skip(1)
+                .all(|span| span.style.bg != Some(theme.cursor_bg)),
+            "cursor line tint should not override visual selection",
+        );
+    }
+
+    #[test]
+    fn block_cursor_on_context_prefix_space_is_single_cell() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = RenderedDiffLine {
+            line: Line::from(vec![
+                Span::styled("   9    9 ", Style::default()),
+                Span::styled(" ", Style::default()),
+                Span::raw(" "),
+                Span::styled(
+                    "  pub(in crate::app) struct DiffPaneBody<'a> {",
+                    Style::default(),
+                ),
+            ]),
+            raw_text: "   pub(in crate::app) struct DiffPaneBody<'a> {".to_owned(),
+            anchor: Some(CommentAnchor {
+                commit_id: "head".to_owned(),
+                commit_summary: "summary".to_owned(),
+                file_path: "src/app/ui/diff_pane.rs".to_owned(),
+                hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+                old_lineno: Some(9),
+                new_lineno: Some(9),
+            }),
+            comment_id: None,
+        };
+        let selection = SelectionRenderContext {
+            visual_range: None,
+            cursor: 0,
+            block_cursor_col: 0,
+            search_query: None,
+            focused_diff: true,
+            theme: &theme,
+        };
+
+        let highlighted = display_line_with_selection(&rendered, None, 0, 120, selection);
+        let cursor_cells = highlighted
+            .spans
+            .iter()
+            .filter(|span| span.style.bg == Some(theme.block_cursor_bg))
+            .map(|span| span.content.chars().count())
+            .sum::<usize>();
+        assert_eq!(
+            cursor_cells, 1,
+            "block cursor should render as one cell on context-line prefix",
+        );
     }
 }
