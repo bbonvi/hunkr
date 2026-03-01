@@ -690,6 +690,18 @@ impl App {
             self.file_ui.list_state.select(None);
             return;
         }
+        let visible_len = visible.len();
+        if let Some(visible_idx) = self
+            .file_ui
+            .list_state
+            .selected()
+            .filter(|idx| *idx < visible_len)
+        {
+            // Preserve the user's current row focus (including directories) and
+            // only recompute the target diff file for that focused row.
+            self.select_file_row(visible_idx);
+            return;
+        }
 
         if let Some(path) = self.diff_cache.selected_file.clone()
             && let Some(full_idx) = self
