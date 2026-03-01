@@ -268,9 +268,26 @@ impl App {
         }
     }
 
-    fn cancel_comment_input(&mut self) {
-        self.preferences.input_mode = InputMode::Normal;
-        self.clear_diff_visual_selection();
+    pub(super) fn refresh_comment_create_target_cache(&mut self) {
+        self.comment_editor.create_target_cache =
+            Some(match self.comment_target_from_selection() {
+                Ok(target) => CommentCreateTargetCache::Ready(Box::new(target)),
+                Err(err) => CommentCreateTargetCache::Error(format!("{err:#}")),
+            });
+    }
+
+    fn resolve_comment_create_target(&mut self) -> Result<Option<CommentTarget>, String> {
+        if self.comment_editor.create_target_cache.is_none() {
+            self.refresh_comment_create_target_cache();
+        }
+        match self.comment_editor.create_target_cache.as_ref() {
+            Some(CommentCreateTargetCache::Ready(target)) => Ok(target.as_ref().clone()),
+            Some(CommentCreateTargetCache::Error(err)) => Err(err.clone()),
+            None => Ok(None),
+        }
+    }
+
+    fn reset_comment_editor_state(&mut self) {
         self.comment_editor.buffer.clear();
         self.comment_editor.cursor = 0;
         self.comment_editor.selection = None;
@@ -279,6 +296,13 @@ impl App {
         self.comment_editor.line_ranges.clear();
         self.comment_editor.view_start = 0;
         self.comment_editor.text_offset = 0;
+        self.comment_editor.create_target_cache = None;
+    }
+
+    fn cancel_comment_input(&mut self) {
+        self.preferences.input_mode = InputMode::Normal;
+        self.clear_diff_visual_selection();
+        self.reset_comment_editor_state();
         self.runtime.status = "Comment canceled".to_owned();
     }
 
@@ -290,7 +314,7 @@ impl App {
 
         let mut close_editor = false;
         match self.preferences.input_mode {
-            InputMode::CommentCreate => match self.comment_target_from_selection() {
+            InputMode::CommentCreate => match self.resolve_comment_create_target() {
                 Ok(Some(target)) => {
                     let result = self
                         .comments
@@ -331,7 +355,7 @@ impl App {
                 }
                 Err(err) => {
                     self.runtime.status =
-                        format!("Failed to resolve affected commits for comment: {err:#}");
+                        format!("Failed to resolve affected commits for comment: {err}");
                     close_editor = true;
                 }
             },
@@ -372,14 +396,7 @@ impl App {
         if close_editor {
             self.preferences.input_mode = InputMode::Normal;
             self.clear_diff_visual_selection();
-            self.comment_editor.buffer.clear();
-            self.comment_editor.cursor = 0;
-            self.comment_editor.selection = None;
-            self.comment_editor.mouse_anchor = None;
-            self.comment_editor.rect = None;
-            self.comment_editor.line_ranges.clear();
-            self.comment_editor.view_start = 0;
-            self.comment_editor.text_offset = 0;
+            self.reset_comment_editor_state();
         }
     }
 
@@ -594,11 +611,11 @@ impl App {
             self.runtime.status = format!("Comment #{} missing", id);
             return;
         };
+        let comment_text = comment.text.clone();
         self.preferences.input_mode = InputMode::CommentEdit(id);
-        self.comment_editor.buffer = comment.text.clone();
+        self.reset_comment_editor_state();
+        self.comment_editor.buffer = comment_text;
         self.comment_editor.cursor = self.comment_editor.buffer.len();
-        self.comment_editor.selection = None;
-        self.comment_editor.mouse_anchor = None;
         self.runtime.status = format!(
             "Editing comment #{}: Enter save, Ctrl-s save, Esc cancel",
             id
@@ -903,10 +920,8 @@ impl App {
                     return;
                 }
                 self.preferences.input_mode = InputMode::CommentCreate;
-                self.comment_editor.buffer.clear();
-                self.comment_editor.cursor = 0;
-                self.comment_editor.selection = None;
-                self.comment_editor.mouse_anchor = None;
+                self.reset_comment_editor_state();
+                self.refresh_comment_create_target_cache();
                 self.diff_ui.pending_op = None;
                 self.runtime.status =
                     "Comment mode: Enter save, Alt+Enter newline, Esc cancel".to_owned();

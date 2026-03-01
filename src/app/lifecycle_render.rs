@@ -111,6 +111,7 @@ impl App {
                 line_ranges: Vec::new(),
                 view_start: 0,
                 text_offset: 0,
+                create_target_cache: None,
             },
             shell_command: ShellCommandState {
                 buffer: String::new(),

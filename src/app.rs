@@ -434,6 +434,14 @@ struct CommentEditorState {
     line_ranges: Vec<(usize, usize)>,
     view_start: usize,
     text_offset: u16,
+    create_target_cache: Option<CommentCreateTargetCache>,
+}
+
+/// Cached comment target resolution for create-mode modal rendering/submission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CommentCreateTargetCache {
+    Ready(Box<Option<CommentTarget>>),
+    Error(String),
 }
 
 /// Shell command modal/editor mutable state.

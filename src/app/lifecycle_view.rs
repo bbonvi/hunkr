@@ -727,6 +727,11 @@ impl App {
             .style(Style::default().bg(theme.modal_bg))
             .border_style(Style::default().fg(theme.border));
         let context_inner = context_block.inner(sections[1]);
+        if matches!(self.preferences.input_mode, InputMode::CommentCreate)
+            && self.comment_editor.create_target_cache.is_none()
+        {
+            self.refresh_comment_create_target_cache();
+        }
         let context_lines =
             self.comment_context_preview_lines(context_inner.height as usize, theme);
         frame.render_widget(context_block, sections[1]);
@@ -1081,54 +1086,57 @@ impl App {
                     );
                 }
             }
-            InputMode::CommentCreate => match self.comment_target_from_selection() {
-                Ok(Some(target)) => {
-                    let start =
-                        format_anchor_lines(target.start.old_lineno, target.start.new_lineno);
-                    let end = format_anchor_lines(target.end.old_lineno, target.end.new_lineno);
-                    let span = if start == end {
-                        start
-                    } else {
-                        format!("{start} -> {end}")
-                    };
-                    lines.push(Line::from(vec![
-                        Span::styled("target ", Style::default().fg(theme.dimmed)),
-                        Span::styled(
-                            format!(
-                                "{} {} ({span}; {} selected lines)",
-                                target.kind.as_str(),
-                                sanitize_terminal_text(&target.start.file_path),
-                                target.selected_lines.len()
+            InputMode::CommentCreate => match self.comment_editor.create_target_cache.as_ref() {
+                Some(CommentCreateTargetCache::Ready(target)) => match target.as_ref() {
+                    Some(target) => {
+                        let start =
+                            format_anchor_lines(target.start.old_lineno, target.start.new_lineno);
+                        let end = format_anchor_lines(target.end.old_lineno, target.end.new_lineno);
+                        let span = if start == end {
+                            start
+                        } else {
+                            format!("{start} -> {end}")
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled("target ", Style::default().fg(theme.dimmed)),
+                            Span::styled(
+                                format!(
+                                    "{} {} ({span}; {} selected lines)",
+                                    target.kind.as_str(),
+                                    sanitize_terminal_text(&target.start.file_path),
+                                    target.selected_lines.len()
+                                ),
+                                Style::default().fg(theme.muted),
                             ),
-                            Style::default().fg(theme.muted),
-                        ),
-                    ]));
-                    has_primary_context = !target.selected_lines.is_empty();
-                    self.push_compact_selection_preview(
-                        &mut lines,
-                        &target.selected_lines,
-                        rows.saturating_sub(1),
-                        theme,
-                    );
-                }
-                Ok(None) => {
+                        ]));
+                        has_primary_context = !target.selected_lines.is_empty();
+                        self.push_compact_selection_preview(
+                            &mut lines,
+                            &target.selected_lines,
+                            rows.saturating_sub(1),
+                            theme,
+                        );
+                    }
+                    None => {
+                        lines.push(Line::from(vec![
+                            Span::styled("target ", Style::default().fg(theme.dimmed)),
+                            Span::styled(
+                                "no anchor at cursor; showing local diff snippet",
+                                Style::default().fg(theme.muted),
+                            ),
+                        ]));
+                    }
+                },
+                Some(CommentCreateTargetCache::Error(err)) => {
                     lines.push(Line::from(vec![
                         Span::styled("target ", Style::default().fg(theme.dimmed)),
                         Span::styled(
-                            "no anchor at cursor; showing local diff snippet",
-                            Style::default().fg(theme.muted),
-                        ),
-                    ]));
-                }
-                Err(err) => {
-                    lines.push(Line::from(vec![
-                        Span::styled("target ", Style::default().fg(theme.dimmed)),
-                        Span::styled(
-                            format!("failed to resolve target: {err:#}"),
+                            format!("failed to resolve target: {err}"),
                             Style::default().fg(theme.issue),
                         ),
                     ]));
                 }
+                None => {}
             },
             InputMode::Normal
             | InputMode::ShellCommand
