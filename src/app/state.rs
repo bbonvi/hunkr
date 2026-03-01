@@ -5,8 +5,8 @@ impl App {
         let reopened = GitService::open_at(target)
             .with_context(|| format!("failed to reopen repository at {}", target.display()))?;
         let branch = reopened.branch_name().to_owned();
-        self.git = reopened;
-        self.comments = CommentStore::new(self.store.root_dir(), &branch)
+        self.deps.git = reopened;
+        self.deps.comments = CommentStore::new(self.deps.store.root_dir(), &branch)
             .with_context(|| format!("failed to reload comments for branch {branch}"))?;
         self.reload_commits(true)
             .context("failed to refresh commit and diff state")?;
@@ -19,18 +19,19 @@ impl App {
     }
 
     pub(super) fn reload_commits(&mut self, preserve_manual_selection: bool) -> anyhow::Result<()> {
-        let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
-        let prior_cursor_idx = self.commit_ui.list_state.selected();
+        let history = self.deps.git.load_first_parent_history(HISTORY_LIMIT)?;
+        let prior_cursor_idx = self.ui.commit_ui.list_state.selected();
         let prior_cursor_commit_id = self.selected_commit_id();
         let prior_visual_anchor_commit_id = self
+            .ui
             .commit_ui
             .visual_anchor
-            .and_then(|idx| self.commits.get(idx))
+            .and_then(|idx| self.domain.commits.get(idx))
             .map(|row| row.info.id.clone());
 
         let mut old_selected = BTreeSet::new();
         if preserve_manual_selection {
-            for row in &self.commits {
+            for row in &self.domain.commits {
                 if row.selected {
                     old_selected.insert(row.info.id.clone());
                 }
@@ -38,14 +39,17 @@ impl App {
         }
 
         let mut known = BTreeSet::new();
-        for row in &self.commits {
+        for row in &self.domain.commits {
             known.insert(row.info.id.clone());
         }
 
-        self.commits = history
+        self.domain.commits = history
             .into_iter()
             .map(|info| {
-                let status = self.store.commit_status(&self.review_state, &info.id);
+                let status = self
+                    .deps
+                    .store
+                    .commit_status(&self.domain.review_state, &info.id);
                 let selected = preserve_manual_selection && old_selected.contains(&info.id);
                 CommitRow {
                     info,
@@ -56,10 +60,10 @@ impl App {
             })
             .collect();
 
-        let uncommitted_file_count = self.git.uncommitted_file_count()?;
+        let uncommitted_file_count = self.deps.git.uncommitted_file_count()?;
         let uncommitted_selected =
             preserve_manual_selection && old_selected.contains(UNCOMMITTED_COMMIT_ID);
-        self.commits.insert(
+        self.domain.commits.insert(
             0,
             CommitRow {
                 info: CommitInfo {
@@ -78,18 +82,20 @@ impl App {
         );
 
         self.sync_commit_cursor_for_filters(prior_cursor_commit_id.as_deref(), prior_cursor_idx);
-        self.commit_ui.visual_anchor = prior_visual_anchor_commit_id
+        self.ui.commit_ui.visual_anchor = prior_visual_anchor_commit_id
             .as_deref()
-            .and_then(|commit_id| index_of_commit(&self.commits, commit_id));
+            .and_then(|commit_id| index_of_commit(&self.domain.commits, commit_id));
         if self
+            .ui
             .commit_ui
             .visual_anchor
             .is_some_and(|anchor| !self.visible_commit_indices().contains(&anchor))
         {
-            self.commit_ui.visual_anchor = None;
+            self.ui.commit_ui.visual_anchor = None;
         }
 
         let new_commits = self
+            .domain
             .commits
             .iter()
             .filter(|row| {
@@ -114,42 +120,42 @@ impl App {
 
     /// Restores persisted UI session state after initial commit loading.
     pub(super) fn restore_persisted_ui_session(&mut self) -> anyhow::Result<()> {
-        let session = self.review_state.ui_session.clone();
+        let session = self.domain.review_state.ui_session.clone();
 
         if let Some(filter) = session.commit_status_filter {
-            self.commit_ui.status_filter = commit_status_filter_from_session(filter);
+            self.ui.commit_ui.status_filter = commit_status_filter_from_session(filter);
         }
         if let Some(theme_mode) = session.theme_mode {
-            self.preferences.theme_mode = theme_mode_from_session(theme_mode);
+            self.ui.preferences.theme_mode = theme_mode_from_session(theme_mode);
         }
 
-        restore_commit_selection(&mut self.commits, &session.selected_commit_ids);
-        self.commit_ui.visual_anchor = None;
-        self.commit_ui.selection_anchor = None;
-        self.commit_ui.mouse_anchor = None;
-        self.commit_ui.mouse_dragging = false;
-        self.commit_ui.mouse_drag_mode = None;
-        self.commit_ui.mouse_drag_baseline = None;
+        restore_commit_selection(&mut self.domain.commits, &session.selected_commit_ids);
+        self.ui.commit_ui.visual_anchor = None;
+        self.ui.commit_ui.selection_anchor = None;
+        self.ui.commit_ui.mouse_anchor = None;
+        self.ui.commit_ui.mouse_dragging = false;
+        self.ui.commit_ui.mouse_drag_mode = None;
+        self.ui.commit_ui.mouse_drag_baseline = None;
 
         self.runtime.selection_rebuild_due = None;
         self.reset_diff_view_for_commit_selection_change();
-        self.diff_cache.selected_file = session.selected_file;
-        self.diff_cache.positions = session
+        self.ui.diff_cache.selected_file = session.selected_file;
+        self.ui.diff_cache.positions = session
             .diff_positions
             .into_iter()
             .map(|(path, position)| (path, diff_position_from_session(position)))
             .collect();
-        self.diff_cache.pending_view_anchor = None;
+        self.ui.diff_cache.pending_view_anchor = None;
         self.rebuild_selection_dependent_views()?;
 
         self.sync_commit_cursor_for_filters(
             session.commit_cursor_id.as_deref(),
-            self.commit_ui.list_state.selected(),
+            self.ui.commit_ui.list_state.selected(),
         );
 
         if let Some(focused) = session.focused_pane.map(focus_pane_from_session) {
             let has_files = !self.visible_file_indices().is_empty();
-            self.preferences.focused = restore_focus_with_availability(focused, has_files);
+            self.ui.preferences.focused = restore_focus_with_availability(focused, has_files);
         }
 
         Ok(())
@@ -159,12 +165,14 @@ impl App {
     pub(super) fn snapshot_ui_session_state(&mut self) {
         self.persist_selected_file_position();
         let available_paths = self
+            .domain
             .aggregate
             .files
             .keys()
             .cloned()
             .collect::<BTreeSet<_>>();
         let diff_positions = self
+            .ui
             .diff_cache
             .positions
             .iter()
@@ -172,8 +180,9 @@ impl App {
             .map(|(path, position)| (path.clone(), session_diff_position_from_runtime(*position)))
             .collect::<BTreeMap<_, _>>();
 
-        self.review_state.ui_session = crate::model::UiSessionState {
+        self.domain.review_state.ui_session = crate::model::UiSessionState {
             selected_commit_ids: self
+                .domain
                 .commits
                 .iter()
                 .filter(|row| row.selected)
@@ -181,11 +190,12 @@ impl App {
                 .collect(),
             commit_cursor_id: self.selected_commit_id(),
             commit_status_filter: Some(commit_status_filter_to_session(
-                self.commit_ui.status_filter,
+                self.ui.commit_ui.status_filter,
             )),
-            focused_pane: Some(focus_pane_to_session(self.preferences.focused)),
-            theme_mode: Some(theme_mode_to_session(self.preferences.theme_mode)),
+            focused_pane: Some(focus_pane_to_session(self.ui.preferences.focused)),
+            theme_mode: Some(theme_mode_to_session(self.ui.preferences.theme_mode)),
             selected_file: self
+                .ui
                 .diff_cache
                 .selected_file
                 .clone()
@@ -196,12 +206,12 @@ impl App {
 
     /// Persists current UI session state before process exit.
     pub fn persist_session_state_before_exit(&mut self) -> anyhow::Result<()> {
-        if self.onboarding_active() || !self.store.root_dir().exists() {
+        if self.onboarding_active() || !self.deps.store.root_dir().exists() {
             return Ok(());
         }
         self.flush_pending_selection_rebuild();
         self.snapshot_ui_session_state();
-        self.store.save(&self.review_state)
+        self.deps.store.save(&self.domain.review_state)
     }
 
     pub(super) fn rebuild_selection_dependent_views(&mut self) -> anyhow::Result<()> {
@@ -209,21 +219,22 @@ impl App {
         let mut aggregate = if selected_ordered.is_empty() {
             AggregatedDiff::default()
         } else {
-            self.git.aggregate_for_commits(&selected_ordered)?
+            self.deps.git.aggregate_for_commits(&selected_ordered)?
         };
         if self.uncommitted_selected() {
-            merge_aggregate_diff(&mut aggregate, self.git.aggregate_uncommitted()?);
+            merge_aggregate_diff(&mut aggregate, self.deps.git.aggregate_uncommitted()?);
         }
-        let changed_paths = changed_paths_between_aggregates(&self.aggregate, &aggregate);
+        let changed_paths = changed_paths_between_aggregates(&self.domain.aggregate, &aggregate);
         let aggregate_changed = !changed_paths.is_empty();
 
         if aggregate_changed {
             self.capture_pending_diff_view_anchor();
         }
 
-        self.aggregate = aggregate;
-        self.deleted_file_content_visible.retain(|path| {
-            self.aggregate
+        self.domain.aggregate = aggregate;
+        self.domain.deleted_file_content_visible.retain(|path| {
+            self.domain
+                .aggregate
                 .file_changes
                 .get(path)
                 .is_some_and(|change| change.kind == FileChangeKind::Deleted)
@@ -231,13 +242,14 @@ impl App {
         self.prune_diff_positions_for_removed_files();
 
         if aggregate_changed {
-            self.diff_cache
+            self.ui
+                .diff_cache
                 .rendered_cache
                 .retain(|(path, _), _| !changed_paths.contains(path));
-            self.diff_cache.rendered_key = None;
-            self.diff_cache.file_ranges.clear();
-            self.diff_cache.file_range_by_path.clear();
-            self.diff_ui.pending_op = None;
+            self.ui.diff_cache.rendered_key = None;
+            self.ui.diff_cache.file_ranges.clear();
+            self.ui.diff_cache.file_range_by_path.clear();
+            self.ui.diff_ui.pending_op = None;
         }
 
         self.rebuild_file_tree();
@@ -249,71 +261,74 @@ impl App {
 
     pub(super) fn prune_diff_positions_for_removed_files(&mut self) {
         let existing_paths = self
+            .domain
             .aggregate
             .files
             .keys()
             .cloned()
             .collect::<BTreeSet<_>>();
-        prune_diff_positions_for_missing_paths(&mut self.diff_cache.positions, &existing_paths);
+        prune_diff_positions_for_missing_paths(&mut self.ui.diff_cache.positions, &existing_paths);
 
-        if let Some(path) = self.diff_cache.selected_file.as_ref()
+        if let Some(path) = self.ui.diff_cache.selected_file.as_ref()
             && !existing_paths.contains(path)
         {
-            self.diff_position = DiffPosition::default();
+            self.domain.diff_position = DiffPosition::default();
         }
     }
 
     pub(super) fn capture_pending_diff_view_anchor(&mut self) {
-        self.diff_cache.pending_view_anchor =
-            capture_pending_diff_view_anchor(&self.rendered_diff, self.diff_position);
+        self.ui.diff_cache.pending_view_anchor =
+            capture_pending_diff_view_anchor(&self.domain.rendered_diff, self.domain.diff_position);
     }
 
     pub(super) fn apply_pending_diff_view_anchor(&mut self) {
-        let Some(pending) = self.diff_cache.pending_view_anchor.take() else {
+        let Some(pending) = self.ui.diff_cache.pending_view_anchor.take() else {
             return;
         };
-        if self.rendered_diff.is_empty() {
-            self.diff_position = DiffPosition::default();
+        if self.domain.rendered_diff.is_empty() {
+            self.domain.diff_position = DiffPosition::default();
             return;
         }
 
-        let cursor_idx = find_index_for_line_locator(&self.rendered_diff, &pending.cursor_line);
-        let top_idx = find_index_for_line_locator(&self.rendered_diff, &pending.top_line);
+        let cursor_idx =
+            find_index_for_line_locator(&self.domain.rendered_diff, &pending.cursor_line);
+        let top_idx = find_index_for_line_locator(&self.domain.rendered_diff, &pending.top_line);
 
         match (cursor_idx, top_idx) {
             (Some(cursor), Some(top)) => {
-                self.diff_position.cursor = cursor;
-                self.diff_position.scroll = top;
+                self.domain.diff_position.cursor = cursor;
+                self.domain.diff_position.scroll = top;
             }
             (Some(cursor), None) => {
-                self.diff_position.cursor = cursor;
-                self.diff_position.scroll = cursor.saturating_sub(pending.cursor_to_top_offset);
+                self.domain.diff_position.cursor = cursor;
+                self.domain.diff_position.scroll =
+                    cursor.saturating_sub(pending.cursor_to_top_offset);
             }
             (None, Some(top)) => {
-                self.diff_position.scroll = top;
-                self.diff_position.cursor = top.saturating_add(pending.cursor_to_top_offset);
+                self.domain.diff_position.scroll = top;
+                self.domain.diff_position.cursor = top.saturating_add(pending.cursor_to_top_offset);
             }
             (None, None) => {}
         }
     }
 
     pub(super) fn ensure_rendered_diff(&mut self) {
-        if self.file_rows.is_empty() {
-            self.rendered_diff = Arc::new(Vec::new());
-            self.diff_cache.rendered_key = None;
-            self.diff_cache.file_ranges.clear();
-            self.diff_cache.file_range_by_path.clear();
-            self.diff_position = DiffPosition::default();
+        if self.domain.file_rows.is_empty() {
+            self.domain.rendered_diff = Arc::new(Vec::new());
+            self.ui.diff_cache.rendered_key = None;
+            self.ui.diff_cache.file_ranges.clear();
+            self.ui.diff_cache.file_range_by_path.clear();
+            self.domain.diff_position = DiffPosition::default();
             self.sync_diff_block_cursor_to_cursor_line();
             return;
         }
 
         let ordered_paths = self.file_tree_paths_in_order();
         let key = RenderedDiffKey {
-            theme_mode: self.preferences.theme_mode,
+            theme_mode: self.ui.preferences.theme_mode,
             visible_paths: ordered_paths.clone(),
         };
-        if self.diff_cache.rendered_key.as_ref() == Some(&key) {
+        if self.ui.diff_cache.rendered_key.as_ref() == Some(&key) {
             return;
         }
 
@@ -321,16 +336,16 @@ impl App {
         self.persist_selected_file_position();
 
         if ordered_paths.is_empty() {
-            self.rendered_diff = Arc::new(Vec::new());
-            self.diff_cache.file_ranges.clear();
-            self.diff_cache.file_range_by_path.clear();
-            self.diff_cache.rendered_key = Some(key);
-            self.diff_position = DiffPosition::default();
+            self.domain.rendered_diff = Arc::new(Vec::new());
+            self.ui.diff_cache.file_ranges.clear();
+            self.ui.diff_cache.file_range_by_path.clear();
+            self.ui.diff_cache.rendered_key = Some(key);
+            self.domain.diff_position = DiffPosition::default();
             self.sync_diff_block_cursor_to_cursor_line();
             return;
         }
 
-        let theme = UiTheme::from_mode(self.preferences.theme_mode);
+        let theme = UiTheme::from_mode(self.ui.preferences.theme_mode);
         let mut rendered = Vec::new();
         let mut ranges = Vec::new();
         let mut range_by_path = HashMap::new();
@@ -342,28 +357,30 @@ impl App {
                 path,
                 idx + 1,
                 total_files,
-                self.aggregate.file_changes.get(path),
+                self.domain.aggregate.file_changes.get(path),
                 &theme,
-                self.preferences.nerd_fonts,
-                &self.preferences.nerd_font_theme,
+                self.ui.preferences.nerd_fonts,
+                &self.ui.preferences.nerd_font_theme,
             ));
 
-            let file_key = (path.clone(), self.preferences.theme_mode);
-            let file_rendered = if let Some(cached) = self.diff_cache.rendered_cache.get(&file_key)
-            {
-                cached.clone()
-            } else {
-                let built = self
-                    .aggregate
-                    .files
-                    .get(path)
-                    .map(|patch| Arc::new(self.build_diff_lines(patch)))
-                    .unwrap_or_else(|| Arc::new(Vec::new()));
-                self.diff_cache
-                    .rendered_cache
-                    .insert(file_key.clone(), built.clone());
-                built
-            };
+            let file_key = (path.clone(), self.ui.preferences.theme_mode);
+            let file_rendered =
+                if let Some(cached) = self.ui.diff_cache.rendered_cache.get(&file_key) {
+                    cached.clone()
+                } else {
+                    let built = self
+                        .domain
+                        .aggregate
+                        .files
+                        .get(path)
+                        .map(|patch| Arc::new(self.build_diff_lines(patch)))
+                        .unwrap_or_else(|| Arc::new(Vec::new()));
+                    self.ui
+                        .diff_cache
+                        .rendered_cache
+                        .insert(file_key.clone(), built.clone());
+                    built
+                };
 
             rendered.extend(file_rendered.iter().cloned());
 
@@ -380,37 +397,37 @@ impl App {
             range_by_path.insert(path.clone(), (range_start, range_end));
         }
 
-        self.rendered_diff = Arc::new(rendered);
-        self.diff_cache.file_ranges = ranges;
-        self.diff_cache.file_range_by_path = range_by_path;
-        self.diff_cache.rendered_key = Some(key);
-        if let Some(path) = self.diff_cache.selected_file.clone()
-            && self.diff_cache.file_range_by_path.contains_key(&path)
+        self.domain.rendered_diff = Arc::new(rendered);
+        self.ui.diff_cache.file_ranges = ranges;
+        self.ui.diff_cache.file_range_by_path = range_by_path;
+        self.ui.diff_cache.rendered_key = Some(key);
+        if let Some(path) = self.ui.diff_cache.selected_file.clone()
+            && self.ui.diff_cache.file_range_by_path.contains_key(&path)
         {
             self.restore_diff_position(&path);
         } else {
-            self.diff_position = DiffPosition::default();
+            self.domain.diff_position = DiffPosition::default();
         }
         self.apply_pending_diff_view_anchor();
         self.sync_diff_cursor_to_content_bounds();
     }
 
     pub(super) fn sync_diff_cursor_to_content_bounds(&mut self) {
-        if self.rendered_diff.is_empty() {
-            self.diff_position = DiffPosition::default();
+        if self.domain.rendered_diff.is_empty() {
+            self.domain.diff_position = DiffPosition::default();
             self.sync_diff_block_cursor_to_cursor_line();
             return;
         }
 
-        if self.diff_position.cursor >= self.rendered_diff.len() {
-            self.diff_position.cursor = self.rendered_diff.len() - 1;
+        if self.domain.diff_position.cursor >= self.domain.rendered_diff.len() {
+            self.domain.diff_position.cursor = self.domain.rendered_diff.len() - 1;
         }
-        if self.diff_position.scroll >= self.rendered_diff.len() {
-            self.diff_position.scroll = self.rendered_diff.len() - 1;
+        if self.domain.diff_position.scroll >= self.domain.rendered_diff.len() {
+            self.domain.diff_position.scroll = self.domain.rendered_diff.len() - 1;
         }
         self.sync_diff_visual_bounds();
 
-        if diff_viewport_layout_ready(&self.diff_ui.pane_rects) {
+        if diff_viewport_layout_ready(&self.ui.diff_ui.pane_rects) {
             self.ensure_cursor_visible();
         } else {
             self.sync_diff_block_cursor_to_cursor_line();
@@ -418,33 +435,38 @@ impl App {
     }
 
     pub(super) fn invalidate_diff_cache(&mut self) {
-        self.diff_cache.rendered_cache.clear();
-        self.diff_cache.rendered_key = None;
-        self.diff_cache.file_ranges.clear();
-        self.diff_cache.file_range_by_path.clear();
+        self.ui.diff_cache.rendered_cache.clear();
+        self.ui.diff_cache.rendered_key = None;
+        self.ui.diff_cache.file_ranges.clear();
+        self.ui.diff_cache.file_range_by_path.clear();
         self.ensure_rendered_diff();
     }
 
     pub(super) fn current_comment_id(&self) -> Option<u64> {
-        self.rendered_diff
-            .get(self.diff_position.cursor)
+        self.domain
+            .rendered_diff
+            .get(self.domain.diff_position.cursor)
             .and_then(|line| line.comment_id)
     }
 
     pub(super) fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
-        let theme = UiTheme::from_mode(self.preferences.theme_mode);
+        let theme = UiTheme::from_mode(self.ui.preferences.theme_mode);
         let now_ts = Utc::now().timestamp();
         let file_comments: Vec<&ReviewComment> = self
+            .deps
             .comments
             .comments()
             .iter()
             .filter(|comment| comment.target.end.file_path == patch.path)
             .collect();
         let deleted_file =
-            should_hide_deleted_file_content(self.aggregate.file_changes.get(&patch.path));
-        let deleted_content_expanded =
-            deleted_file && self.deleted_file_content_visible.contains(&patch.path);
+            should_hide_deleted_file_content(self.domain.aggregate.file_changes.get(&patch.path));
+        let deleted_content_expanded = deleted_file
+            && self
+                .domain
+                .deleted_file_content_visible
+                .contains(&patch.path);
         if deleted_file && !deleted_content_expanded {
             let mut last_commit_banner: Option<String> = None;
             let mut inserted_commit_comments = BTreeSet::new();
@@ -463,7 +485,7 @@ impl App {
                     if !rendered_toggle {
                         rendered.push(deleted_file_toggle_line(
                             false,
-                            self.preferences.nerd_fonts,
+                            self.ui.preferences.nerd_fonts,
                             &theme,
                         ));
                         rendered_toggle = true;
@@ -474,7 +496,7 @@ impl App {
             if !rendered_toggle {
                 rendered.push(deleted_file_toggle_line(
                     false,
-                    self.preferences.nerd_fonts,
+                    self.ui.preferences.nerd_fonts,
                     &theme,
                 ));
             }
@@ -507,7 +529,7 @@ impl App {
                 if deleted_content_expanded && !rendered_deleted_toggle {
                     rendered.push(deleted_file_toggle_line(
                         true,
-                        self.preferences.nerd_fonts,
+                        self.ui.preferences.nerd_fonts,
                         &theme,
                     ));
                     rendered_deleted_toggle = true;
@@ -596,7 +618,7 @@ impl App {
         if deleted_content_expanded && !rendered_deleted_toggle {
             rendered.push(deleted_file_toggle_line(
                 true,
-                self.preferences.nerd_fonts,
+                self.ui.preferences.nerd_fonts,
                 &theme,
             ));
         }
@@ -645,7 +667,7 @@ impl App {
     pub(super) fn rebuild_file_tree(&mut self) {
         let mut tree = FileTree::default();
         let mut draft_paths = BTreeSet::new();
-        for (path, patch) in &self.aggregate.files {
+        for (path, patch) in &self.domain.aggregate.files {
             if patch
                 .hunks
                 .iter()
@@ -662,15 +684,15 @@ impl App {
             tree.insert_with_change(
                 path,
                 modified_ts,
-                self.aggregate.file_changes.get(path).cloned(),
+                self.domain.aggregate.file_changes.get(path).cloned(),
             );
         }
 
-        self.file_rows = tree.flattened_rows(
-            self.preferences.nerd_fonts,
-            &self.preferences.nerd_font_theme,
+        self.domain.file_rows = tree.flattened_rows(
+            self.ui.preferences.nerd_fonts,
+            &self.ui.preferences.nerd_font_theme,
         );
-        for row in &mut self.file_rows {
+        for row in &mut self.domain.file_rows {
             if row.selectable
                 && row
                     .path
@@ -680,51 +702,54 @@ impl App {
                 row.modified_ts = None;
             }
         }
-        if self.file_rows.is_empty() {
-            self.file_ui.list_state.select(None);
-            self.diff_cache.selected_file = None;
+        if self.domain.file_rows.is_empty() {
+            self.ui.file_ui.list_state.select(None);
+            self.ui.diff_cache.selected_file = None;
         }
     }
 
     pub(super) fn ensure_selected_file_exists(&mut self) {
-        if self.file_rows.is_empty() {
-            self.diff_cache.selected_file = None;
-            self.file_ui.list_state.select(None);
+        if self.domain.file_rows.is_empty() {
+            self.ui.diff_cache.selected_file = None;
+            self.ui.file_ui.list_state.select(None);
             return;
         }
 
-        if let Some(path) = self.diff_cache.selected_file.clone()
+        if let Some(path) = self.ui.diff_cache.selected_file.clone()
             && let Some(idx) = self
+                .domain
                 .file_rows
                 .iter()
                 .position(|row| row.selectable && row.path.as_ref() == Some(&path))
         {
-            self.diff_cache.selected_file = self.file_rows[idx].path.clone();
+            self.ui.diff_cache.selected_file = self.domain.file_rows[idx].path.clone();
             return;
         }
 
-        if let Some(idx) = self.file_rows.iter().position(|row| row.selectable) {
-            self.diff_cache.selected_file = self.file_rows[idx].path.clone();
+        if let Some(idx) = self.domain.file_rows.iter().position(|row| row.selectable) {
+            self.ui.diff_cache.selected_file = self.domain.file_rows[idx].path.clone();
         }
     }
 
     pub(super) fn visible_commit_indices(&self) -> Vec<usize> {
-        self.commits
+        self.domain
+            .commits
             .iter()
             .enumerate()
-            .filter(|(_, row)| self.commit_ui.status_filter.matches_row(row))
-            .filter(|(_, row)| commit_row_matches_filter_query(row, &self.search.commit_query))
+            .filter(|(_, row)| self.ui.commit_ui.status_filter.matches_row(row))
+            .filter(|(_, row)| commit_row_matches_filter_query(row, &self.ui.search.commit_query))
             .map(|(idx, _)| idx)
             .collect()
     }
 
     pub(super) fn visible_file_indices(&self) -> Vec<usize> {
-        matching_file_indices_with_parent_dirs(&self.file_rows, &self.search.file_query)
+        matching_file_indices_with_parent_dirs(&self.domain.file_rows, &self.ui.search.file_query)
     }
 
     pub(super) fn selected_commit_full_index(&self) -> Option<usize> {
         let visible = self.visible_commit_indices();
-        self.commit_ui
+        self.ui
+            .commit_ui
             .list_state
             .selected()
             .and_then(|idx| visible.get(idx).copied())
@@ -732,7 +757,7 @@ impl App {
 
     pub(super) fn selected_commit_id(&self) -> Option<String> {
         self.selected_commit_full_index()
-            .and_then(|idx| self.commits.get(idx))
+            .and_then(|idx| self.domain.commits.get(idx))
             .map(|row| row.info.id.clone())
     }
 
@@ -743,46 +768,49 @@ impl App {
     ) {
         let visible = self.visible_commit_indices();
         if visible.is_empty() {
-            self.commit_ui.list_state.select(None);
-            self.commit_ui.visual_anchor = None;
+            self.ui.commit_ui.list_state.select(None);
+            self.ui.commit_ui.visual_anchor = None;
             return;
         }
 
         if let Some(commit_id) = preferred_commit_id
-            && let Some(full_idx) = index_of_commit(&self.commits, commit_id)
+            && let Some(full_idx) = index_of_commit(&self.domain.commits, commit_id)
             && let Some(visible_idx) = visible.iter().position(|entry| *entry == full_idx)
         {
-            self.commit_ui.list_state.select(Some(visible_idx));
+            self.ui.commit_ui.list_state.select(Some(visible_idx));
             return;
         }
 
         let selected_idx = fallback_visible_idx.unwrap_or(0).min(visible.len() - 1);
-        self.commit_ui.list_state.select(Some(selected_idx));
+        self.ui.commit_ui.list_state.select(Some(selected_idx));
 
         if self
+            .ui
             .commit_ui
             .visual_anchor
             .is_some_and(|anchor| !visible.contains(&anchor))
         {
-            self.commit_ui.visual_anchor = None;
+            self.ui.commit_ui.visual_anchor = None;
         }
         if self
+            .ui
             .commit_ui
             .selection_anchor
             .is_some_and(|anchor| !visible.contains(&anchor))
         {
-            self.commit_ui.selection_anchor = None;
+            self.ui.commit_ui.selection_anchor = None;
         }
     }
 
     pub(super) fn sync_file_cursor_for_filters(&mut self) {
         let visible = self.visible_file_indices();
         if visible.is_empty() {
-            self.file_ui.list_state.select(None);
+            self.ui.file_ui.list_state.select(None);
             return;
         }
         let visible_len = visible.len();
         if let Some(visible_idx) = self
+            .ui
             .file_ui
             .list_state
             .selected()
@@ -794,32 +822,33 @@ impl App {
             return;
         }
 
-        if let Some(path) = self.diff_cache.selected_file.clone()
+        if let Some(path) = self.ui.diff_cache.selected_file.clone()
             && let Some(full_idx) = self
+                .domain
                 .file_rows
                 .iter()
                 .position(|row| row.selectable && row.path.as_ref() == Some(&path))
             && let Some(visible_idx) = visible.iter().position(|entry| *entry == full_idx)
         {
-            self.file_ui.list_state.select(Some(visible_idx));
+            self.ui.file_ui.list_state.select(Some(visible_idx));
             return;
         }
 
         let Some((visible_idx, full_idx)) = visible
             .iter()
             .enumerate()
-            .find(|(_, idx)| self.file_rows[**idx].selectable)
+            .find(|(_, idx)| self.domain.file_rows[**idx].selectable)
             .map(|(visible_idx, idx)| (visible_idx, *idx))
         else {
-            self.file_ui.list_state.select(None);
+            self.ui.file_ui.list_state.select(None);
             return;
         };
 
-        self.file_ui.list_state.select(Some(visible_idx));
-        let next_path = self.file_rows[full_idx].path.clone();
-        if next_path != self.diff_cache.selected_file {
+        self.ui.file_ui.list_state.select(Some(visible_idx));
+        let next_path = self.domain.file_rows[full_idx].path.clone();
+        if next_path != self.ui.diff_cache.selected_file {
             self.persist_selected_file_position();
-            self.diff_cache.selected_file = next_path.clone();
+            self.ui.diff_cache.selected_file = next_path.clone();
             if let Some(path) = next_path {
                 self.restore_diff_position(&path);
                 self.sync_diff_cursor_to_content_bounds();
@@ -833,7 +862,12 @@ impl App {
         if let Err(err) = self.rebuild_selection_dependent_views() {
             self.runtime.status = format!("failed to rebuild diff: {err:#}");
         } else {
-            let selected = self.commits.iter().filter(|row| row.selected).count();
+            let selected = self
+                .domain
+                .commits
+                .iter()
+                .filter(|row| row.selected)
+                .count();
             self.runtime.status = format!("{} commit(s) selected", selected);
         }
     }
@@ -841,7 +875,12 @@ impl App {
     pub(super) fn on_selection_changed_debounced(&mut self) {
         self.runtime.selection_rebuild_due = Some(Instant::now() + SELECTION_REBUILD_DEBOUNCE);
         self.reset_diff_view_for_commit_selection_change();
-        let selected = self.commits.iter().filter(|row| row.selected).count();
+        let selected = self
+            .domain
+            .commits
+            .iter()
+            .filter(|row| row.selected)
+            .count();
         self.runtime.status = format!("{} commit(s) selected", selected);
     }
 
@@ -854,47 +893,52 @@ impl App {
             self.runtime.status = format!("failed to rebuild diff: {err:#}");
             return;
         }
-        let selected = self.commits.iter().filter(|row| row.selected).count();
+        let selected = self
+            .domain
+            .commits
+            .iter()
+            .filter(|row| row.selected)
+            .count();
         self.runtime.status = format!("{} commit(s) selected", selected);
     }
 
     pub(super) fn reset_diff_view_for_commit_selection_change(&mut self) {
-        self.diff_cache.pending_view_anchor = None;
-        self.diff_cache.positions.clear();
-        self.diff_position = DiffPosition::default();
-        self.diff_ui.visual_selection = None;
-        self.diff_ui.block_cursor_col = 0;
-        self.diff_ui.block_cursor_goal = 0;
-        self.diff_ui.mouse_anchor = None;
+        self.ui.diff_cache.pending_view_anchor = None;
+        self.ui.diff_cache.positions.clear();
+        self.domain.diff_position = DiffPosition::default();
+        self.ui.diff_ui.visual_selection = None;
+        self.ui.diff_ui.block_cursor_col = 0;
+        self.ui.diff_ui.block_cursor_goal = 0;
+        self.ui.diff_ui.mouse_anchor = None;
     }
 
     pub(super) fn selected_commit_ids_oldest_first(&self) -> Vec<String> {
-        selected_ids_oldest_first(&self.commits)
+        selected_ids_oldest_first(&self.domain.commits)
     }
 
     pub(super) fn file_tree_paths_in_order(&self) -> Vec<String> {
         self.visible_file_indices()
             .into_iter()
-            .filter_map(|idx| self.file_rows.get(idx))
+            .filter_map(|idx| self.domain.file_rows.get(idx))
             .filter(|row| row.selectable)
             .filter_map(|row| row.path.clone())
             .collect()
     }
 
     pub(super) fn file_range_for_path(&self, path: &str) -> Option<(usize, usize)> {
-        self.diff_cache.file_range_by_path.get(path).copied()
+        self.ui.diff_cache.file_range_by_path.get(path).copied()
     }
 
     pub(super) fn file_range_index_for_line(&self, line: usize) -> Option<usize> {
-        if self.diff_cache.file_ranges.is_empty() {
+        if self.ui.diff_cache.file_ranges.is_empty() {
             return None;
         }
 
         let mut left = 0usize;
-        let mut right = self.diff_cache.file_ranges.len();
+        let mut right = self.ui.diff_cache.file_ranges.len();
         while left < right {
             let mid = left + ((right - left) / 2);
-            let range = &self.diff_cache.file_ranges[mid];
+            let range = &self.ui.diff_cache.file_ranges[mid];
             if line < range.start {
                 right = mid;
             } else if line >= range.end {
@@ -908,26 +952,28 @@ impl App {
 
     pub(super) fn file_path_for_line(&self, line: usize) -> Option<&str> {
         self.file_range_index_for_line(line)
-            .and_then(|idx| self.diff_cache.file_ranges.get(idx))
+            .and_then(|idx| self.ui.diff_cache.file_ranges.get(idx))
             .map(|range| range.path.as_str())
     }
 
     pub(super) fn select_file_row_for_path(&mut self, path: &str) {
         if let Some(idx) = self
+            .domain
             .file_rows
             .iter()
             .position(|row| row.selectable && row.path.as_deref() == Some(path))
         {
             let visible = self.visible_file_indices();
             let visible_idx = visible.iter().position(|entry| *entry == idx);
-            self.file_ui.list_state.select(visible_idx);
+            self.ui.file_ui.list_state.select(visible_idx);
         }
     }
 
     pub(super) fn selected_file_progress(&self) -> Option<(usize, usize)> {
-        let path = self.diff_cache.selected_file.as_deref()?;
-        let total = self.diff_cache.file_ranges.len();
+        let path = self.ui.diff_cache.selected_file.as_deref()?;
+        let total = self.ui.diff_cache.file_ranges.len();
         let index = self
+            .ui
             .diff_cache
             .file_ranges
             .iter()

@@ -552,12 +552,16 @@ struct RuntimeState {
     should_quit: bool,
 }
 
-/// High-level app state and interaction flow for the hunkr UI.
-pub struct App {
+/// External adapters/resources used by app workflows.
+struct AppDependencies {
     git: GitService,
     store: StateStore,
     instance_lock: Option<InstanceLock>,
     comments: CommentStore,
+}
+
+/// Business/domain projections currently shown in the UI.
+struct AppDomainState {
     review_state: ReviewState,
     commits: Vec<CommitRow>,
     file_rows: Vec<TreeRow>,
@@ -565,6 +569,10 @@ pub struct App {
     deleted_file_content_visible: BTreeSet<String>,
     diff_position: DiffPosition,
     rendered_diff: Arc<Vec<RenderedDiffLine>>,
+}
+
+/// UI interaction and view/cache state.
+struct AppUiState {
     commit_ui: CommitUiState,
     file_ui: FileUiState,
     preferences: UiPreferences,
@@ -574,6 +582,13 @@ pub struct App {
     shell_command: ShellCommandState,
     worktree_switch: WorktreeSwitchState,
     search: SearchState,
+}
+
+/// High-level app state and interaction flow for the hunkr UI.
+pub struct App {
+    deps: AppDependencies,
+    domain: AppDomainState,
+    ui: AppUiState,
     runtime: RuntimeState,
 }
 

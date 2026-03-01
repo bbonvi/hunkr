@@ -33,7 +33,7 @@ impl App {
         } else {
             app.reload_commits(true)?;
             app.restore_persisted_ui_session()?;
-            let selected = app.commits.iter().filter(|row| row.selected).count();
+            let selected = app.domain.commits.iter().filter(|row| row.selected).count();
             app.runtime.status = format!("{selected} commit(s) selected");
         }
         Ok(app)
@@ -50,105 +50,111 @@ impl App {
             .map(ShellCommandHistoryEntry::new)
             .collect::<VecDeque<_>>();
         Self {
-            git: deps.git,
-            store: deps.store,
-            instance_lock: deps.instance_lock,
-            comments: deps.comments,
-            review_state: deps.review_state,
-            commits: Vec::new(),
-            file_rows: Vec::new(),
-            aggregate: AggregatedDiff::default(),
-            deleted_file_content_visible: BTreeSet::new(),
-            diff_position: DiffPosition::default(),
-            rendered_diff: Arc::new(Vec::new()),
-            commit_ui: CommitUiState {
-                list_state: ListState::default(),
-                visual_anchor: None,
-                selection_anchor: None,
-                mouse_anchor: None,
-                mouse_dragging: false,
-                mouse_drag_mode: None,
-                mouse_drag_baseline: None,
-                status_filter: CommitStatusFilter::All,
+            deps: AppDependencies {
+                git: deps.git,
+                store: deps.store,
+                instance_lock: deps.instance_lock,
+                comments: deps.comments,
             },
-            file_ui: FileUiState {
-                list_state: ListState::default(),
+            domain: AppDomainState {
+                review_state: deps.review_state,
+                commits: Vec::new(),
+                file_rows: Vec::new(),
+                aggregate: AggregatedDiff::default(),
+                deleted_file_content_visible: BTreeSet::new(),
+                diff_position: DiffPosition::default(),
+                rendered_diff: Arc::new(Vec::new()),
             },
-            preferences: UiPreferences {
-                focused: FocusPane::Commits,
-                input_mode: InputMode::Normal,
-                theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
-                diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
-                list_wheel_coalesce: Duration::from_millis(config.list_wheel_coalesce_ms),
-                nerd_fonts: config.nerd_fonts,
-                nerd_font_theme: NerdFontTheme::default(),
-            },
-            diff_ui: DiffUiState {
-                visual_selection: None,
-                block_cursor_col: 0,
-                block_cursor_goal: 0,
-                mouse_anchor: None,
-                last_list_wheel_event: None,
-                pane_rects: PaneRects::default(),
-                pending_op: None,
-            },
-            diff_cache: DiffCacheState {
-                selected_file: None,
-                positions: HashMap::new(),
-                file_ranges: Vec::new(),
-                file_range_by_path: HashMap::new(),
-                pending_view_anchor: None,
-                rendered_cache: HashMap::new(),
-                rendered_key: None,
-                highlighter: DiffSyntaxHighlighter::new(),
-            },
-            comment_editor: CommentEditorState {
-                buffer: String::new(),
-                cursor: 0,
-                selection: None,
-                mouse_anchor: None,
-                rect: None,
-                line_ranges: Vec::new(),
-                view_start: 0,
-                text_offset: 0,
-                create_target_cache: None,
-            },
-            shell_command: ShellCommandState {
-                buffer: String::new(),
-                cursor: 0,
-                history: shell_history,
-                history_nav: None,
-                history_draft: String::new(),
-                reverse_search: None,
-                active_command: None,
-                output_lines: Vec::new(),
-                output_tail: String::new(),
-                output_cursor: 0,
-                output_visual_selection: None,
-                output_mouse_anchor: None,
-                output_flash_clear_due: None,
-                output_scroll: 0,
-                output_viewport: 0,
-                output_follow: true,
-                output_rect: None,
-                running: None,
-                finished: None,
-            },
-            worktree_switch: WorktreeSwitchState {
-                entries: Vec::new(),
-                list_state: ListState::default(),
-                query: String::new(),
-                search_active: false,
-                viewport_rows: 0,
-            },
-            search: SearchState {
-                diff_buffer: String::new(),
-                diff_cursor: 0,
-                diff_query: None,
-                commit_query: String::new(),
-                commit_cursor: 0,
-                file_query: String::new(),
-                file_cursor: 0,
+            ui: AppUiState {
+                commit_ui: CommitUiState {
+                    list_state: ListState::default(),
+                    visual_anchor: None,
+                    selection_anchor: None,
+                    mouse_anchor: None,
+                    mouse_dragging: false,
+                    mouse_drag_mode: None,
+                    mouse_drag_baseline: None,
+                    status_filter: CommitStatusFilter::All,
+                },
+                file_ui: FileUiState {
+                    list_state: ListState::default(),
+                },
+                preferences: UiPreferences {
+                    focused: FocusPane::Commits,
+                    input_mode: InputMode::Normal,
+                    theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
+                    diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
+                    list_wheel_coalesce: Duration::from_millis(config.list_wheel_coalesce_ms),
+                    nerd_fonts: config.nerd_fonts,
+                    nerd_font_theme: NerdFontTheme::default(),
+                },
+                diff_ui: DiffUiState {
+                    visual_selection: None,
+                    block_cursor_col: 0,
+                    block_cursor_goal: 0,
+                    mouse_anchor: None,
+                    last_list_wheel_event: None,
+                    pane_rects: PaneRects::default(),
+                    pending_op: None,
+                },
+                diff_cache: DiffCacheState {
+                    selected_file: None,
+                    positions: HashMap::new(),
+                    file_ranges: Vec::new(),
+                    file_range_by_path: HashMap::new(),
+                    pending_view_anchor: None,
+                    rendered_cache: HashMap::new(),
+                    rendered_key: None,
+                    highlighter: DiffSyntaxHighlighter::new(),
+                },
+                comment_editor: CommentEditorState {
+                    buffer: String::new(),
+                    cursor: 0,
+                    selection: None,
+                    mouse_anchor: None,
+                    rect: None,
+                    line_ranges: Vec::new(),
+                    view_start: 0,
+                    text_offset: 0,
+                    create_target_cache: None,
+                },
+                shell_command: ShellCommandState {
+                    buffer: String::new(),
+                    cursor: 0,
+                    history: shell_history,
+                    history_nav: None,
+                    history_draft: String::new(),
+                    reverse_search: None,
+                    active_command: None,
+                    output_lines: Vec::new(),
+                    output_tail: String::new(),
+                    output_cursor: 0,
+                    output_visual_selection: None,
+                    output_mouse_anchor: None,
+                    output_flash_clear_due: None,
+                    output_scroll: 0,
+                    output_viewport: 0,
+                    output_follow: true,
+                    output_rect: None,
+                    running: None,
+                    finished: None,
+                },
+                worktree_switch: WorktreeSwitchState {
+                    entries: Vec::new(),
+                    list_state: ListState::default(),
+                    query: String::new(),
+                    search_active: false,
+                    viewport_rows: 0,
+                },
+                search: SearchState {
+                    diff_buffer: String::new(),
+                    diff_cursor: 0,
+                    diff_query: None,
+                    commit_query: String::new(),
+                    commit_cursor: 0,
+                    file_query: String::new(),
+                    file_cursor: 0,
+                },
             },
             runtime: RuntimeState {
                 status: String::new(),
@@ -170,17 +176,17 @@ impl App {
     }
 
     fn complete_first_open_setup(&mut self) -> anyhow::Result<()> {
-        let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
+        let history = self.deps.git.load_first_parent_history(HISTORY_LIMIT)?;
         let reviewed_ids = first_open_reviewed_commit_ids(&history);
         if !reviewed_ids.is_empty() {
-            self.store.set_many_status(
-                &mut self.review_state,
+            self.deps.store.set_many_status(
+                &mut self.domain.review_state,
                 reviewed_ids,
                 ReviewStatus::Reviewed,
-                self.git.branch_name(),
+                self.deps.git.branch_name(),
             );
         }
-        self.store.save(&self.review_state)?;
+        self.deps.store.save(&self.domain.review_state)?;
         Ok(())
     }
 
@@ -198,7 +204,12 @@ impl App {
         self.runtime.last_refresh = Instant::now();
         self.runtime.last_relative_time_redraw = Instant::now();
 
-        let selected = self.commits.iter().filter(|row| row.selected).count();
+        let selected = self
+            .domain
+            .commits
+            .iter()
+            .filter(|row| row.selected)
+            .count();
         let ready = format!("{selected} commit(s) selected");
         self.runtime.status = if let Some(note) = onboarding_note {
             format!("{note} {ready}")
@@ -235,16 +246,16 @@ impl App {
     fn handle_project_data_dir_consent(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                if let Err(err) = std::fs::create_dir_all(self.store.root_dir()) {
+                if let Err(err) = std::fs::create_dir_all(self.deps.store.root_dir()) {
                     self.runtime.status = format!(
                         "failed to create {}: {err}",
-                        self.store.root_dir().display()
+                        self.deps.store.root_dir().display()
                     );
                     return;
                 }
-                if self.instance_lock.is_none() {
-                    match self.store.acquire_instance_lock() {
-                        Ok(lock) => self.instance_lock = Some(lock),
+                if self.deps.instance_lock.is_none() {
+                    match self.deps.store.acquire_instance_lock() {
+                        Ok(lock) => self.deps.instance_lock = Some(lock),
                         Err(err) => {
                             self.runtime.status = format!("setup failed: {err:#}");
                             self.runtime.should_quit = true;
@@ -266,7 +277,7 @@ impl App {
     fn handle_gitignore_choice(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                let gitignore_path = self.git.root().join(".gitignore");
+                let gitignore_path = self.deps.git.root().join(".gitignore");
                 let note = match append_gitignore_entry(&gitignore_path, ".hunkr") {
                     Ok(GitignoreUpdate::Added) => "Added .hunkr to .gitignore.".to_owned(),
                     Ok(GitignoreUpdate::AlreadyPresent) => {
@@ -324,7 +335,7 @@ impl App {
             self.runtime.last_relative_time_redraw.elapsed(),
             selection_rebuild_in,
         );
-        let timeout = if self.shell_command.running.is_some() {
+        let timeout = if self.ui.shell_command.running.is_some() {
             timeout.min(SHELL_STREAM_POLL_EVERY)
         } else {
             timeout
@@ -337,19 +348,19 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
-        let theme = UiTheme::from_mode(self.preferences.theme_mode);
+        let theme = UiTheme::from_mode(self.ui.preferences.theme_mode);
         if self.onboarding_active() {
             self.render_onboarding(frame, &theme);
             return;
         }
 
         self.ensure_rendered_diff();
-        self.comment_editor.rect = None;
-        self.comment_editor.line_ranges.clear();
-        self.comment_editor.view_start = 0;
-        self.comment_editor.text_offset = 0;
-        self.shell_command.output_rect = None;
-        self.shell_command.output_viewport = 0;
+        self.ui.comment_editor.rect = None;
+        self.ui.comment_editor.line_ranges.clear();
+        self.ui.comment_editor.view_start = 0;
+        self.ui.comment_editor.text_offset = 0;
+        self.ui.shell_command.output_rect = None;
+        self.ui.shell_command.output_viewport = 0;
 
         let root_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
@@ -376,7 +387,7 @@ impl App {
             ])
             .split(main_chunks[0]);
 
-        self.diff_ui.pane_rects = PaneRects {
+        self.ui.diff_ui.pane_rects = PaneRects {
             commits: left_chunks[0],
             files: left_chunks[1],
             diff: main_chunks[1],
@@ -384,21 +395,21 @@ impl App {
         self.sync_diff_cursor_to_content_bounds();
 
         self.render_header(frame, root_chunks[0], &theme);
-        self.render_commits(frame, self.diff_ui.pane_rects.commits, &theme);
-        self.render_files(frame, self.diff_ui.pane_rects.files, &theme);
-        self.render_diff(frame, self.diff_ui.pane_rects.diff, &theme);
+        self.render_commits(frame, self.ui.diff_ui.pane_rects.commits, &theme);
+        self.render_files(frame, self.ui.diff_ui.pane_rects.files, &theme);
+        self.render_diff(frame, self.ui.diff_ui.pane_rects.diff, &theme);
         self.render_footer(frame, root_chunks[2], &theme);
         if self.runtime.show_help {
             self.render_help_overlay(frame, &theme);
         }
         if matches!(
-            self.preferences.input_mode,
+            self.ui.preferences.input_mode,
             InputMode::CommentCreate | InputMode::CommentEdit(_)
         ) {
             self.render_comment_modal(frame, &theme);
-        } else if matches!(self.preferences.input_mode, InputMode::ShellCommand) {
+        } else if matches!(self.ui.preferences.input_mode, InputMode::ShellCommand) {
             self.render_shell_command_modal(frame, &theme);
-        } else if matches!(self.preferences.input_mode, InputMode::WorktreeSwitch) {
+        } else if matches!(self.ui.preferences.input_mode, InputMode::WorktreeSwitch) {
             self.render_worktree_switcher_modal(frame, &theme);
         }
     }
@@ -485,15 +496,15 @@ impl App {
             return;
         }
 
-        if !matches!(self.preferences.input_mode, InputMode::Normal) {
+        if !matches!(self.ui.preferences.input_mode, InputMode::Normal) {
             self.handle_non_normal_input(key);
             return;
         }
 
         if theme_toggle_conflicts_with_diff_pending_op(
             key,
-            self.preferences.focused,
-            self.diff_ui.pending_op,
+            self.ui.preferences.focused,
+            self.ui.diff_ui.pending_op,
         ) {
             self.dispatch_focus_key(key);
             return;
@@ -510,10 +521,10 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.runtime.should_quit = true,
             KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
-                self.set_focus(focus_with_l(self.preferences.focused))
+                self.set_focus(focus_with_l(self.ui.preferences.focused))
             }
             KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
-                self.set_focus(focus_with_h(self.preferences.focused))
+                self.set_focus(focus_with_h(self.ui.preferences.focused))
             }
             KeyCode::Char('1') => self.set_focus(FocusPane::Commits),
             KeyCode::Char('2') => self.set_focus(FocusPane::Files),
@@ -533,7 +544,7 @@ impl App {
                 self.open_shell_command_modal();
             }
             KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
-                if self.preferences.focused == FocusPane::Diff {
+                if self.ui.preferences.focused == FocusPane::Diff {
                     self.dispatch_focus_key(key);
                 } else {
                     self.open_worktree_switcher();
@@ -567,9 +578,12 @@ impl App {
     }
 
     pub(super) fn toggle_theme(&mut self) {
-        self.preferences.theme_mode = self.preferences.theme_mode.toggle();
-        self.diff_cache.rendered_key = None;
-        self.runtime.status = format!("Theme switched to {}", self.preferences.theme_mode.label());
+        self.ui.preferences.theme_mode = self.ui.preferences.theme_mode.toggle();
+        self.ui.diff_cache.rendered_key = None;
+        self.runtime.status = format!(
+            "Theme switched to {}",
+            self.ui.preferences.theme_mode.label()
+        );
     }
 }
 

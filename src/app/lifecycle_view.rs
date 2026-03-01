@@ -11,18 +11,18 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let nerd_fonts = self.preferences.nerd_fonts;
+        let nerd_fonts = self.ui.preferences.nerd_fonts;
         let branch_prefix = branch_label_prefix(nerd_fonts);
         let wt_prefix = worktree_label_prefix(nerd_fonts);
         let branch_label = if nerd_fonts {
-            format!("{branch_prefix} {} ", self.git.branch_name())
+            format!("{branch_prefix} {} ", self.deps.git.branch_name())
         } else {
-            format!("{branch_prefix}{} ", self.git.branch_name())
+            format!("{branch_prefix}{} ", self.deps.git.branch_name())
         };
         let wt_label = if nerd_fonts {
-            format!("{wt_prefix} {} ", short_path_label(self.git.root()))
+            format!("{wt_prefix} {} ", short_path_label(self.deps.git.root()))
         } else {
-            format!("{wt_prefix}{} ", short_path_label(self.git.root()))
+            format!("{wt_prefix}{} ", short_path_label(self.deps.git.root()))
         };
         let headline = Line::from(vec![
             Span::styled(
@@ -51,10 +51,10 @@ impl App {
         theme: &UiTheme,
     ) {
         let files_search_mode = matches!(
-            self.preferences.input_mode,
+            self.ui.preferences.input_mode,
             InputMode::ListSearch(FocusPane::Files)
         );
-        let file_query = self.search.file_query.trim();
+        let file_query = self.ui.search.file_query.trim();
         let files_search_display = if !file_query.is_empty() {
             format!("/{file_query}")
         } else if files_search_mode {
@@ -65,21 +65,25 @@ impl App {
         let visible_indices = self.visible_file_indices();
         let visible_rows: Vec<TreeRow> = visible_indices
             .iter()
-            .filter_map(|idx| self.file_rows.get(*idx).cloned())
+            .filter_map(|idx| self.domain.file_rows.get(*idx).cloned())
             .collect();
-        ListPaneRenderer::new(theme, self.preferences.focused, self.preferences.nerd_fonts)
-            .render_files(
-                frame,
-                rect,
-                FilePaneModel {
-                    file_rows: &visible_rows,
-                    changed_files: self.aggregate.files.len(),
-                    shown_files: visible_rows.iter().filter(|row| row.selectable).count(),
-                    search_display: &files_search_display,
-                    search_enabled: files_search_mode || !file_query.is_empty(),
-                    file_list_state: &mut self.file_ui.list_state,
-                },
-            );
+        ListPaneRenderer::new(
+            theme,
+            self.ui.preferences.focused,
+            self.ui.preferences.nerd_fonts,
+        )
+        .render_files(
+            frame,
+            rect,
+            FilePaneModel {
+                file_rows: &visible_rows,
+                changed_files: self.domain.aggregate.files.len(),
+                shown_files: visible_rows.iter().filter(|row| row.selectable).count(),
+                search_display: &files_search_display,
+                search_enabled: files_search_mode || !file_query.is_empty(),
+                file_list_state: &mut self.ui.file_ui.list_state,
+            },
+        );
     }
 
     pub(super) fn render_commits(
@@ -89,10 +93,10 @@ impl App {
         theme: &UiTheme,
     ) {
         let commits_search_mode = matches!(
-            self.preferences.input_mode,
+            self.ui.preferences.input_mode,
             InputMode::ListSearch(FocusPane::Commits)
         );
-        let commit_query = self.search.commit_query.trim();
+        let commit_query = self.ui.search.commit_query.trim();
         let commits_search_display = if !commit_query.is_empty() {
             format!("/{commit_query}")
         } else if commits_search_mode {
@@ -103,32 +107,42 @@ impl App {
         let visible_indices = self.visible_commit_indices();
         let visible_rows: Vec<CommitRow> = visible_indices
             .iter()
-            .filter_map(|idx| self.commits.get(*idx).cloned())
+            .filter_map(|idx| self.domain.commits.get(*idx).cloned())
             .collect();
         let commented_commit_ids = self
+            .deps
             .comments
             .comments()
             .iter()
             .flat_map(|comment| comment.target.commits.iter().cloned())
             .collect::<BTreeSet<_>>();
-        let selected_total = self.commits.iter().filter(|row| row.selected).count();
-        ListPaneRenderer::new(theme, self.preferences.focused, self.preferences.nerd_fonts)
-            .render_commits(
-                frame,
-                rect,
-                CommitPaneModel {
-                    commits: &visible_rows,
-                    commented_commit_ids: &commented_commit_ids,
-                    status_counts: self.status_counts(),
-                    selected_total,
-                    shown_commits: visible_rows.len(),
-                    total_commits: self.commits.len(),
-                    status_filter: self.commit_ui.status_filter,
-                    search_display: &commits_search_display,
-                    search_enabled: commits_search_mode || !commit_query.is_empty(),
-                    commit_list_state: &mut self.commit_ui.list_state,
-                },
-            );
+        let selected_total = self
+            .domain
+            .commits
+            .iter()
+            .filter(|row| row.selected)
+            .count();
+        ListPaneRenderer::new(
+            theme,
+            self.ui.preferences.focused,
+            self.ui.preferences.nerd_fonts,
+        )
+        .render_commits(
+            frame,
+            rect,
+            CommitPaneModel {
+                commits: &visible_rows,
+                commented_commit_ids: &commented_commit_ids,
+                status_counts: self.status_counts(),
+                selected_total,
+                shown_commits: visible_rows.len(),
+                total_commits: self.domain.commits.len(),
+                status_filter: self.ui.commit_ui.status_filter,
+                search_display: &commits_search_display,
+                search_enabled: commits_search_mode || !commit_query.is_empty(),
+                commit_list_state: &mut self.ui.commit_ui.list_state,
+            },
+        );
     }
 
     pub(super) fn render_diff(
@@ -142,12 +156,13 @@ impl App {
             .map(|(start, end)| end.saturating_sub(start) + 1)
             .unwrap_or(0);
         let visual_range = self
+            .ui
             .diff_ui
             .visual_selection
             .and_then(|_| self.diff_selected_range());
         let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
         let sticky_banner_indexes =
-            self.sticky_banner_indexes_for_scroll(self.diff_position.scroll, viewport_rows);
+            self.sticky_banner_indexes_for_scroll(self.domain.diff_position.scroll, viewport_rows);
         let sticky_rows = sticky_banner_indexes
             .len()
             .min(viewport_rows.saturating_sub(1));
@@ -157,8 +172,8 @@ impl App {
             visible_indexes.insert(*idx);
         }
         for row in 0..body_rows {
-            let idx = self.diff_position.scroll.saturating_add(row);
-            if idx >= self.rendered_diff.len() {
+            let idx = self.domain.diff_position.scroll.saturating_add(row);
+            if idx >= self.domain.rendered_diff.len() {
                 break;
             }
             visible_indexes.insert(idx);
@@ -170,34 +185,35 @@ impl App {
             }
         }
         let empty_state_message = diff_empty_state_message(
-            !self.rendered_diff.is_empty(),
-            self.aggregate.files.len(),
-            self.diff_cache.file_ranges.len(),
-            &self.search.file_query,
+            !self.domain.rendered_diff.is_empty(),
+            self.domain.aggregate.files.len(),
+            self.ui.diff_cache.file_ranges.len(),
+            &self.ui.search.file_query,
         );
         let selected_file = self
+            .ui
             .diff_cache
             .selected_file
             .as_deref()
-            .filter(|path| self.diff_cache.file_range_by_path.contains_key(*path));
+            .filter(|path| self.ui.diff_cache.file_range_by_path.contains_key(*path));
         let title = DiffPaneTitle {
             selected_file,
             selected_file_progress: self.selected_file_progress(),
-            nerd_fonts: self.preferences.nerd_fonts,
-            nerd_font_theme: &self.preferences.nerd_font_theme,
+            nerd_fonts: self.ui.preferences.nerd_fonts,
+            nerd_font_theme: &self.ui.preferences.nerd_font_theme,
             selected_lines,
         };
         let body = DiffPaneBody {
-            rendered_diff: &self.rendered_diff,
-            diff_position: self.diff_position,
-            block_cursor_col: self.diff_ui.block_cursor_col,
-            search_query: self.search.diff_query.as_deref(),
+            rendered_diff: &self.domain.rendered_diff,
+            diff_position: self.domain.diff_position,
+            block_cursor_col: self.ui.diff_ui.block_cursor_col,
+            search_query: self.ui.search.diff_query.as_deref(),
             visual_range,
             sticky_banner_indexes: &sticky_banner_indexes,
             empty_state_message: empty_state_message.as_deref(),
             line_overrides: &line_overrides,
         };
-        DiffPaneRenderer::new(theme, self.preferences.focused).render(frame, rect, title, body);
+        DiffPaneRenderer::new(theme, self.ui.preferences.focused).render(frame, rect, title, body);
     }
 
     fn highlight_visible_diff_line(
@@ -205,7 +221,7 @@ impl App {
         idx: usize,
         theme: &UiTheme,
     ) -> Option<Line<'static>> {
-        let rendered = self.rendered_diff.get(idx)?;
+        let rendered = self.domain.rendered_diff.get(idx)?;
         let anchor = rendered.anchor.as_ref()?;
         if is_commit_anchor(anchor) {
             return None;
@@ -226,8 +242,8 @@ impl App {
             rendered.line.spans[1].clone(),
             rendered.line.spans[2].clone(),
         ];
-        let mut highlighted = self.diff_cache.highlighter.highlight_single_line(
-            self.preferences.theme_mode,
+        let mut highlighted = self.ui.diff_cache.highlighter.highlight_single_line(
+            self.ui.preferences.theme_mode,
             &anchor.file_path,
             code_text,
         );
@@ -255,15 +271,15 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let commit_visual_active = self.commit_ui.visual_anchor.is_some();
-        let diff_visual_active = self.diff_ui.visual_selection.is_some();
+        let commit_visual_active = self.ui.commit_ui.visual_anchor.is_some();
+        let diff_visual_active = self.ui.diff_ui.visual_selection.is_some();
         let mode = footer_mode_label(
-            self.preferences.input_mode,
+            self.ui.preferences.input_mode,
             commit_visual_active,
             diff_visual_active,
         );
 
-        let pane_line = match self.preferences.input_mode {
+        let pane_line = match self.ui.preferences.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" save ", Style::default().fg(theme.muted)),
@@ -275,7 +291,7 @@ impl App {
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
             ]),
             InputMode::ShellCommand => {
-                if self.shell_command.running.is_some() {
+                if self.ui.shell_command.running.is_some() {
                     Line::from(vec![
                         key_chip("j/k", theme),
                         Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -290,7 +306,7 @@ impl App {
                         key_chip("Backspace", theme),
                         Span::styled(" reset", Style::default().fg(theme.muted)),
                     ])
-                } else if self.shell_command.finished.is_some() {
+                } else if self.ui.shell_command.finished.is_some() {
                     Line::from(vec![
                         key_chip("j/k", theme),
                         Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -319,7 +335,7 @@ impl App {
                 }
             }
             InputMode::WorktreeSwitch => {
-                if self.worktree_switch.search_active {
+                if self.ui.worktree_switch.search_active {
                     Line::from(vec![
                         key_chip("Enter", theme),
                         Span::styled(" defocus ", Style::default().fg(theme.muted)),
@@ -361,7 +377,7 @@ impl App {
                 key_chip("Backspace", theme),
                 Span::styled(" edit", Style::default().fg(theme.muted)),
             ]),
-            InputMode::Normal => match self.preferences.focused {
+            InputMode::Normal => match self.ui.preferences.focused {
                 FocusPane::Files => Line::from(vec![
                     key_chip("j/k", theme),
                     Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -433,7 +449,7 @@ impl App {
         )];
         let show_primary_status = !self.runtime.status.is_empty()
             && !matches!(
-                self.preferences.input_mode,
+                self.ui.preferences.input_mode,
                 InputMode::DiffSearch | InputMode::ListSearch(_) | InputMode::WorktreeSwitch
             );
         if show_primary_status {
@@ -457,16 +473,16 @@ impl App {
             ));
         }
 
-        match self.preferences.input_mode {
+        match self.ui.preferences.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => {
-                let line_count = self.comment_editor.buffer.matches('\n').count() + 1;
+                let line_count = self.ui.comment_editor.buffer.matches('\n').count() + 1;
                 let (line, col) = comment_cursor_line_col(
-                    &self.comment_editor.buffer,
-                    self.comment_editor.cursor,
+                    &self.ui.comment_editor.buffer,
+                    self.ui.comment_editor.cursor,
                 );
                 status.push(footer_separator(theme));
                 status.push(footer_detail_chip(
-                    format!("{} chars", self.comment_editor.buffer.chars().count()),
+                    format!("{} chars", self.ui.comment_editor.buffer.chars().count()),
                     theme,
                 ));
                 status.push(Span::raw(" "));
@@ -478,17 +494,21 @@ impl App {
             InputMode::DiffSearch => {
                 status.push(footer_separator(theme));
                 status.extend(search_prompt_spans(
-                    &self.search.diff_buffer,
-                    self.search.diff_cursor,
+                    &self.ui.search.diff_buffer,
+                    self.ui.search.diff_cursor,
                     theme,
                 ));
             }
             InputMode::ListSearch(pane) => {
                 let (query, cursor) = match pane {
-                    FocusPane::Commits => {
-                        (self.search.commit_query.as_str(), self.search.commit_cursor)
-                    }
-                    FocusPane::Files => (self.search.file_query.as_str(), self.search.file_cursor),
+                    FocusPane::Commits => (
+                        self.ui.search.commit_query.as_str(),
+                        self.ui.search.commit_cursor,
+                    ),
+                    FocusPane::Files => (
+                        self.ui.search.file_query.as_str(),
+                        self.ui.search.file_cursor,
+                    ),
                     FocusPane::Diff => ("", 0),
                 };
                 status.push(footer_separator(theme));
@@ -497,15 +517,16 @@ impl App {
             InputMode::ShellCommand => {
                 status.push(footer_separator(theme));
                 let command = self
+                    .ui
                     .shell_command
                     .active_command
                     .as_deref()
-                    .unwrap_or(self.shell_command.buffer.as_str());
-                let label = if self.shell_command.running.is_some() {
+                    .unwrap_or(self.ui.shell_command.buffer.as_str());
+                let label = if self.ui.shell_command.running.is_some() {
                     "running"
-                } else if self.shell_command.finished.is_some() {
+                } else if self.ui.shell_command.finished.is_some() {
                     "done"
-                } else if self.shell_command.reverse_search.is_some() {
+                } else if self.ui.shell_command.reverse_search.is_some() {
                     "search"
                 } else {
                     "input"
@@ -521,18 +542,20 @@ impl App {
                 ));
             }
             InputMode::WorktreeSwitch => {
-                if self.worktree_switch.search_active || !self.worktree_switch.query.is_empty() {
-                    let query = if self.worktree_switch.query.is_empty() {
+                if self.ui.worktree_switch.search_active
+                    || !self.ui.worktree_switch.query.is_empty()
+                {
+                    let query = if self.ui.worktree_switch.query.is_empty() {
                         "/".to_owned()
                     } else {
-                        format!("/{}", self.worktree_switch.query)
+                        format!("/{}", self.ui.worktree_switch.query)
                     };
                     status.push(footer_separator(theme));
                     status.push(footer_chip(
                         &format!(
                             "{query} {}/{}",
                             self.visible_worktree_indices().len(),
-                            self.worktree_switch.entries.len()
+                            self.ui.worktree_switch.entries.len()
                         ),
                         Style::default().fg(theme.accent).bg(blend_colors(
                             theme.panel_title_bg,
@@ -656,7 +679,7 @@ impl App {
         let area = centered_rect(56, 48, frame.area());
         frame.render_widget(Clear, area);
 
-        let title = match self.preferences.input_mode {
+        let title = match self.ui.preferences.input_mode {
             InputMode::CommentCreate => " NEW COMMENT ",
             InputMode::CommentEdit(_) => " EDIT COMMENT ",
             InputMode::Normal
@@ -691,7 +714,7 @@ impl App {
             ])
             .split(inner);
 
-        let mode_badge = match self.preferences.input_mode {
+        let mode_badge = match self.ui.preferences.input_mode {
             InputMode::CommentCreate => "create",
             InputMode::CommentEdit(_) => "edit",
             InputMode::Normal
@@ -721,7 +744,7 @@ impl App {
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("{} chars", self.comment_editor.buffer.chars().count()),
+                    format!("{} chars", self.ui.comment_editor.buffer.chars().count()),
                     Style::default().fg(theme.dimmed),
                 ),
             ]),
@@ -740,8 +763,8 @@ impl App {
             .style(Style::default().bg(theme.modal_bg))
             .border_style(Style::default().fg(theme.border));
         let context_inner = context_block.inner(sections[1]);
-        if matches!(self.preferences.input_mode, InputMode::CommentCreate)
-            && self.comment_editor.create_target_cache.is_none()
+        if matches!(self.ui.preferences.input_mode, InputMode::CommentCreate)
+            && self.ui.comment_editor.create_target_cache.is_none()
         {
             self.refresh_comment_create_target_cache();
         }
@@ -761,9 +784,9 @@ impl App {
             .border_style(Style::default().fg(theme.border));
         let editor_inner = editor_block.inner(sections[2]);
         let modal_view = comment_modal_lines(
-            &self.comment_editor.buffer,
-            self.comment_editor.cursor,
-            self.comment_editor.selection,
+            &self.ui.comment_editor.buffer,
+            self.ui.comment_editor.cursor,
+            self.ui.comment_editor.selection,
             editor_inner.height.saturating_sub(1) as usize,
             theme,
         );
@@ -773,10 +796,10 @@ impl App {
             view_start,
             text_offset,
         } = modal_view;
-        self.comment_editor.rect = Some(editor_inner);
-        self.comment_editor.line_ranges = line_ranges;
-        self.comment_editor.view_start = view_start;
-        self.comment_editor.text_offset = text_offset;
+        self.ui.comment_editor.rect = Some(editor_inner);
+        self.ui.comment_editor.line_ranges = line_ranges;
+        self.ui.comment_editor.view_start = view_start;
+        self.ui.comment_editor.text_offset = text_offset;
         frame.render_widget(editor_block, sections[2]);
         frame.render_widget(
             Paragraph::new(lines).style(Style::default().fg(theme.text)),
@@ -801,16 +824,21 @@ impl App {
         let area = centered_rect(68, 44, frame.area());
         frame.render_widget(Clear, area);
 
-        let command_failed = self.shell_command.finished.as_ref().is_some_and(|result| {
-            result
-                .exit_status
-                .code()
-                .map(|code| code != 0)
-                .unwrap_or(true)
-        });
+        let command_failed = self
+            .ui
+            .shell_command
+            .finished
+            .as_ref()
+            .is_some_and(|result| {
+                result
+                    .exit_status
+                    .code()
+                    .map(|code| code != 0)
+                    .unwrap_or(true)
+            });
         let border_color = if command_failed {
             theme.unreviewed
-        } else if self.shell_command.finished.is_some() {
+        } else if self.ui.shell_command.finished.is_some() {
             blend_colors(theme.border, theme.reviewed, 116)
         } else {
             theme.focus_border
@@ -842,21 +870,21 @@ impl App {
             ])
             .split(inner);
 
-        let mode_badge = if self.shell_command.running.is_some() {
+        let mode_badge = if self.ui.shell_command.running.is_some() {
             "running"
-        } else if self.shell_command.finished.is_some() {
+        } else if self.ui.shell_command.finished.is_some() {
             "done"
-        } else if self.shell_command.reverse_search.is_some() {
+        } else if self.ui.shell_command.reverse_search.is_some() {
             "search"
         } else {
             "input"
         };
-        let status_text = if let Some(result) = self.shell_command.finished.as_ref() {
+        let status_text = if let Some(result) = self.ui.shell_command.finished.as_ref() {
             match result.exit_status.code() {
                 Some(code) => format!("exit code {code}"),
                 None => "process terminated by signal".to_owned(),
             }
-        } else if self.shell_command.running.is_some() {
+        } else if self.ui.shell_command.running.is_some() {
             "streaming output…".to_owned()
         } else {
             "ready".to_owned()
@@ -879,7 +907,7 @@ impl App {
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("{} commands", self.shell_command.history.len()),
+                    format!("{} commands", self.ui.shell_command.history.len()),
                     Style::default().fg(theme.dimmed),
                 ),
             ]),
@@ -909,8 +937,8 @@ impl App {
 
         let mut command_lines = Vec::new();
         let command_editable =
-            self.shell_command.running.is_none() && self.shell_command.finished.is_none();
-        if command_editable && let Some(search) = self.shell_command.reverse_search.as_ref() {
+            self.ui.shell_command.running.is_none() && self.ui.shell_command.finished.is_none();
+        if command_editable && let Some(search) = self.ui.shell_command.reverse_search.as_ref() {
             let match_count = search.match_indexes.len();
             let marker = if match_count == 0 {
                 "no match".to_owned()
@@ -926,14 +954,14 @@ impl App {
         }
         if command_editable {
             command_lines.push(shell_prompt_line(
-                &self.shell_command.buffer,
-                self.shell_command.cursor,
+                &self.ui.shell_command.buffer,
+                self.ui.shell_command.cursor,
                 theme,
             ));
         } else {
             command_lines.push(Line::from(vec![
                 Span::styled("$ ", Style::default().fg(theme.dimmed)),
-                sanitized_span(&self.shell_command.buffer, None),
+                sanitized_span(&self.ui.shell_command.buffer, None),
             ]));
         }
         frame.render_widget(
@@ -948,13 +976,13 @@ impl App {
             .style(Style::default().bg(theme.modal_editor_bg))
             .border_style(Style::default().fg(theme.border));
         let output_inner = output_block.inner(sections[2]);
-        self.shell_command.output_rect = Some(output_inner);
-        self.shell_command.output_viewport = output_inner.height as usize;
+        self.ui.shell_command.output_rect = Some(output_inner);
+        self.ui.shell_command.output_viewport = output_inner.height as usize;
         frame.render_widget(output_block, sections[2]);
 
         let output_rows = self.shell_output_rows();
 
-        if self.shell_command.output_follow {
+        if self.ui.shell_command.output_follow {
             let max_scroll = self.shell_output_max_scroll();
             self.set_shell_output_scroll(max_scroll);
         }
@@ -968,23 +996,25 @@ impl App {
                 output_inner,
             );
         } else {
-            self.shell_command.output_cursor = self
+            self.ui.shell_command.output_cursor = self
+                .ui
                 .shell_command
                 .output_cursor
                 .min(output_rows.len().saturating_sub(1));
             let max_scroll = self.shell_output_max_scroll();
-            self.shell_command.output_scroll = self.shell_command.output_scroll.min(max_scroll);
+            self.ui.shell_command.output_scroll =
+                self.ui.shell_command.output_scroll.min(max_scroll);
             let visual_range = self.shell_output_visual_range();
 
             let visible_rows = output_rows
                 .iter()
                 .enumerate()
-                .skip(self.shell_command.output_scroll)
+                .skip(self.ui.shell_command.output_scroll)
                 .take(viewport_rows)
                 .map(|(idx, row)| {
                     let in_visual =
                         visual_range.is_some_and(|(start, end)| idx >= start && idx <= end);
-                    let is_cursor = idx == self.shell_command.output_cursor;
+                    let is_cursor = idx == self.ui.shell_command.output_cursor;
                     let base =
                         Line::from(Span::styled(row.clone(), Style::default().fg(theme.text)));
                     apply_row_highlight(
@@ -1003,8 +1033,11 @@ impl App {
 
         if sections[2].width >= 3 && sections[2].height >= 3 && viewport_rows > 0 {
             let total_rows = output_rows.len().max(1);
-            let (thumb_start, thumb_len) =
-                scrollbar_thumb(total_rows, viewport_rows, self.shell_command.output_scroll);
+            let (thumb_start, thumb_len) = scrollbar_thumb(
+                total_rows,
+                viewport_rows,
+                self.ui.shell_command.output_scroll,
+            );
             let x = sections[2]
                 .x
                 .saturating_add(sections[2].width.saturating_sub(2));
@@ -1024,7 +1057,7 @@ impl App {
             }
         }
 
-        let footer_text = if self.shell_command.running.is_some() {
+        let footer_text = if self.ui.shell_command.running.is_some() {
             Line::from(vec![
                 key_chip("Esc", theme),
                 Span::styled(" interrupt  ", Style::default().fg(theme.muted)),
@@ -1037,7 +1070,7 @@ impl App {
                 key_chip("Backspace", theme),
                 Span::styled(" reset", Style::default().fg(theme.muted)),
             ])
-        } else if self.shell_command.finished.is_some() {
+        } else if self.ui.shell_command.finished.is_some() {
             Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" continue  ", Style::default().fg(theme.muted)),
@@ -1075,9 +1108,9 @@ impl App {
         let mut lines = Vec::<Line<'static>>::new();
         let mut has_primary_context = false;
 
-        match self.preferences.input_mode {
+        match self.ui.preferences.input_mode {
             InputMode::CommentEdit(id) => {
-                if let Some(comment) = self.comments.comment_by_id(id) {
+                if let Some(comment) = self.deps.comments.comment_by_id(id) {
                     lines.push(Line::from(vec![
                         Span::styled("target ", Style::default().fg(theme.dimmed)),
                         Span::styled(
@@ -1099,7 +1132,7 @@ impl App {
                     );
                 }
             }
-            InputMode::CommentCreate => match self.comment_editor.create_target_cache.as_ref() {
+            InputMode::CommentCreate => match self.ui.comment_editor.create_target_cache.as_ref() {
                 Some(CommentCreateTargetCache::Ready(target)) => match target.as_ref() {
                     Some(target) => {
                         let start =
@@ -1158,10 +1191,10 @@ impl App {
             | InputMode::ListSearch(_) => {}
         }
 
-        if !has_primary_context && !self.rendered_diff.is_empty() {
-            let cursor = self.diff_position.cursor;
+        if !has_primary_context && !self.domain.rendered_diff.is_empty() {
+            let cursor = self.domain.diff_position.cursor;
             let start = cursor.saturating_sub(1);
-            let end = (cursor + 1).min(self.rendered_diff.len().saturating_sub(1));
+            let end = (cursor + 1).min(self.domain.rendered_diff.len().saturating_sub(1));
             for idx in start..=end {
                 if lines.len() >= rows {
                     break;
@@ -1177,7 +1210,7 @@ impl App {
                         },
                     ),
                     Span::raw(truncate(
-                        &sanitize_terminal_text(&self.rendered_diff[idx].raw_text),
+                        &sanitize_terminal_text(&self.domain.rendered_diff[idx].raw_text),
                         120,
                     )),
                 ]));
@@ -1430,17 +1463,17 @@ impl App {
             .split(inner);
 
         let visible = self.visible_worktree_indices();
-        let search = if self.worktree_switch.query.trim().is_empty() {
-            if self.worktree_switch.search_active {
+        let search = if self.ui.worktree_switch.query.trim().is_empty() {
+            if self.ui.worktree_switch.search_active {
                 "/".to_owned()
             } else {
                 "off".to_owned()
             }
         } else {
-            format!("/{}", self.worktree_switch.query)
+            format!("/{}", self.ui.worktree_switch.query)
         };
         let filter_style =
-            if self.worktree_switch.search_active || !self.worktree_switch.query.is_empty() {
+            if self.ui.worktree_switch.search_active || !self.ui.worktree_switch.query.is_empty() {
                 Style::default()
                     .fg(theme.accent)
                     .add_modifier(Modifier::BOLD)
@@ -1449,19 +1482,23 @@ impl App {
             };
         let selected = self
             .selected_worktree_full_index()
-            .and_then(|idx| self.worktree_switch.entries.get(idx))
+            .and_then(|idx| self.ui.worktree_switch.entries.get(idx))
             .map(|entry| short_path_label(&entry.path))
             .unwrap_or_else(|| "none".to_owned());
         let summary = Paragraph::new(Line::from(vec![
             Span::styled("source: ", Style::default().fg(theme.dimmed)),
             Span::styled(
-                short_path_label(self.git.root()),
+                short_path_label(self.deps.git.root()),
                 Style::default().fg(theme.text),
             ),
             Span::raw("  "),
             Span::styled("shown: ", Style::default().fg(theme.dimmed)),
             Span::styled(
-                format!("{}/{}", visible.len(), self.worktree_switch.entries.len()),
+                format!(
+                    "{}/{}",
+                    visible.len(),
+                    self.ui.worktree_switch.entries.len()
+                ),
                 Style::default().fg(theme.text),
             ),
             Span::raw("  "),
@@ -1482,9 +1519,9 @@ impl App {
             let now_ts = Utc::now().timestamp();
             visible
                 .iter()
-                .filter_map(|idx| self.worktree_switch.entries.get(*idx))
+                .filter_map(|idx| self.ui.worktree_switch.entries.get(*idx))
                 .map(|entry| {
-                    let current = if entry.path == self.git.root() {
+                    let current = if entry.path == self.deps.git.root() {
                         "*"
                     } else {
                         " "
@@ -1527,11 +1564,11 @@ impl App {
                     .border_style(Style::default().fg(theme.border)),
             )
             .highlight_style(Style::default().bg(theme.visual_bg))
-            .highlight_symbol(list_highlight_symbol(self.preferences.nerd_fonts));
-        self.worktree_switch.viewport_rows = sections[1].height.saturating_sub(2) as usize;
-        frame.render_stateful_widget(list, sections[1], &mut self.worktree_switch.list_state);
+            .highlight_symbol(list_highlight_symbol(self.ui.preferences.nerd_fonts));
+        self.ui.worktree_switch.viewport_rows = sections[1].height.saturating_sub(2) as usize;
+        frame.render_stateful_widget(list, sections[1], &mut self.ui.worktree_switch.list_state);
 
-        let footer = if self.worktree_switch.search_active {
+        let footer = if self.ui.worktree_switch.search_active {
             Paragraph::new(Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" defocus ", Style::default().fg(theme.muted)),
