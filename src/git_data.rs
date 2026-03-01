@@ -507,10 +507,7 @@ fn append_diff_files(
             *current_hunk_index.borrow_mut() = None;
             touched_paths.borrow_mut().insert(path.clone());
             commit_patches.borrow_mut().entry(path.clone()).or_default();
-            let summary = file_change_summary_from_delta(
-                delta,
-                old_path.clone(),
-            );
+            let summary = file_change_summary_from_delta(delta, old_path.clone());
             path_changes
                 .borrow_mut()
                 .entry(path)
