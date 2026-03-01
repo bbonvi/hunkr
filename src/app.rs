@@ -31,6 +31,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 mod comment_helpers;
 mod core_helpers;
+mod flow;
+mod input;
 mod lifecycle_input;
 mod lifecycle_mouse;
 mod lifecycle_render;

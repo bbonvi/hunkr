@@ -1,3 +1,4 @@
+use super::flow::{self, AppAction};
 use super::*;
 use crate::config::AppConfig;
 
@@ -424,6 +425,10 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        flow::dispatch(self, AppAction::Tick);
+    }
+
+    pub(in crate::app) fn run_tick_cycle(&mut self, now: Instant) {
         if self.onboarding_active() {
             return;
         }
@@ -433,7 +438,6 @@ impl App {
             self.request_terminal_clear();
         }
 
-        let now = self.now_instant();
         if self
             .runtime
             .selection_rebuild_due
@@ -462,24 +466,13 @@ impl App {
     }
 
     pub fn handle_event(&mut self, event: Event) {
-        let mut should_redraw = false;
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Press => {
-                self.handle_key(key);
-                should_redraw = true;
+                flow::dispatch(self, AppAction::KeyPress(key));
             }
-            Event::Mouse(mouse) => {
-                self.handle_mouse(mouse);
-                should_redraw = true;
-            }
-            Event::Resize(_, _) => {
-                self.ensure_cursor_visible();
-                should_redraw = true;
-            }
+            Event::Mouse(mouse) => flow::dispatch(self, AppAction::Mouse(mouse)),
+            Event::Resize(_, _) => flow::dispatch(self, AppAction::Resize),
             _ => {}
-        }
-        if should_redraw {
-            self.runtime.needs_redraw = true;
         }
     }
 

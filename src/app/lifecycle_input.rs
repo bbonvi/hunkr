@@ -1,17 +1,11 @@
 //! Keyboard/input-mode handlers for the app lifecycle.
+use super::input::modal_controller;
 use super::services::comment_workflow;
 use super::*;
 
 impl App {
     pub(super) fn handle_non_normal_input(&mut self, key: KeyEvent) {
-        match self.ui.preferences.input_mode {
-            InputMode::CommentCreate | InputMode::CommentEdit(_) => self.handle_comment_input(key),
-            InputMode::ShellCommand => self.handle_shell_command_input(key),
-            InputMode::WorktreeSwitch => self.handle_worktree_switch_input(key),
-            InputMode::DiffSearch => self.handle_diff_search_input(key),
-            InputMode::ListSearch(pane) => self.handle_list_search_input(pane, key),
-            InputMode::Normal => {}
-        }
+        modal_controller::dispatch_modal_key(self, key);
     }
 
     pub(super) fn handle_comment_input(&mut self, key: KeyEvent) {

@@ -1,4 +1,5 @@
 //! Mouse interaction handlers for list panes, diff, and comment editor modal.
+use super::input::modal_controller;
 use super::*;
 
 impl App {
@@ -7,18 +8,13 @@ impl App {
             return;
         }
 
+        if modal_controller::dispatch_modal_mouse(self, mouse) {
+            return;
+        }
         if matches!(
             self.ui.preferences.input_mode,
-            InputMode::CommentCreate | InputMode::CommentEdit(_)
+            InputMode::WorktreeSwitch | InputMode::DiffSearch | InputMode::ListSearch(_)
         ) {
-            self.handle_comment_mouse(mouse);
-            return;
-        }
-        if matches!(self.ui.preferences.input_mode, InputMode::ShellCommand) {
-            self.handle_shell_command_mouse(mouse);
-            return;
-        }
-        if matches!(self.ui.preferences.input_mode, InputMode::WorktreeSwitch) {
             return;
         }
         let x = mouse.column;
@@ -241,7 +237,7 @@ impl App {
         }
     }
 
-    fn handle_comment_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+    pub(in crate::app) fn handle_comment_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         let Some(editor_rect) = self.ui.comment_editor.rect else {
             return;
         };
