@@ -220,6 +220,46 @@ fn compose_commit_line_renders_git_decorations() {
 }
 
 #[test]
+fn compose_commit_line_places_status_markers_after_git_decorations() {
+    let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
+    row.info.decorations = vec![
+        CommitDecoration {
+            kind: CommitDecorationKind::Head,
+            label: "HEAD -> main".to_owned(),
+        },
+        CommitDecoration {
+            kind: CommitDecorationKind::LocalBranch,
+            label: "main".to_owned(),
+        },
+    ];
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(180, 3_600, &theme, true);
+    let rendered = presenter.commit_row_line(&row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    let refs_idx = flattened.find(" HEAD -> main, main").expect("refs");
+    let status_idx = flattened.find("").expect("status badge");
+    let unpushed_idx = flattened.find("").expect("unpushed marker");
+    assert!(status_idx > refs_idx);
+    assert!(unpushed_idx > status_idx);
+}
+
+#[test]
+fn compose_commit_line_left_pads_short_relative_age() {
+    let row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
+    let rendered = presenter.commit_row_line(&row);
+    let age_span = rendered.spans.last().expect("age span");
+
+    assert_eq!(age_span.content.as_ref(), " 1h ago");
+}
+
+#[test]
 fn file_row_line_sanitizes_untrusted_path_label() {
     let row = TreeRow {
         label: "[F] src/\u{1b}[31mapp.rs".to_owned(),

@@ -15,6 +15,8 @@ use super::super::{
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
+const MIN_RELATIVE_AGE_WIDTH: usize = 7;
+
 /// Renders commit/file list panes so App keeps high-level orchestration only.
 pub(in crate::app) struct ListPaneRenderer<'a> {
     theme: &'a UiTheme,
@@ -302,7 +304,12 @@ impl<'a> ListLinePresenter<'a> {
         if row.selectable {
             let right = row
                 .modified_ts
-                .map(|ts| format_relative_time(ts, self.now_ts))
+                .map(|ts| {
+                    pad_min_width(
+                        format_relative_time(ts, self.now_ts),
+                        MIN_RELATIVE_AGE_WIDTH,
+                    )
+                })
                 .unwrap_or_default();
             let badge = row
                 .change
@@ -389,12 +396,37 @@ impl<'a> ListLinePresenter<'a> {
         let marker = commit_selection_marker(row.selected, self.nerd_fonts);
         let left = format!("{marker} {} {summary}", row.info.short_id);
         let max_right_width = self.width.saturating_sub(1);
+        let mut right_spans: Vec<Span<'static>> = Vec::new();
+        let mut right_width = 0;
+        let decorations = commit_decoration_label(row, self.nerd_fonts);
+        if !decorations.is_empty() {
+            let remaining =
+                max_right_width.saturating_sub(right_width + usize::from(right_width > 0));
+            if remaining > 0 {
+                let max_decorations = remaining.min(28);
+                let rendered = truncate(&decorations, max_decorations);
+                if right_width > 0 {
+                    right_spans.push(Span::raw(" "));
+                }
+                right_spans.push(Span::styled(
+                    rendered.clone(),
+                    Style::default().fg(self.theme.accent),
+                ));
+                right_width += display_width(&rendered) + usize::from(right_width > 0);
+            }
+        }
         let status_badge = commit_status_badge(row.status, self.nerd_fonts).to_owned();
-        let mut right_spans = vec![Span::styled(
-            status_badge.clone(),
-            status_style(row.status, self.theme).add_modifier(Modifier::BOLD),
-        )];
-        let mut right_width = display_width(&status_badge);
+        let status_needed = display_width(&status_badge) + usize::from(right_width > 0);
+        if right_width + status_needed <= max_right_width {
+            if right_width > 0 {
+                right_spans.push(Span::raw(" "));
+            }
+            right_spans.push(Span::styled(
+                status_badge.clone(),
+                status_style(row.status, self.theme).add_modifier(Modifier::BOLD),
+            ));
+            right_width += status_needed;
+        }
         if row.info.unpushed {
             let unpushed = unpushed_marker(self.nerd_fonts).to_owned();
             let needed = 1 + display_width(&unpushed);
@@ -409,21 +441,10 @@ impl<'a> ListLinePresenter<'a> {
                 right_width += needed;
             }
         }
-        let decorations = commit_decoration_label(row, self.nerd_fonts);
-        if !decorations.is_empty() {
-            let remaining = max_right_width.saturating_sub(right_width + 1);
-            if remaining > 0 {
-                let max_decorations = remaining.min(28);
-                let rendered = truncate(&decorations, max_decorations);
-                right_spans.push(Span::raw(" "));
-                right_spans.push(Span::styled(
-                    rendered.clone(),
-                    Style::default().fg(self.theme.accent),
-                ));
-                right_width += 1 + display_width(&rendered);
-            }
-        }
-        let age = format_relative_time(row.info.timestamp, self.now_ts);
+        let age = pad_min_width(
+            format_relative_time(row.info.timestamp, self.now_ts),
+            MIN_RELATIVE_AGE_WIDTH,
+        );
         let age_width = display_width(&age);
         if right_width + 1 + age_width <= max_right_width {
             right_spans.push(Span::raw(" "));
@@ -469,6 +490,15 @@ fn commit_decoration_label(row: &CommitRow, nerd_fonts: bool) -> String {
     } else {
         format!("refs:{labels}")
     }
+}
+
+fn pad_min_width(value: String, min_width: usize) -> String {
+    let width = display_width(&value);
+    if width >= min_width {
+        return value;
+    }
+
+    format!("{}{}", " ".repeat(min_width - width), value)
 }
 
 fn file_change_style(kind: Option<FileChangeKind>, theme: &UiTheme) -> Style {
