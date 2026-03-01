@@ -641,6 +641,10 @@ impl App {
 }
 
 #[cfg(test)]
+mod driver;
+#[cfg(test)]
+mod driver_tests;
+#[cfg(test)]
 mod shell_output_policy_tests;
 #[cfg(test)]
 mod tests;
