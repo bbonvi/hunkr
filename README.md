@@ -15,6 +15,7 @@ It lets you review a selected commit range as one net diff across all changed fi
 - In-app worktree switcher to move across linked git worktrees without leaving the session
 - Built-in git actions are read-only by product design
 - In-app shell command modal with streamed output and command history
+- Session restore across restarts (selected commits, pane focus, diff viewport context)
 - Keyboard-first UX with mouse support (drag-select commit ranges with edge auto-scroll, wheel scroll in list panes)
 - Responsive behavior on large diff sessions
 
@@ -36,7 +37,7 @@ It lets you review a selected commit range as one net diff across all changed fi
 
 All review state stays in your repo under `.hunkr/`:
 
-- `.hunkr/state.json` for commit statuses
+- `.hunkr/state.json` for review statuses and session context
 - `.hunkr/shell-history.json` for `!` command history
 - `.hunkr/comments/index.json` for comment storage
 - `.hunkr/comments/<branch>-review-tasks.md` for exported review tasks
