@@ -506,11 +506,16 @@ fn append_diff_files(
             *current_path.borrow_mut() = path.clone();
             *current_hunk_index.borrow_mut() = None;
             touched_paths.borrow_mut().insert(path.clone());
-            commit_patches.borrow_mut().entry(path).or_default();
-            let summary = file_change_summary_from_delta(delta, old_path);
+            commit_patches.borrow_mut().entry(path.clone()).or_default();
+            let summary = file_change_summary_from_delta(
+                delta,
+                old_path.clone(),
+            );
             path_changes
                 .borrow_mut()
-                .insert(current_path.borrow().clone(), summary);
+                .entry(path)
+                .and_modify(|current| merge_delta_file_change_summary(current, &summary))
+                .or_insert(summary);
             true
         },
         None,
@@ -674,7 +679,7 @@ fn decoration_from_ref_name(name: &str) -> Option<(CommitDecorationKind, String)
 
 fn file_change_summary_from_delta(
     delta: git2::DiffDelta<'_>,
-    old_path: Option<String>,
+    rename_from: Option<String>,
 ) -> FileChangeSummary {
     let kind = match delta.status() {
         git2::Delta::Added => FileChangeKind::Added,
@@ -687,8 +692,9 @@ fn file_change_summary_from_delta(
         git2::Delta::Conflicted => FileChangeKind::Unmerged,
         _ => FileChangeKind::Unknown,
     };
+
     let old_path = if matches!(kind, FileChangeKind::Renamed | FileChangeKind::Copied) {
-        old_path
+        rename_from
     } else {
         None
     };
@@ -698,6 +704,25 @@ fn file_change_summary_from_delta(
         old_path,
         additions: 0,
         deletions: 0,
+    }
+}
+
+fn merge_delta_file_change_summary(current: &mut FileChangeSummary, next: &FileChangeSummary) {
+    if current.old_path.is_none() {
+        current.old_path = next.old_path.clone();
+    }
+    current.kind = merge_delta_change_kind(current.kind, next.kind);
+}
+
+fn merge_delta_change_kind(current: FileChangeKind, next: FileChangeKind) -> FileChangeKind {
+    use FileChangeKind::*;
+    match (current, next) {
+        (_, Unknown) => current,
+        (Unknown, _) => next,
+        (Added, Deleted) | (Deleted, Added) => Modified,
+        // Preserve richer classifications when later steps emit a plain modified marker.
+        (Renamed | Copied | TypeChanged, Modified) => current,
+        (_, next) => next,
     }
 }
 

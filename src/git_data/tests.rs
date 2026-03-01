@@ -185,6 +185,37 @@ fn aggregate_for_single_commit_reports_rename_metadata() {
 }
 
 #[test]
+fn aggregate_for_single_commit_rewrite_keeps_modified_kind() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    let original = (1..=174)
+        .map(|idx| format!("line-{idx}\n"))
+        .collect::<String>();
+    commit_file(repo_dir.path(), "rewrite.txt", &original, "seed");
+
+    let rewritten = (105..=174)
+        .map(|idx| format!("line-{idx}\n"))
+        .collect::<String>();
+    commit_file(repo_dir.path(), "rewrite.txt", &rewritten, "rewrite");
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[0].id.clone()];
+    let aggregate = service.aggregate_for_commits(&selected).expect("aggregate");
+    let change = aggregate
+        .file_changes
+        .get("rewrite.txt")
+        .expect("rewrite metadata");
+
+    assert_eq!(change.kind, FileChangeKind::Modified);
+    assert!(change.deletions > 0);
+    assert!(
+        aggregate.files.contains_key("rewrite.txt"),
+        "rewrite should keep the path visible in aggregated patches"
+    );
+}
+
+#[test]
 fn aggregate_uncommitted_includes_untracked_text_file_content() {
     let repo_dir = tempdir().expect("tempdir");
     init_repo(repo_dir.path());
