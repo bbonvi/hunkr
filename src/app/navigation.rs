@@ -629,12 +629,13 @@ impl App {
 
     pub(super) fn ensure_cursor_visible(&mut self) {
         let visible = self.visible_diff_rows();
-
-        if self.diff_position.cursor < self.diff_position.scroll {
-            self.diff_position.scroll = self.diff_position.cursor;
-        } else if self.diff_position.cursor >= self.diff_position.scroll + visible {
-            self.diff_position.scroll = self.diff_position.cursor + 1 - visible;
-        }
+        let next_scroll = diff_scroll_with_scrolloff(
+            self.diff_position.cursor,
+            self.diff_position.scroll,
+            visible,
+            DIFF_CURSOR_SCROLL_OFF_LINES,
+        );
+        self.set_diff_scroll(next_scroll);
         self.sync_diff_block_cursor_to_cursor_line();
         self.sync_selected_file_to_cursor();
     }

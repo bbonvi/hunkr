@@ -1784,6 +1784,36 @@ fn viewport_scroll_preserves_cursor_offset() {
 }
 
 #[test]
+fn diff_scroll_with_scrolloff_keeps_scroll_when_cursor_stays_within_gutter() {
+    let next_scroll = diff_scroll_with_scrolloff(26, 10, 20, 3);
+    assert_eq!(next_scroll, 10);
+}
+
+#[test]
+fn diff_scroll_with_scrolloff_scrolls_when_cursor_enters_bottom_gutter() {
+    let next_scroll = diff_scroll_with_scrolloff(27, 10, 20, 3);
+    assert_eq!(next_scroll, 11);
+}
+
+#[test]
+fn diff_scroll_with_scrolloff_scrolls_when_cursor_enters_top_gutter() {
+    let next_scroll = diff_scroll_with_scrolloff(12, 10, 20, 3);
+    assert_eq!(next_scroll, 9);
+}
+
+#[test]
+fn diff_scroll_with_scrolloff_clamps_for_small_viewports() {
+    let next_scroll = diff_scroll_with_scrolloff(13, 10, 4, 3);
+    assert_eq!(next_scroll, 11);
+}
+
+#[test]
+fn diff_scroll_with_scrolloff_handles_single_row_viewports() {
+    let next_scroll = diff_scroll_with_scrolloff(9, 5, 1, 3);
+    assert_eq!(next_scroll, 9);
+}
+
+#[test]
 fn effective_list_top_for_selection_keeps_existing_top_when_cursor_stays_visible() {
     assert_eq!(effective_list_top_for_selection(Some(12), 10, 8, 40), 10);
 }

@@ -748,6 +748,37 @@ pub(super) fn scrolled_diff_position_preserving_offset(
     }
 }
 
+/// Computes the next diff scroll top while preserving a Vim-style `scrolloff` cursor gutter.
+///
+/// The returned scroll keeps `cursor` at least `scrolloff` rows away from the viewport edges when
+/// possible, while clamping the gutter for very small viewports where both edges cannot be
+/// satisfied at once.
+pub(super) fn diff_scroll_with_scrolloff(
+    cursor: usize,
+    current_scroll: usize,
+    visible_rows: usize,
+    scrolloff: usize,
+) -> usize {
+    let rows = visible_rows.max(1);
+    let effective_scrolloff = scrolloff.min(rows.saturating_sub(1) / 2);
+    let top_threshold = current_scroll.saturating_add(effective_scrolloff);
+
+    if cursor < top_threshold {
+        return cursor.saturating_sub(effective_scrolloff);
+    }
+
+    let bottom_threshold = current_scroll
+        .saturating_add(rows.saturating_sub(1))
+        .saturating_sub(effective_scrolloff);
+    if cursor > bottom_threshold {
+        return cursor
+            .saturating_add(effective_scrolloff.saturating_add(1))
+            .saturating_sub(rows);
+    }
+
+    current_scroll
+}
+
 /// Computes a list scroll offset that preserves the cursor's viewport row after a list mutation.
 ///
 /// `prior_selected` and `prior_top` define the cursor row before mutation. `next_selected` is the

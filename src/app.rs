@@ -88,6 +88,7 @@ const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
 const SHELL_HISTORY_LIMIT: usize = 1_000;
 const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
 const TERMINAL_CLEAR_EVERY: Duration = Duration::from_secs(120);
+const DIFF_CURSOR_SCROLL_OFF_LINES: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
