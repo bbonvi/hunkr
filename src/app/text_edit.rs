@@ -1,4 +1,5 @@
-//! UTF-8-safe text editing primitives for inline comment editing.
+//! UTF-8-safe text editing primitives shared across inline text inputs.
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WordClass {
@@ -287,6 +288,145 @@ fn char_at_column_or_last(text: &str, char_column: usize) -> Option<(usize, usiz
         last = Some(entry);
     }
     last
+}
+
+/// Outcome when applying one keypress to a single-line editor buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SingleLineEditOutcome {
+    NotHandled,
+    CursorMoved,
+    BufferChanged,
+}
+
+/// Applies one shell-like editing keypress to a single-line buffer.
+pub(super) fn apply_single_line_edit_key(
+    text: &mut String,
+    cursor: &mut usize,
+    key: KeyEvent,
+) -> SingleLineEditOutcome {
+    let start_len = text.len();
+    let start_cursor = clamp_char_boundary(text, (*cursor).min(start_len));
+    *cursor = start_cursor;
+
+    let handled = match key.code {
+        KeyCode::Home => {
+            *cursor = 0;
+            true
+        }
+        KeyCode::End => {
+            *cursor = text.len();
+            true
+        }
+        KeyCode::Left
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            *cursor = prev_word_boundary(text, *cursor);
+            true
+        }
+        KeyCode::Left => {
+            *cursor = prev_char_boundary(text, *cursor);
+            true
+        }
+        KeyCode::Right
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            *cursor = next_word_boundary(text, *cursor);
+            true
+        }
+        KeyCode::Right => {
+            *cursor = next_char_boundary(text, *cursor);
+            true
+        }
+        KeyCode::Backspace
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            delete_prev_word(text, cursor);
+            true
+        }
+        KeyCode::Backspace => {
+            delete_prev_char(text, cursor);
+            true
+        }
+        KeyCode::Delete
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            delete_next_word(text, cursor);
+            true
+        }
+        KeyCode::Delete => {
+            delete_next_char(text, cursor);
+            true
+        }
+        KeyCode::Char('a') | KeyCode::Char('A')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            *cursor = 0;
+            true
+        }
+        KeyCode::Char('e') | KeyCode::Char('E')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            *cursor = text.len();
+            true
+        }
+        KeyCode::Char('u') | KeyCode::Char('U')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            delete_to_line_start(text, cursor);
+            true
+        }
+        KeyCode::Char('k') | KeyCode::Char('K')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            delete_to_line_end(text, cursor);
+            true
+        }
+        KeyCode::Char('w') | KeyCode::Char('W')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            delete_prev_word(text, cursor);
+            true
+        }
+        KeyCode::Char('b') | KeyCode::Char('B') if key.modifiers.contains(KeyModifiers::ALT) => {
+            *cursor = prev_word_boundary(text, *cursor);
+            true
+        }
+        KeyCode::Char('f') | KeyCode::Char('F') if key.modifiers.contains(KeyModifiers::ALT) => {
+            *cursor = next_word_boundary(text, *cursor);
+            true
+        }
+        KeyCode::Char('d') | KeyCode::Char('D') if key.modifiers.contains(KeyModifiers::ALT) => {
+            delete_next_word(text, cursor);
+            true
+        }
+        KeyCode::Char(c)
+            if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+        {
+            insert_char_at_cursor(text, cursor, c);
+            true
+        }
+        _ => false,
+    };
+
+    if !handled {
+        return SingleLineEditOutcome::NotHandled;
+    }
+
+    if text.len() != start_len {
+        SingleLineEditOutcome::BufferChanged
+    } else if *cursor != start_cursor {
+        SingleLineEditOutcome::CursorMoved
+    } else {
+        SingleLineEditOutcome::NotHandled
+    }
 }
 
 pub(super) fn insert_char_at_cursor(text: &mut String, cursor: &mut usize, ch: char) {

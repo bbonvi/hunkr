@@ -1,9 +1,7 @@
 use super::lifecycle_input::{
     clear_commit_selection, clear_commit_visual_anchor, diff_search_repeat_direction,
 };
-use super::lifecycle_render::{
-    theme_toggle_conflicts_with_diff_pending_op,
-};
+use super::lifecycle_render::theme_toggle_conflicts_with_diff_pending_op;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::state::should_hide_deleted_file_content;
 use super::ui::list_panes::{
@@ -441,6 +439,56 @@ fn vertical_cursor_movement_keeps_column_when_possible() {
     assert_eq!(
         move_cursor_down(text, down),
         text.find("pq").expect("pq start") + 2
+    );
+}
+
+#[test]
+fn single_line_edit_key_supports_shell_style_hotkeys() {
+    let mut text = "alpha beta".to_owned();
+    let mut cursor = text.len();
+
+    assert_eq!(
+        apply_single_line_edit_key(
+            &mut text,
+            &mut cursor,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        ),
+        SingleLineEditOutcome::CursorMoved
+    );
+    assert_eq!(cursor, 0);
+
+    assert_eq!(
+        apply_single_line_edit_key(
+            &mut text,
+            &mut cursor,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
+        ),
+        SingleLineEditOutcome::BufferChanged
+    );
+    assert_eq!(text, " beta");
+    assert_eq!(cursor, 0);
+
+    assert_eq!(
+        apply_single_line_edit_key(
+            &mut text,
+            &mut cursor,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+        ),
+        SingleLineEditOutcome::NotHandled
+    );
+}
+
+#[test]
+fn single_line_edit_key_backspace_at_start_is_not_handled() {
+    let mut text = String::new();
+    let mut cursor = 0usize;
+    assert_eq!(
+        apply_single_line_edit_key(
+            &mut text,
+            &mut cursor,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        ),
+        SingleLineEditOutcome::NotHandled
     );
 }
 

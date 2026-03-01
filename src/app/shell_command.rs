@@ -136,146 +136,16 @@ impl App {
             KeyCode::PageDown => {
                 self.scroll_shell_output_lines(self.shell_command.output_viewport as isize)
             }
-            KeyCode::Home => {
-                self.shell_command.cursor = 0;
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::End => {
-                self.shell_command.cursor = self.shell_command.buffer.len();
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Left
-                if key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                self.shell_command.cursor =
-                    prev_word_boundary(&self.shell_command.buffer, self.shell_command.cursor);
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Left => {
-                self.shell_command.cursor = prev_char_boundary(
-                    &self.shell_command.buffer,
-                    clamp_char_boundary(&self.shell_command.buffer, self.shell_command.cursor),
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Right
-                if key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                self.shell_command.cursor =
-                    next_word_boundary(&self.shell_command.buffer, self.shell_command.cursor);
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Right => {
-                self.shell_command.cursor = next_char_boundary(
-                    &self.shell_command.buffer,
-                    clamp_char_boundary(&self.shell_command.buffer, self.shell_command.cursor),
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Backspace
-                if key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                delete_prev_word(
+            _ => {
+                let edit = apply_single_line_edit_key(
                     &mut self.shell_command.buffer,
                     &mut self.shell_command.cursor,
+                    key,
                 );
-                self.shell_command.history_nav = None;
+                if !matches!(edit, SingleLineEditOutcome::NotHandled) {
+                    self.shell_command.history_nav = None;
+                }
             }
-            KeyCode::Backspace => {
-                delete_prev_char(
-                    &mut self.shell_command.buffer,
-                    &mut self.shell_command.cursor,
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Delete
-                if key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                delete_next_word(
-                    &mut self.shell_command.buffer,
-                    &mut self.shell_command.cursor,
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Delete => {
-                delete_next_char(
-                    &mut self.shell_command.buffer,
-                    &mut self.shell_command.cursor,
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char('a') | KeyCode::Char('A')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.shell_command.cursor = 0;
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char('e') | KeyCode::Char('E')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.shell_command.cursor = self.shell_command.buffer.len();
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char('u') | KeyCode::Char('U')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                delete_to_line_start(
-                    &mut self.shell_command.buffer,
-                    &mut self.shell_command.cursor,
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char('k') | KeyCode::Char('K')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                delete_to_line_end(
-                    &mut self.shell_command.buffer,
-                    &mut self.shell_command.cursor,
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char('w') | KeyCode::Char('W')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                delete_prev_word(
-                    &mut self.shell_command.buffer,
-                    &mut self.shell_command.cursor,
-                );
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char('b') | KeyCode::Char('B')
-                if key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.shell_command.cursor =
-                    prev_word_boundary(&self.shell_command.buffer, self.shell_command.cursor);
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char('f') | KeyCode::Char('F')
-                if key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.shell_command.cursor =
-                    next_word_boundary(&self.shell_command.buffer, self.shell_command.cursor);
-                self.shell_command.history_nav = None;
-            }
-            KeyCode::Char(c)
-                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
-            {
-                insert_char_at_cursor(
-                    &mut self.shell_command.buffer,
-                    &mut self.shell_command.cursor,
-                    c,
-                );
-                self.shell_command.history_nav = None;
-            }
-            _ => {}
         }
     }
 
