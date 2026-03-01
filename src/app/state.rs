@@ -138,6 +138,12 @@ impl App {
         }
 
         self.aggregate = aggregate;
+        self.deleted_file_content_visible.retain(|path| {
+            self.aggregate
+                .file_changes
+                .get(path)
+                .is_some_and(|change| change.kind == FileChangeKind::Deleted)
+        });
         self.prune_diff_positions_for_removed_files();
 
         if aggregate_changed {
@@ -344,96 +350,76 @@ impl App {
             .iter()
             .filter(|comment| comment.target.end.file_path == patch.path)
             .collect();
-        if should_hide_deleted_file_content(self.aggregate.file_changes.get(&patch.path)) {
-            rendered.push(RenderedDiffLine {
-                line: Line::from(vec![
-                    Span::styled("~ ", Style::default().fg(theme.diff_meta)),
-                    Span::styled(
-                        "File removed; deleted content hidden",
-                        Style::default()
-                            .fg(theme.issue)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ]),
-                raw_text: "~ [file removed]".to_owned(),
-                anchor: None,
-                comment_id: None,
-            });
+        let deleted_file =
+            should_hide_deleted_file_content(self.aggregate.file_changes.get(&patch.path));
+        let deleted_content_expanded =
+            deleted_file && self.deleted_file_content_visible.contains(&patch.path);
+        if deleted_file && !deleted_content_expanded {
+            let mut last_commit_banner: Option<String> = None;
+            let mut inserted_commit_comments = BTreeSet::new();
+            let mut rendered_toggle = false;
+            for hunk in &patch.hunks {
+                if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
+                    push_commit_banner_and_comments(
+                        &mut rendered,
+                        &file_comments,
+                        &mut inserted_commit_comments,
+                        &patch.path,
+                        hunk,
+                        &theme,
+                        now_ts,
+                    );
+                    if !rendered_toggle {
+                        rendered.push(deleted_file_toggle_line(
+                            false,
+                            self.preferences.nerd_fonts,
+                            &theme,
+                        ));
+                        rendered_toggle = true;
+                    }
+                }
+                last_commit_banner = Some(hunk.commit_id.clone());
+            }
+            if !rendered_toggle {
+                rendered.push(deleted_file_toggle_line(
+                    false,
+                    self.preferences.nerd_fonts,
+                    &theme,
+                ));
+            }
 
-            let mut sorted_comments = file_comments;
+            let mut sorted_comments = file_comments.clone();
             sorted_comments.sort_by_key(|comment| comment.id);
             for comment in sorted_comments {
-                push_comment_lines(&mut rendered, comment, &theme, now_ts);
+                if inserted_commit_comments.insert(comment.id) {
+                    push_comment_lines(&mut rendered, comment, &theme, now_ts);
+                }
             }
             rendered.push(rendered_separator_line(&theme));
             return rendered;
         }
         let mut last_commit_banner: Option<String> = None;
         let mut inserted_commit_comments = BTreeSet::new();
+        let mut rendered_deleted_toggle = false;
 
         for hunk in &patch.hunks {
-            let commit_anchor = CommentAnchor {
-                commit_id: hunk.commit_id.clone(),
-                commit_summary: hunk.commit_summary.clone(),
-                file_path: patch.path.clone(),
-                hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
-                old_lineno: None,
-                new_lineno: None,
-            };
             if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
-                let age = format_relative_time(hunk.commit_timestamp, now_ts);
-                let commit_summary = sanitize_terminal_text(&hunk.commit_summary);
-                let (commit_line, line) = if hunk.commit_short.is_empty() {
-                    (
-                        format!("---- {commit_summary} ({age})"),
-                        Line::from(vec![
-                            Span::styled("---- ", Style::default().fg(theme.dimmed)),
-                            Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
-                            Span::raw(" "),
-                            Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
-                        ]),
-                    )
-                } else {
-                    (
-                        format!(
-                            "---- commit {} {} ({})",
-                            hunk.commit_short, commit_summary, age
-                        ),
-                        Line::from(vec![
-                            Span::styled("---- ", Style::default().fg(theme.dimmed)),
-                            Span::styled("commit ", Style::default().fg(theme.muted)),
-                            Span::styled(
-                                hunk.commit_short.clone(),
-                                Style::default()
-                                    .fg(theme.focus_border)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::raw(" "),
-                            Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
-                            Span::raw(" "),
-                            Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
-                        ]),
-                    )
-                };
-                rendered.push(RenderedDiffLine {
-                    line,
-                    raw_text: commit_line,
-                    anchor: Some(commit_anchor.clone()),
-                    comment_id: None,
-                });
-
-                let mut commit_comments: Vec<&ReviewComment> = file_comments
-                    .iter()
-                    .copied()
-                    .filter(|comment| {
-                        comment_targets_commit_end(comment, &patch.path, &hunk.commit_id)
-                    })
-                    .collect();
-                commit_comments.sort_by_key(|comment| comment.id);
-                for comment in commit_comments {
-                    if inserted_commit_comments.insert(comment.id) {
-                        push_comment_lines(&mut rendered, comment, &theme, now_ts);
-                    }
+                push_commit_banner_and_comments(
+                    &mut rendered,
+                    &file_comments,
+                    &mut inserted_commit_comments,
+                    &patch.path,
+                    hunk,
+                    &theme,
+                    now_ts,
+                );
+                if deleted_content_expanded && !rendered_deleted_toggle {
+                    rendered.push(deleted_file_toggle_line(
+                        true,
+                        self.preferences.nerd_fonts,
+                        &theme,
+                    ));
+                    rendered_deleted_toggle = true;
                 }
             }
             last_commit_banner = Some(hunk.commit_id.clone());
@@ -515,6 +501,13 @@ impl App {
             }
 
             rendered.push(rendered_separator_line(&theme));
+        }
+        if deleted_content_expanded && !rendered_deleted_toggle {
+            rendered.push(deleted_file_toggle_line(
+                true,
+                self.preferences.nerd_fonts,
+                &theme,
+            ));
         }
 
         rendered
@@ -837,6 +830,107 @@ impl App {
             .iter()
             .position(|range| range.path == path)?;
         Some((index + 1, total))
+    }
+}
+
+/// Renders one commit banner row and injects commit-scoped comments under it.
+fn push_commit_banner_and_comments(
+    rendered: &mut Vec<RenderedDiffLine>,
+    file_comments: &[&ReviewComment],
+    inserted_commit_comments: &mut BTreeSet<u64>,
+    patch_path: &str,
+    hunk: &crate::model::Hunk,
+    theme: &UiTheme,
+    now_ts: i64,
+) {
+    let commit_anchor = CommentAnchor {
+        commit_id: hunk.commit_id.clone(),
+        commit_summary: hunk.commit_summary.clone(),
+        file_path: patch_path.to_owned(),
+        hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+        old_lineno: None,
+        new_lineno: None,
+    };
+    let age = format_relative_time(hunk.commit_timestamp, now_ts);
+    let commit_summary = sanitize_terminal_text(&hunk.commit_summary);
+    let (commit_line, line) = if hunk.commit_short.is_empty() {
+        (
+            format!("---- {commit_summary} ({age})"),
+            Line::from(vec![
+                Span::styled("---- ", Style::default().fg(theme.dimmed)),
+                Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
+                Span::raw(" "),
+                Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
+            ]),
+        )
+    } else {
+        (
+            format!(
+                "---- commit {} {} ({})",
+                hunk.commit_short, commit_summary, age
+            ),
+            Line::from(vec![
+                Span::styled("---- ", Style::default().fg(theme.dimmed)),
+                Span::styled("commit ", Style::default().fg(theme.muted)),
+                Span::styled(
+                    hunk.commit_short.clone(),
+                    Style::default()
+                        .fg(theme.focus_border)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
+                Span::raw(" "),
+                Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
+            ]),
+        )
+    };
+    rendered.push(RenderedDiffLine {
+        line,
+        raw_text: commit_line,
+        anchor: Some(commit_anchor),
+        comment_id: None,
+    });
+
+    let mut commit_comments: Vec<&ReviewComment> = file_comments
+        .iter()
+        .copied()
+        .filter(|comment| comment_targets_commit_end(comment, patch_path, &hunk.commit_id))
+        .collect();
+    commit_comments.sort_by_key(|comment| comment.id);
+    for comment in commit_comments {
+        if inserted_commit_comments.insert(comment.id) {
+            push_comment_lines(rendered, comment, theme, now_ts);
+        }
+    }
+}
+
+fn deleted_file_toggle_line(expanded: bool, nerd_fonts: bool, theme: &UiTheme) -> RenderedDiffLine {
+    let (action, caret) = if expanded {
+        ("Hide content", if nerd_fonts { "" } else { ">" })
+    } else {
+        ("Show hidden content", if nerd_fonts { "" } else { "v" })
+    };
+    RenderedDiffLine {
+        line: Line::from(vec![
+            Span::styled(
+                "File removed. ",
+                Style::default()
+                    .fg(theme.issue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                action,
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(caret, Style::default().fg(theme.muted)),
+        ]),
+        raw_text: DELETED_FILE_TOGGLE_RAW_TEXT.to_owned(),
+        anchor: None,
+        comment_id: None,
     }
 }
 

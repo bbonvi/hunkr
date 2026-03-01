@@ -61,6 +61,7 @@ impl App {
             commits: Vec::new(),
             file_rows: Vec::new(),
             aggregate: AggregatedDiff::default(),
+            deleted_file_content_visible: BTreeSet::new(),
             diff_position: DiffPosition::default(),
             rendered_diff: Arc::new(Vec::new()),
             commit_ui: CommitUiState {

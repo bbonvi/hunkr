@@ -888,6 +888,7 @@ impl App {
             KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => {
                 self.copy_diff_visual_selection();
             }
+            KeyCode::Enter if self.toggle_deleted_file_content_under_cursor() => {}
             KeyCode::Enter if self.diff_ui.visual_selection.is_some() => {
                 self.copy_diff_visual_selection();
             }

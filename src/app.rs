@@ -82,6 +82,7 @@ const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
 const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
+const DELETED_FILE_TOGGLE_RAW_TEXT: &str = "__DELETED_FILE_TOGGLE__";
 const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
 const SHELL_HISTORY_LIMIT: usize = 1_000;
 const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
@@ -548,6 +549,7 @@ pub struct App {
     commits: Vec<CommitRow>,
     file_rows: Vec<TreeRow>,
     aggregate: AggregatedDiff,
+    deleted_file_content_visible: BTreeSet<String>,
     diff_position: DiffPosition,
     rendered_diff: Arc<Vec<RenderedDiffLine>>,
     commit_ui: CommitUiState,

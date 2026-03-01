@@ -909,6 +909,52 @@ impl App {
             .any(|row| row.is_uncommitted && row.selected)
     }
 
+    /// Toggles visibility of deleted-file content when cursor is on the deleted-file toggle row.
+    pub(super) fn toggle_deleted_file_content_under_cursor(&mut self) -> bool {
+        let Some(line) = self.rendered_diff.get(self.diff_position.cursor) else {
+            return false;
+        };
+        if line.raw_text != DELETED_FILE_TOGGLE_RAW_TEXT {
+            return false;
+        }
+        let Some(path) = self
+            .file_path_for_line(self.diff_position.cursor)
+            .map(str::to_owned)
+        else {
+            return false;
+        };
+        if !matches!(
+            self.aggregate.file_changes.get(&path),
+            Some(change) if change.kind == FileChangeKind::Deleted
+        ) {
+            return false;
+        }
+
+        let now_visible = if self.deleted_file_content_visible.contains(&path) {
+            self.deleted_file_content_visible.remove(&path);
+            false
+        } else {
+            self.deleted_file_content_visible.insert(path.clone());
+            true
+        };
+
+        self.capture_pending_diff_view_anchor();
+        self.diff_cache
+            .rendered_cache
+            .retain(|(candidate_path, _), _| candidate_path != &path);
+        self.diff_cache.rendered_key = None;
+        self.diff_cache.file_ranges.clear();
+        self.diff_cache.file_range_by_path.clear();
+        self.ensure_rendered_diff();
+        self.select_file_row_for_path(&path);
+        self.runtime.status = if now_visible {
+            format!("Showing deleted content for {path}")
+        } else {
+            format!("Hiding deleted content for {path}")
+        };
+        true
+    }
+
     pub(super) fn copy_diff_visual_selection(&mut self) {
         if self.diff_ui.visual_selection.is_none() {
             self.runtime.status = "No diff visual range to copy".to_owned();
