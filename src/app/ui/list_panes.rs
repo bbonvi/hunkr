@@ -193,10 +193,6 @@ impl<'a> ListPaneRenderer<'a> {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled(
-                format!("{selected_prefix}{selected_total} "),
-                Style::default().fg(self.theme.muted),
-            ),
         ];
         title_spans.extend(commit_status_count_spans(
             (unreviewed, reviewed, issue_found, resolved),
@@ -208,7 +204,11 @@ impl<'a> ListPaneRenderer<'a> {
             Style::default().fg(self.theme.muted),
         ));
         title_spans.push(Span::styled(
-            format!("{} ", commit_status_filter_label_prefix(self.nerd_fonts)),
+            format!("{selected_prefix}{selected_total} "),
+            Style::default().fg(self.theme.muted),
+        ));
+        title_spans.push(Span::styled(
+            commit_status_filter_label_prefix(self.nerd_fonts).to_owned(),
             Style::default().fg(self.theme.muted),
         ));
         title_spans.extend(commit_status_filter_spans(
@@ -216,11 +216,12 @@ impl<'a> ListPaneRenderer<'a> {
             self.theme,
             self.nerd_fonts,
         ));
-        title_spans.extend([
-            Span::raw(" "),
-            Span::styled("filter:", Style::default().fg(self.theme.muted)),
-            sanitized_span(search_display, Some(filter_style)),
-        ]);
+        if search_enabled {
+            title_spans.extend([
+                Span::raw(" "),
+                sanitized_span(search_display, Some(filter_style)),
+            ]);
+        }
         let title = Line::from(title_spans);
         let border_style = if self.focused == FocusPane::Commits {
             Style::default().fg(self.theme.focus_border)
