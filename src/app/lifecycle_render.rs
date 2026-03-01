@@ -176,6 +176,7 @@ impl App {
                 terminal_clear_requested: false,
                 needs_redraw: true,
                 should_quit: false,
+                draw_perf: DrawPerfState::default(),
             },
         }
     }

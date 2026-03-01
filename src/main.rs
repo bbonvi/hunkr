@@ -5,7 +5,10 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::io::{self, Stdout};
+use std::{
+    io::{self, Stdout},
+    time::Instant,
+};
 
 use hunkr::app::App;
 
@@ -27,9 +30,11 @@ fn run_event_loop(
             if app.take_terminal_clear_request() {
                 terminal.clear().context("failed to clear terminal")?;
             }
+            let draw_started = Instant::now();
             terminal
                 .draw(|frame| app.draw(frame))
                 .context("failed to render frame")?;
+            app.record_draw_duration(draw_started.elapsed());
             app.mark_drawn();
         }
 

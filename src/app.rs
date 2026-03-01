@@ -94,6 +94,7 @@ const SHELL_HISTORY_LIMIT: usize = 1_000;
 const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
 const TERMINAL_CLEAR_EVERY: Duration = Duration::from_secs(120);
 const DIFF_CURSOR_SCROLL_OFF_LINES: usize = 3;
+const DRAW_BUDGET_WARNING: Duration = Duration::from_millis(24);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -555,6 +556,15 @@ struct RuntimeState {
     terminal_clear_requested: bool,
     needs_redraw: bool,
     should_quit: bool,
+    draw_perf: DrawPerfState,
+}
+
+/// Draw-loop performance metrics used as runtime guardrails.
+#[derive(Debug, Clone, Copy, Default)]
+struct DrawPerfState {
+    last_draw_duration: Duration,
+    max_draw_duration: Duration,
+    over_budget_frames: u64,
 }
 
 /// External adapters/resources used by app workflows.
@@ -611,6 +621,22 @@ impl App {
 
     pub(super) fn now_timestamp(&self) -> i64 {
         self.deps.clock.now_utc().timestamp()
+    }
+
+    pub fn record_draw_duration(&mut self, duration: Duration) {
+        self.runtime.draw_perf.last_draw_duration = duration;
+        if duration > self.runtime.draw_perf.max_draw_duration {
+            self.runtime.draw_perf.max_draw_duration = duration;
+        }
+        if duration > DRAW_BUDGET_WARNING {
+            self.runtime.draw_perf.over_budget_frames =
+                self.runtime.draw_perf.over_budget_frames.saturating_add(1);
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) fn draw_perf_over_budget_frames(&self) -> u64 {
+        self.runtime.draw_perf.over_budget_frames
     }
 }
 
