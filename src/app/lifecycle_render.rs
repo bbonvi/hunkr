@@ -10,6 +10,7 @@ struct BootstrapDeps {
     instance_lock: Option<InstanceLock>,
     comments: CommentStore,
     clock: Arc<dyn AppClock>,
+    runtime_ports: Arc<dyn AppRuntimePorts>,
     review_state: ReviewState,
 }
 
@@ -33,6 +34,7 @@ impl App {
             instance_lock,
             comments,
             clock: ports.clock(),
+            runtime_ports: ports.runtime_ports(),
             review_state,
         };
         let mut app = Self::from_bootstrap_deps(deps, &config, first_open);
@@ -65,6 +67,7 @@ impl App {
                 instance_lock: deps.instance_lock,
                 comments: deps.comments,
                 clock: deps.clock,
+                runtime_ports: deps.runtime_ports,
             },
             domain: AppDomainState {
                 review_state: deps.review_state,

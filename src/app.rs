@@ -57,7 +57,7 @@ use self::nerd_fonts::{
     format_path_with_icon, format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
     list_highlight_symbol_width, uncommitted_badge, worktree_label_prefix,
 };
-use self::ports::{AppBootstrapPorts, AppClock, SystemBootstrapPorts};
+use self::ports::{AppBootstrapPorts, AppClock, AppRuntimePorts, SystemBootstrapPorts};
 use self::selection_helpers::*;
 use self::text_edit::*;
 use self::tree_highlight::*;
@@ -574,6 +574,7 @@ struct AppDependencies {
     instance_lock: Option<InstanceLock>,
     comments: CommentStore,
     clock: Arc<dyn AppClock>,
+    runtime_ports: Arc<dyn AppRuntimePorts>,
 }
 
 /// Business/domain projections currently shown in the UI.

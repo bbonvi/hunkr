@@ -17,6 +17,15 @@ pub trait AppBootstrapPorts: Send + Sync {
     fn state_store_for_repo(&self, repo_root: &Path) -> StateStore;
     fn open_comment_store(&self, store_root: &Path, branch: &str) -> anyhow::Result<CommentStore>;
     fn clock(&self) -> Arc<dyn AppClock>;
+    fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts> {
+        Arc::new(SystemRuntimePorts)
+    }
+}
+
+/// Runtime dependency ports used after initial bootstrap.
+pub trait AppRuntimePorts: Send + Sync {
+    fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService>;
+    fn open_comment_store(&self, store_root: &Path, branch: &str) -> anyhow::Result<CommentStore>;
 }
 
 /// System clock implementation for production runtime.
@@ -34,6 +43,17 @@ impl AppClock for SystemClock {
 
 /// Default bootstrap provider backed by concrete infrastructure adapters.
 pub struct SystemBootstrapPorts;
+pub struct SystemRuntimePorts;
+
+impl AppRuntimePorts for SystemRuntimePorts {
+    fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService> {
+        GitService::open_at(path)
+    }
+
+    fn open_comment_store(&self, store_root: &Path, branch: &str) -> anyhow::Result<CommentStore> {
+        CommentStore::new(store_root, branch)
+    }
+}
 
 impl AppBootstrapPorts for SystemBootstrapPorts {
     fn open_current_git(&self) -> anyhow::Result<GitService> {

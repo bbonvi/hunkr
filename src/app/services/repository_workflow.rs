@@ -6,11 +6,17 @@ pub(in crate::app) fn switch_repository_context(
     app: &mut App,
     target: &Path,
 ) -> anyhow::Result<()> {
-    let reopened = GitService::open_at(target)
+    let reopened = app
+        .deps
+        .runtime_ports
+        .open_git_at(target)
         .with_context(|| format!("failed to reopen repository at {}", target.display()))?;
     let branch = reopened.branch_name().to_owned();
     app.deps.git = reopened;
-    app.deps.comments = CommentStore::new(app.deps.store.root_dir(), &branch)
+    app.deps.comments = app
+        .deps
+        .runtime_ports
+        .open_comment_store(app.deps.store.root_dir(), &branch)
         .with_context(|| format!("failed to reload comments for branch {branch}"))?;
     reload_commits(app, true).context("failed to refresh commit and diff state")?;
 
