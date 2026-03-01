@@ -1,3 +1,4 @@
+use super::services::status_workflow;
 use super::*;
 
 impl App {
@@ -265,38 +266,7 @@ impl App {
     }
 
     pub(super) fn set_status_for_ids(&mut self, ids: &BTreeSet<String>, status: ReviewStatus) {
-        self.flush_pending_selection_rebuild();
-        self.deps.store.set_many_status(
-            &mut self.domain.review_state,
-            ids.iter().cloned(),
-            status,
-            self.deps.git.branch_name(),
-        );
-
-        apply_status_transition(&mut self.domain.commits, ids, status);
-        self.sync_commit_cursor_for_filters(None, self.ui.commit_ui.list_state.selected());
-
-        let save_result = self.deps.store.save(&self.domain.review_state);
-        let mut status_message = if let Err(err) = save_result {
-            format!("failed to persist status change: {err:#}")
-        } else {
-            format!("{} commit(s) -> {}", ids.len(), status.as_str())
-        };
-        let hidden_selected = selected_rows_hidden_by_status_filter(
-            &self.domain.commits,
-            self.ui.commit_ui.status_filter,
-        );
-        if hidden_selected > 0 {
-            status_message.push_str(&format!(", {hidden_selected} selected hidden by filter"));
-        }
-
-        if status != ReviewStatus::Unreviewed {
-            self.ui.commit_ui.visual_anchor = None;
-        }
-        if let Err(err) = self.sync_comment_report() {
-            status_message.push_str(&format!(", review tasks sync failed: {err:#}"));
-        }
-        self.runtime.status = status_message;
+        status_workflow::set_status_for_ids(self, ids, status);
     }
 
     pub(super) fn move_diff_cursor(&mut self, delta: isize) {

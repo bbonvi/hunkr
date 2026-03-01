@@ -1,121 +1,13 @@
+use super::services::repository_workflow;
 use super::*;
 
 impl App {
     pub(super) fn switch_repository_context(&mut self, target: &Path) -> anyhow::Result<()> {
-        let reopened = GitService::open_at(target)
-            .with_context(|| format!("failed to reopen repository at {}", target.display()))?;
-        let branch = reopened.branch_name().to_owned();
-        self.deps.git = reopened;
-        self.deps.comments = CommentStore::new(self.deps.store.root_dir(), &branch)
-            .with_context(|| format!("failed to reload comments for branch {branch}"))?;
-        self.reload_commits(true)
-            .context("failed to refresh commit and diff state")?;
-
-        let now = self.now_instant();
-        self.runtime.last_refresh = now;
-        self.runtime.last_relative_time_redraw = now;
-        self.runtime.needs_redraw = true;
-        Ok(())
+        repository_workflow::switch_repository_context(self, target)
     }
 
     pub(super) fn reload_commits(&mut self, preserve_manual_selection: bool) -> anyhow::Result<()> {
-        let history = self.deps.git.load_first_parent_history(HISTORY_LIMIT)?;
-        let prior_cursor_idx = self.ui.commit_ui.list_state.selected();
-        let prior_cursor_commit_id = self.selected_commit_id();
-        let prior_visual_anchor_commit_id = self
-            .ui
-            .commit_ui
-            .visual_anchor
-            .and_then(|idx| self.domain.commits.get(idx))
-            .map(|row| row.info.id.clone());
-
-        let mut old_selected = BTreeSet::new();
-        if preserve_manual_selection {
-            for row in &self.domain.commits {
-                if row.selected {
-                    old_selected.insert(row.info.id.clone());
-                }
-            }
-        }
-
-        let mut known = BTreeSet::new();
-        for row in &self.domain.commits {
-            known.insert(row.info.id.clone());
-        }
-
-        self.domain.commits = history
-            .into_iter()
-            .map(|info| {
-                let status = self
-                    .deps
-                    .store
-                    .commit_status(&self.domain.review_state, &info.id);
-                let selected = preserve_manual_selection && old_selected.contains(&info.id);
-                CommitRow {
-                    info,
-                    selected,
-                    status,
-                    is_uncommitted: false,
-                }
-            })
-            .collect();
-
-        let uncommitted_file_count = self.deps.git.uncommitted_file_count()?;
-        let uncommitted_selected =
-            preserve_manual_selection && old_selected.contains(UNCOMMITTED_COMMIT_ID);
-        self.domain.commits.insert(
-            0,
-            CommitRow {
-                info: CommitInfo {
-                    short_id: UNCOMMITTED_COMMIT_SHORT.to_owned(),
-                    id: UNCOMMITTED_COMMIT_ID.to_owned(),
-                    summary: format_uncommitted_summary(uncommitted_file_count),
-                    author: "local".to_owned(),
-                    timestamp: self.now_timestamp(),
-                    unpushed: false,
-                    decorations: Vec::new(),
-                },
-                selected: uncommitted_selected,
-                status: ReviewStatus::Unreviewed,
-                is_uncommitted: true,
-            },
-        );
-
-        self.sync_commit_cursor_for_filters(prior_cursor_commit_id.as_deref(), prior_cursor_idx);
-        self.ui.commit_ui.visual_anchor = prior_visual_anchor_commit_id
-            .as_deref()
-            .and_then(|commit_id| index_of_commit(&self.domain.commits, commit_id));
-        if self
-            .ui
-            .commit_ui
-            .visual_anchor
-            .is_some_and(|anchor| !self.visible_commit_indices().contains(&anchor))
-        {
-            self.ui.commit_ui.visual_anchor = None;
-        }
-
-        let new_commits = self
-            .domain
-            .commits
-            .iter()
-            .filter(|row| {
-                !row.is_uncommitted
-                    && !known.contains(&row.info.id)
-                    && row.status == ReviewStatus::Unreviewed
-            })
-            .count();
-        if new_commits > 0 {
-            let noun = if new_commits == 1 {
-                "commit"
-            } else {
-                "commits"
-            };
-            self.runtime.status = format!("{new_commits} new unreviewed {noun} detected");
-        }
-
-        self.rebuild_selection_dependent_views()?;
-        self.sync_comment_report()?;
-        Ok(())
+        repository_workflow::reload_commits(self, preserve_manual_selection)
     }
 
     /// Restores persisted UI session state after initial commit loading.
@@ -215,48 +107,7 @@ impl App {
     }
 
     pub(super) fn rebuild_selection_dependent_views(&mut self) -> anyhow::Result<()> {
-        let selected_ordered = self.selected_commit_ids_oldest_first();
-        let mut aggregate = if selected_ordered.is_empty() {
-            AggregatedDiff::default()
-        } else {
-            self.deps.git.aggregate_for_commits(&selected_ordered)?
-        };
-        if self.uncommitted_selected() {
-            merge_aggregate_diff(&mut aggregate, self.deps.git.aggregate_uncommitted()?);
-        }
-        let changed_paths = changed_paths_between_aggregates(&self.domain.aggregate, &aggregate);
-        let aggregate_changed = !changed_paths.is_empty();
-
-        if aggregate_changed {
-            self.capture_pending_diff_view_anchor();
-        }
-
-        self.domain.aggregate = aggregate;
-        self.domain.deleted_file_content_visible.retain(|path| {
-            self.domain
-                .aggregate
-                .file_changes
-                .get(path)
-                .is_some_and(|change| change.kind == FileChangeKind::Deleted)
-        });
-        self.prune_diff_positions_for_removed_files();
-
-        if aggregate_changed {
-            self.ui
-                .diff_cache
-                .rendered_cache
-                .retain(|(path, _), _| !changed_paths.contains(path));
-            self.ui.diff_cache.rendered_key = None;
-            self.ui.diff_cache.file_ranges.clear();
-            self.ui.diff_cache.file_range_by_path.clear();
-            self.ui.diff_ui.pending_op = None;
-        }
-
-        self.rebuild_file_tree();
-        self.ensure_selected_file_exists();
-        self.sync_file_cursor_for_filters();
-        self.ensure_rendered_diff();
-        Ok(())
+        repository_workflow::rebuild_selection_dependent_views(self)
     }
 
     pub(super) fn prune_diff_positions_for_removed_files(&mut self) {

@@ -39,6 +39,7 @@ mod navigation;
 mod nerd_fonts;
 mod ports;
 mod selection_helpers;
+mod services;
 mod shell_command;
 mod state;
 mod text_edit;

@@ -1,4 +1,5 @@
 //! Keyboard/input-mode handlers for the app lifecycle.
+use super::services::comment_workflow;
 use super::*;
 
 impl App {
@@ -294,7 +295,9 @@ impl App {
             });
     }
 
-    fn resolve_comment_create_target(&mut self) -> Result<Option<CommentTarget>, String> {
+    pub(in crate::app) fn resolve_comment_create_target(
+        &mut self,
+    ) -> Result<Option<CommentTarget>, String> {
         if self.ui.comment_editor.create_target_cache.is_none() {
             self.refresh_comment_create_target_cache();
         }
@@ -330,89 +333,7 @@ impl App {
             return;
         }
 
-        let mut close_editor = false;
-        match self.ui.preferences.input_mode {
-            InputMode::CommentCreate => match self.resolve_comment_create_target() {
-                Ok(Some(target)) => {
-                    let result = self
-                        .deps
-                        .comments
-                        .add_comment(&target, &self.ui.comment_editor.buffer);
-                    match result {
-                        Ok(id) => {
-                            self.capture_pending_diff_view_anchor();
-                            self.set_status_for_ids(&target.commits, ReviewStatus::IssueFound);
-                            self.invalidate_diff_cache();
-                            if let Err(err) = self.sync_comment_report() {
-                                self.runtime.status = format!(
-                                    "Comment #{} added, but review tasks sync failed: {err:#}",
-                                    id
-                                );
-                                close_editor = true;
-                            } else {
-                                self.runtime.status = format!(
-                                    "Comment #{} added -> {} ({} commit(s) marked ISSUE_FOUND)",
-                                    id,
-                                    self.deps.comments.report_path().display(),
-                                    target.commits.len()
-                                );
-                                close_editor = true;
-                            }
-                        }
-                        Err(err) => {
-                            self.runtime.status = format!("Failed to save comment: {err:#}");
-                        }
-                    }
-                }
-                Ok(None) => {
-                    self.runtime.status = if self.diff_selection_spans_multiple_files() {
-                        "Comment range must stay within a single file".to_owned()
-                    } else {
-                        "No hunk/line anchor at cursor or selected range".to_owned()
-                    };
-                    close_editor = true;
-                }
-                Err(err) => {
-                    self.runtime.status =
-                        format!("Failed to resolve affected commits for comment: {err}");
-                    close_editor = true;
-                }
-            },
-            InputMode::CommentEdit(id) => {
-                match self
-                    .deps
-                    .comments
-                    .update_comment(id, &self.ui.comment_editor.buffer)
-                {
-                    Ok(true) => {
-                        self.capture_pending_diff_view_anchor();
-                        self.invalidate_diff_cache();
-                        if let Err(err) = self.sync_comment_report() {
-                            self.runtime.status = format!(
-                                "Comment #{} updated, but review tasks sync failed: {err:#}",
-                                id
-                            );
-                        } else {
-                            self.runtime.status = format!("Comment #{} updated", id);
-                        }
-                        close_editor = true;
-                    }
-                    Ok(false) => {
-                        self.runtime.status = format!("Comment #{} not found", id);
-                        close_editor = true;
-                    }
-                    Err(err) => {
-                        self.runtime.status = format!("Failed to update comment #{}: {err:#}", id);
-                    }
-                }
-            }
-            InputMode::ShellCommand
-            | InputMode::WorktreeSwitch
-            | InputMode::DiffSearch
-            | InputMode::ListSearch(_)
-            | InputMode::Normal => {}
-        }
-
+        let close_editor = comment_workflow::submit_comment_from_editor(self);
         if close_editor {
             self.ui.preferences.input_mode = InputMode::Normal;
             self.clear_diff_visual_selection();
