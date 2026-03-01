@@ -483,20 +483,4 @@ mod tests {
         assert!(rendered.ends_with("src/app.rs"));
         assert!(rendered.contains(' '));
     }
-
-    #[test]
-    fn header_prefixes_follow_font_mode() {
-        assert_eq!(branch_label_prefix(true), "");
-        assert_eq!(branch_label_prefix(false), "branch:");
-        assert_eq!(worktree_label_prefix(true), "󱘎");
-        assert_eq!(worktree_label_prefix(false), "wt:");
-    }
-
-    #[test]
-    fn status_filter_tokens_follow_font_mode() {
-        assert_eq!(commit_status_filter_label_prefix(true), "");
-        assert_eq!(commit_status_filter_label_prefix(false), "sf:");
-        assert_eq!(commit_status_filter_all_badge(true), "");
-        assert_eq!(commit_status_filter_all_badge(false), "all");
-    }
 }

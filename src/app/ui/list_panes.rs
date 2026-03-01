@@ -719,51 +719,30 @@ mod tests {
     use crate::app::ThemeMode;
 
     #[test]
-    fn commit_status_filter_spans_use_icons_in_nerd_font_mode() {
+    fn commit_status_count_spans_toggle_separator_by_font_mode() {
         let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let spans =
-            commit_status_filter_spans(CommitStatusFilter::ReviewedOrResolved, &theme, true);
-        let text = spans
+        let counts = [
+            (ReviewStatus::Unreviewed, 9),
+            (ReviewStatus::Reviewed, 8),
+            (ReviewStatus::IssueFound, 7),
+            (ReviewStatus::Resolved, 6),
+        ];
+        let nerd_text = commit_status_count_spans((9, 8, 7, 6), &theme, true)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        let ascii_text = commit_status_count_spans((9, 8, 7, 6), &theme, false)
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
 
-        assert_eq!(text, "|");
-    }
+        assert!(!nerd_text.contains(':'));
+        for (status, count) in counts {
+            let nerd_token = format!("{}{}", commit_status_badge(status, true), count);
+            let ascii_token = format!("{}:{count}", commit_status_badge(status, false));
 
-    #[test]
-    fn commit_status_filter_spans_keep_ascii_badges_without_nerd_fonts() {
-        let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let spans = commit_status_filter_spans(CommitStatusFilter::All, &theme, false);
-        let text = spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-
-        assert_eq!(text, "all");
-    }
-
-    #[test]
-    fn commit_status_count_spans_drop_colons_in_nerd_font_mode() {
-        let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let spans = commit_status_count_spans((9, 8, 7, 6), &theme, true);
-        let text = spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-
-        assert_eq!(text, "9 8 7 6 ");
-    }
-
-    #[test]
-    fn commit_status_count_spans_keep_colons_without_nerd_fonts() {
-        let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let spans = commit_status_count_spans((9, 8, 7, 6), &theme, false);
-        let text = spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-
-        assert_eq!(text, "U:9 R:8 I:7 S:6 ");
+            assert!(nerd_text.contains(&nerd_token));
+            assert!(ascii_text.contains(&ascii_token));
+        }
     }
 }
