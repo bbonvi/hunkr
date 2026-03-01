@@ -43,6 +43,8 @@ pub struct CommitStatusEntry {
 pub struct ReviewState {
     pub version: u32,
     pub statuses: BTreeMap<String, CommitStatusEntry>,
+    #[serde(default)]
+    pub ui_session: UiSessionState,
 }
 
 impl Default for ReviewState {
@@ -50,8 +52,61 @@ impl Default for ReviewState {
         Self {
             version: 2,
             statuses: BTreeMap::new(),
+            ui_session: UiSessionState::default(),
         }
     }
+}
+
+/// Persisted UI/session context restored on next launch when still applicable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct UiSessionState {
+    #[serde(default)]
+    pub selected_commit_ids: BTreeSet<String>,
+    #[serde(default)]
+    pub commit_cursor_id: Option<String>,
+    #[serde(default)]
+    pub commit_status_filter: Option<UiSessionCommitStatusFilter>,
+    #[serde(default)]
+    pub focused_pane: Option<UiSessionFocusPane>,
+    #[serde(default)]
+    pub theme_mode: Option<UiSessionThemeMode>,
+    #[serde(default)]
+    pub selected_file: Option<String>,
+    #[serde(default)]
+    pub diff_positions: BTreeMap<String, UiSessionDiffPosition>,
+}
+
+/// Serializable focus-pane variant for restart persistence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UiSessionFocusPane {
+    Commits,
+    Files,
+    Diff,
+}
+
+/// Serializable commit filter variant for restart persistence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UiSessionCommitStatusFilter {
+    All,
+    UnreviewedOrIssueFound,
+    ReviewedOrResolved,
+}
+
+/// Serializable UI theme-mode variant for restart persistence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum UiSessionThemeMode {
+    Dark,
+    Light,
+}
+
+/// Serializable per-file local diff viewport snapshot for restart persistence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct UiSessionDiffPosition {
+    pub scroll: usize,
+    pub cursor: usize,
 }
 
 /// Lightweight commit entry shown in commit history pane.

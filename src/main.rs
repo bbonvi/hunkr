@@ -34,6 +34,8 @@ fn run_event_loop(
         }
 
         if app.should_quit() {
+            app.persist_session_state_before_exit()
+                .context("failed to persist session state")?;
             break;
         }
 

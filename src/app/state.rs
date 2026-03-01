@@ -20,7 +20,6 @@ impl App {
 
     pub(super) fn reload_commits(&mut self, preserve_manual_selection: bool) -> anyhow::Result<()> {
         let history = self.git.load_first_parent_history(HISTORY_LIMIT)?;
-        let default_selected = self.git.default_unpushed_commit_ids()?;
         let prior_cursor_idx = self.commit_ui.list_state.selected();
         let prior_cursor_commit_id = self.selected_commit_id();
         let prior_visual_anchor_commit_id = self
@@ -38,7 +37,6 @@ impl App {
             }
         }
 
-        let had_existing_rows = !self.commits.is_empty();
         let mut known = BTreeSet::new();
         for row in &self.commits {
             known.insert(row.info.id.clone());
@@ -48,13 +46,7 @@ impl App {
             .into_iter()
             .map(|info| {
                 let status = self.store.commit_status(&self.review_state, &info.id);
-                let selected = if preserve_manual_selection && old_selected.contains(&info.id) {
-                    true
-                } else if !had_existing_rows {
-                    default_selected.contains(&info.id) && status == ReviewStatus::Unreviewed
-                } else {
-                    false
-                };
+                let selected = preserve_manual_selection && old_selected.contains(&info.id);
                 CommitRow {
                     info,
                     selected,
@@ -118,6 +110,98 @@ impl App {
         self.rebuild_selection_dependent_views()?;
         self.sync_comment_report()?;
         Ok(())
+    }
+
+    /// Restores persisted UI session state after initial commit loading.
+    pub(super) fn restore_persisted_ui_session(&mut self) -> anyhow::Result<()> {
+        let session = self.review_state.ui_session.clone();
+
+        if let Some(filter) = session.commit_status_filter {
+            self.commit_ui.status_filter = commit_status_filter_from_session(filter);
+        }
+        if let Some(theme_mode) = session.theme_mode {
+            self.preferences.theme_mode = theme_mode_from_session(theme_mode);
+        }
+
+        restore_commit_selection(&mut self.commits, &session.selected_commit_ids);
+        self.commit_ui.visual_anchor = None;
+        self.commit_ui.selection_anchor = None;
+        self.commit_ui.mouse_anchor = None;
+        self.commit_ui.mouse_dragging = false;
+        self.commit_ui.mouse_drag_mode = None;
+        self.commit_ui.mouse_drag_baseline = None;
+
+        self.runtime.selection_rebuild_due = None;
+        self.reset_diff_view_for_commit_selection_change();
+        self.diff_cache.selected_file = session.selected_file;
+        self.diff_cache.positions = session
+            .diff_positions
+            .into_iter()
+            .map(|(path, position)| (path, diff_position_from_session(position)))
+            .collect();
+        self.diff_cache.pending_view_anchor = None;
+        self.rebuild_selection_dependent_views()?;
+
+        self.sync_commit_cursor_for_filters(
+            session.commit_cursor_id.as_deref(),
+            self.commit_ui.list_state.selected(),
+        );
+
+        if let Some(focused) = session.focused_pane.map(focus_pane_from_session) {
+            let has_files = !self.visible_file_indices().is_empty();
+            self.preferences.focused = restore_focus_with_availability(focused, has_files);
+        }
+
+        Ok(())
+    }
+
+    /// Captures the current UI context into persisted review state.
+    pub(super) fn snapshot_ui_session_state(&mut self) {
+        self.persist_selected_file_position();
+        let available_paths = self
+            .aggregate
+            .files
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let diff_positions = self
+            .diff_cache
+            .positions
+            .iter()
+            .filter(|(path, _)| available_paths.contains(*path))
+            .map(|(path, position)| (path.clone(), session_diff_position_from_runtime(*position)))
+            .collect::<BTreeMap<_, _>>();
+
+        self.review_state.ui_session = crate::model::UiSessionState {
+            selected_commit_ids: self
+                .commits
+                .iter()
+                .filter(|row| row.selected)
+                .map(|row| row.info.id.clone())
+                .collect(),
+            commit_cursor_id: self.selected_commit_id(),
+            commit_status_filter: Some(commit_status_filter_to_session(
+                self.commit_ui.status_filter,
+            )),
+            focused_pane: Some(focus_pane_to_session(self.preferences.focused)),
+            theme_mode: Some(theme_mode_to_session(self.preferences.theme_mode)),
+            selected_file: self
+                .diff_cache
+                .selected_file
+                .clone()
+                .filter(|path| available_paths.contains(path)),
+            diff_positions,
+        };
+    }
+
+    /// Persists current UI session state before process exit.
+    pub fn persist_session_state_before_exit(&mut self) -> anyhow::Result<()> {
+        if self.onboarding_active() || !self.store.root_dir().exists() {
+            return Ok(());
+        }
+        self.flush_pending_selection_rebuild();
+        self.snapshot_ui_session_state();
+        self.store.save(&self.review_state)
     }
 
     pub(super) fn rebuild_selection_dependent_views(&mut self) -> anyhow::Result<()> {
@@ -946,6 +1030,94 @@ fn deleted_file_toggle_line(expanded: bool, nerd_fonts: bool, theme: &UiTheme) -
     }
 }
 
+fn focus_pane_to_session(focused: FocusPane) -> crate::model::UiSessionFocusPane {
+    match focused {
+        FocusPane::Commits => crate::model::UiSessionFocusPane::Commits,
+        FocusPane::Files => crate::model::UiSessionFocusPane::Files,
+        FocusPane::Diff => crate::model::UiSessionFocusPane::Diff,
+    }
+}
+
+fn focus_pane_from_session(focused: crate::model::UiSessionFocusPane) -> FocusPane {
+    match focused {
+        crate::model::UiSessionFocusPane::Commits => FocusPane::Commits,
+        crate::model::UiSessionFocusPane::Files => FocusPane::Files,
+        crate::model::UiSessionFocusPane::Diff => FocusPane::Diff,
+    }
+}
+
+fn commit_status_filter_to_session(
+    filter: CommitStatusFilter,
+) -> crate::model::UiSessionCommitStatusFilter {
+    match filter {
+        CommitStatusFilter::All => crate::model::UiSessionCommitStatusFilter::All,
+        CommitStatusFilter::UnreviewedOrIssueFound => {
+            crate::model::UiSessionCommitStatusFilter::UnreviewedOrIssueFound
+        }
+        CommitStatusFilter::ReviewedOrResolved => {
+            crate::model::UiSessionCommitStatusFilter::ReviewedOrResolved
+        }
+    }
+}
+
+fn commit_status_filter_from_session(
+    filter: crate::model::UiSessionCommitStatusFilter,
+) -> CommitStatusFilter {
+    match filter {
+        crate::model::UiSessionCommitStatusFilter::All => CommitStatusFilter::All,
+        crate::model::UiSessionCommitStatusFilter::UnreviewedOrIssueFound => {
+            CommitStatusFilter::UnreviewedOrIssueFound
+        }
+        crate::model::UiSessionCommitStatusFilter::ReviewedOrResolved => {
+            CommitStatusFilter::ReviewedOrResolved
+        }
+    }
+}
+
+fn theme_mode_to_session(theme_mode: ThemeMode) -> crate::model::UiSessionThemeMode {
+    match theme_mode {
+        ThemeMode::Dark => crate::model::UiSessionThemeMode::Dark,
+        ThemeMode::Light => crate::model::UiSessionThemeMode::Light,
+    }
+}
+
+fn theme_mode_from_session(theme_mode: crate::model::UiSessionThemeMode) -> ThemeMode {
+    match theme_mode {
+        crate::model::UiSessionThemeMode::Dark => ThemeMode::Dark,
+        crate::model::UiSessionThemeMode::Light => ThemeMode::Light,
+    }
+}
+
+fn session_diff_position_from_runtime(
+    position: DiffPosition,
+) -> crate::model::UiSessionDiffPosition {
+    crate::model::UiSessionDiffPosition {
+        scroll: position.scroll,
+        cursor: position.cursor,
+    }
+}
+
+fn diff_position_from_session(position: crate::model::UiSessionDiffPosition) -> DiffPosition {
+    DiffPosition {
+        scroll: position.scroll,
+        cursor: position.cursor,
+    }
+}
+
+fn restore_commit_selection(rows: &mut [CommitRow], selected_commit_ids: &BTreeSet<String>) {
+    for row in rows {
+        row.selected = selected_commit_ids.contains(&row.info.id);
+    }
+}
+
+fn restore_focus_with_availability(focused: FocusPane, has_files: bool) -> FocusPane {
+    if focused == FocusPane::Files && !has_files {
+        FocusPane::Commits
+    } else {
+        focused
+    }
+}
+
 pub(super) fn format_uncommitted_summary(file_count: usize) -> String {
     let noun = if file_count == 1 { "file" } else { "files" };
     format!("{UNCOMMITTED_COMMIT_SUMMARY} ({file_count} {noun})")
@@ -1050,5 +1222,82 @@ pub(super) fn rendered_separator_line(_theme: &UiTheme) -> RenderedDiffLine {
         raw_text: String::new(),
         anchor: None,
         comment_id: None,
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::{CommitRow, FocusPane, restore_commit_selection, restore_focus_with_availability};
+    use crate::model::{
+        CommitInfo, ReviewStatus, UNCOMMITTED_COMMIT_ID, UNCOMMITTED_COMMIT_SHORT,
+        UNCOMMITTED_COMMIT_SUMMARY,
+    };
+    use std::collections::BTreeSet;
+
+    fn row(id: &str) -> CommitRow {
+        CommitRow {
+            info: CommitInfo {
+                id: id.to_owned(),
+                short_id: id.to_owned(),
+                summary: String::new(),
+                author: String::new(),
+                timestamp: 0,
+                unpushed: false,
+                decorations: Vec::new(),
+            },
+            selected: false,
+            status: ReviewStatus::Unreviewed,
+            is_uncommitted: false,
+        }
+    }
+
+    #[test]
+    fn restore_commit_selection_keeps_only_available_ids() {
+        let mut rows = vec![row("a1"), row("b2"), row("c3")];
+        rows.insert(
+            0,
+            CommitRow {
+                info: CommitInfo {
+                    id: UNCOMMITTED_COMMIT_ID.to_owned(),
+                    short_id: UNCOMMITTED_COMMIT_SHORT.to_owned(),
+                    summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
+                    author: "local".to_owned(),
+                    timestamp: 0,
+                    unpushed: false,
+                    decorations: Vec::new(),
+                },
+                selected: false,
+                status: ReviewStatus::Unreviewed,
+                is_uncommitted: true,
+            },
+        );
+        let selected = BTreeSet::from([
+            "b2".to_owned(),
+            "missing".to_owned(),
+            UNCOMMITTED_COMMIT_ID.to_owned(),
+        ]);
+
+        restore_commit_selection(&mut rows, &selected);
+
+        assert!(rows[0].selected);
+        assert!(!rows[1].selected);
+        assert!(rows[2].selected);
+        assert!(!rows[3].selected);
+    }
+
+    #[test]
+    fn restore_focus_falls_back_from_files_when_no_files_are_available() {
+        assert_eq!(
+            restore_focus_with_availability(FocusPane::Files, false),
+            FocusPane::Commits
+        );
+        assert_eq!(
+            restore_focus_with_availability(FocusPane::Files, true),
+            FocusPane::Files
+        );
+        assert_eq!(
+            restore_focus_with_availability(FocusPane::Diff, false),
+            FocusPane::Diff
+        );
     }
 }

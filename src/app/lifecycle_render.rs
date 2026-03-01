@@ -32,7 +32,7 @@ impl App {
             app.runtime.status.clear();
         } else {
             app.reload_commits(true)?;
-            app.ensure_rendered_diff();
+            app.restore_persisted_ui_session()?;
             let selected = app.commits.iter().filter(|row| row.selected).count();
             app.runtime.status = format!("{selected} commit(s) selected");
         }

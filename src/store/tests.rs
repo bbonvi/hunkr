@@ -1,9 +1,13 @@
 //! Unit tests for review state persistence and legacy-upgrade behavior.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use tempfile::tempdir;
 
 use super::*;
+use crate::model::{
+    UiSessionCommitStatusFilter, UiSessionDiffPosition, UiSessionFocusPane, UiSessionState,
+    UiSessionThemeMode,
+};
 
 #[test]
 fn state_roundtrip_preserves_statuses() {
@@ -12,6 +16,7 @@ fn state_roundtrip_preserves_statuses() {
     let mut state = ReviewState {
         version: 2,
         statuses: BTreeMap::new(),
+        ui_session: UiSessionState::default(),
     };
 
     store.set_status(&mut state, "abc123", ReviewStatus::IssueFound, "main");
@@ -128,6 +133,35 @@ fn shell_history_loads_legacy_array_format() {
         loaded,
         vec!["git status".to_owned(), "cargo test".to_owned()]
     );
+}
+
+#[test]
+fn state_roundtrip_preserves_ui_session_snapshot() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+    let state = ReviewState {
+        version: 2,
+        statuses: BTreeMap::new(),
+        ui_session: UiSessionState {
+            selected_commit_ids: BTreeSet::from(["a1".to_owned(), "b2".to_owned()]),
+            commit_cursor_id: Some("b2".to_owned()),
+            commit_status_filter: Some(UiSessionCommitStatusFilter::ReviewedOrResolved),
+            focused_pane: Some(UiSessionFocusPane::Diff),
+            theme_mode: Some(UiSessionThemeMode::Light),
+            selected_file: Some("src/lib.rs".to_owned()),
+            diff_positions: BTreeMap::from([(
+                "src/lib.rs".to_owned(),
+                UiSessionDiffPosition {
+                    scroll: 12,
+                    cursor: 18,
+                },
+            )]),
+        },
+    };
+
+    store.save(&state).expect("save");
+    let loaded = store.load().expect("load");
+    assert_eq!(loaded.ui_session, state.ui_session);
 }
 
 #[test]
