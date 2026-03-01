@@ -11,7 +11,7 @@ impl App {
         self.reload_commits(true)
             .context("failed to refresh commit and diff state")?;
 
-        let now = Instant::now();
+        let now = self.now_instant();
         self.runtime.last_refresh = now;
         self.runtime.last_relative_time_redraw = now;
         self.runtime.needs_redraw = true;
@@ -71,7 +71,7 @@ impl App {
                     id: UNCOMMITTED_COMMIT_ID.to_owned(),
                     summary: format_uncommitted_summary(uncommitted_file_count),
                     author: "local".to_owned(),
-                    timestamp: Utc::now().timestamp(),
+                    timestamp: self.now_timestamp(),
                     unpushed: false,
                     decorations: Vec::new(),
                 },
@@ -452,7 +452,7 @@ impl App {
     pub(super) fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
         let theme = UiTheme::from_mode(self.ui.preferences.theme_mode);
-        let now_ts = Utc::now().timestamp();
+        let now_ts = self.now_timestamp();
         let file_comments: Vec<&ReviewComment> = self
             .deps
             .comments
@@ -873,7 +873,7 @@ impl App {
     }
 
     pub(super) fn on_selection_changed_debounced(&mut self) {
-        self.runtime.selection_rebuild_due = Some(Instant::now() + SELECTION_REBUILD_DEBOUNCE);
+        self.runtime.selection_rebuild_due = Some(self.now_instant() + SELECTION_REBUILD_DEBOUNCE);
         self.reset_diff_view_for_commit_selection_change();
         let selected = self
             .domain

@@ -207,14 +207,14 @@ impl App {
         self.ui
             .shell_command
             .output_flash_clear_due
-            .map(|due| due.saturating_duration_since(Instant::now()))
+            .map(|due| due.saturating_duration_since(self.now_instant()))
     }
 
     pub(super) fn poll_shell_output_flash(&mut self) {
         let Some(due) = self.ui.shell_command.output_flash_clear_due else {
             return;
         };
-        if Instant::now() < due {
+        if self.now_instant() < due {
             return;
         }
         self.ui.shell_command.output_flash_clear_due = None;
@@ -923,7 +923,7 @@ impl App {
                 origin: ShellOutputVisualOrigin::Keyboard,
             });
             self.ui.shell_command.output_cursor = rows.len().saturating_sub(1);
-            self.ui.shell_command.output_flash_clear_due = Some(Instant::now() + duration);
+            self.ui.shell_command.output_flash_clear_due = Some(self.now_instant() + duration);
             self.ensure_shell_output_cursor_visible();
             self.runtime.needs_redraw = true;
         }

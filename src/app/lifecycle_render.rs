@@ -7,23 +7,30 @@ struct BootstrapDeps {
     store: StateStore,
     instance_lock: Option<InstanceLock>,
     comments: CommentStore,
+    clock: Arc<dyn AppClock>,
     review_state: ReviewState,
 }
 
 impl App {
     pub fn bootstrap() -> anyhow::Result<Self> {
-        let git = GitService::open_current()?;
-        let config = AppConfig::load()?;
-        let store = StateStore::for_project(git.root());
+        let ports = SystemBootstrapPorts;
+        Self::bootstrap_with(&ports)
+    }
+
+    pub fn bootstrap_with(ports: &dyn AppBootstrapPorts) -> anyhow::Result<Self> {
+        let git = ports.open_current_git()?;
+        let config = ports.load_config()?;
+        let store = ports.state_store_for_repo(git.root());
         let instance_lock = store.try_acquire_instance_lock()?;
         let first_open = !store.has_state_file();
         let review_state = store.load()?;
-        let comments = CommentStore::new(store.root_dir(), git.branch_name())?;
+        let comments = ports.open_comment_store(store.root_dir(), git.branch_name())?;
         let deps = BootstrapDeps {
             git,
             store,
             instance_lock,
             comments,
+            clock: ports.clock(),
             review_state,
         };
         let mut app = Self::from_bootstrap_deps(deps, &config, first_open);
@@ -40,7 +47,7 @@ impl App {
     }
 
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
-        let now = Instant::now();
+        let now = deps.clock.now_instant();
         let shell_history = deps
             .store
             .load_shell_history()
@@ -55,6 +62,7 @@ impl App {
                 store: deps.store,
                 instance_lock: deps.instance_lock,
                 comments: deps.comments,
+                clock: deps.clock,
             },
             domain: AppDomainState {
                 review_state: deps.review_state,
@@ -201,8 +209,9 @@ impl App {
         }
         self.ensure_rendered_diff();
         self.runtime.onboarding_step = None;
-        self.runtime.last_refresh = Instant::now();
-        self.runtime.last_relative_time_redraw = Instant::now();
+        let now = self.deps.clock.now_instant();
+        self.runtime.last_refresh = now;
+        self.runtime.last_relative_time_redraw = now;
 
         let selected = self
             .domain
@@ -313,7 +322,7 @@ impl App {
 
     pub(super) fn request_terminal_clear(&mut self) {
         self.runtime.terminal_clear_requested = true;
-        self.runtime.last_terminal_clear = Instant::now();
+        self.runtime.last_terminal_clear = self.now_instant();
         self.runtime.needs_redraw = true;
     }
 
@@ -329,7 +338,7 @@ impl App {
         let selection_rebuild_in = self
             .runtime
             .selection_rebuild_due
-            .map(|due| due.saturating_duration_since(Instant::now()));
+            .map(|due| due.saturating_duration_since(self.now_instant()));
         let timeout = next_poll_timeout(
             self.runtime.last_refresh.elapsed(),
             self.runtime.last_relative_time_redraw.elapsed(),
@@ -424,7 +433,7 @@ impl App {
             self.request_terminal_clear();
         }
 
-        let now = Instant::now();
+        let now = self.now_instant();
         if self
             .runtime
             .selection_rebuild_due
@@ -439,15 +448,15 @@ impl App {
             if let Err(err) = self.reload_commits(true) {
                 self.runtime.status = format!("refresh failed: {err:#}");
             }
-            self.runtime.last_refresh = Instant::now();
+            self.runtime.last_refresh = self.now_instant();
             refreshed = true;
             self.runtime.needs_redraw = true;
         }
 
         if refreshed {
-            self.runtime.last_relative_time_redraw = Instant::now();
+            self.runtime.last_relative_time_redraw = self.now_instant();
         } else if self.runtime.last_relative_time_redraw.elapsed() >= RELATIVE_TIME_REDRAW_EVERY {
-            self.runtime.last_relative_time_redraw = Instant::now();
+            self.runtime.last_relative_time_redraw = self.now_instant();
             self.runtime.needs_redraw = true;
         }
     }
@@ -572,7 +581,7 @@ impl App {
         if let Err(err) = self.reload_commits(true) {
             self.runtime.status = format!("reload failed: {err:#}");
         }
-        let now = Instant::now();
+        let now = self.now_instant();
         self.runtime.last_refresh = now;
         self.runtime.last_relative_time_redraw = now;
     }

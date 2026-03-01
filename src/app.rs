@@ -37,6 +37,7 @@ mod lifecycle_render;
 mod lifecycle_view;
 mod navigation;
 mod nerd_fonts;
+mod ports;
 mod selection_helpers;
 mod shell_command;
 mod state;
@@ -53,6 +54,7 @@ use self::nerd_fonts::{
     format_path_with_icon, format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
     list_highlight_symbol_width, uncommitted_badge, worktree_label_prefix,
 };
+use self::ports::{AppBootstrapPorts, AppClock, SystemBootstrapPorts};
 use self::selection_helpers::*;
 use self::text_edit::*;
 use self::tree_highlight::*;
@@ -558,6 +560,7 @@ struct AppDependencies {
     store: StateStore,
     instance_lock: Option<InstanceLock>,
     comments: CommentStore,
+    clock: Arc<dyn AppClock>,
 }
 
 /// Business/domain projections currently shown in the UI.
@@ -596,6 +599,16 @@ pub struct App {
 struct RenderedDiffKey {
     theme_mode: ThemeMode,
     visible_paths: Vec<String>,
+}
+
+impl App {
+    pub(super) fn now_instant(&self) -> Instant {
+        self.deps.clock.now_instant()
+    }
+
+    pub(super) fn now_timestamp(&self) -> i64 {
+        self.deps.clock.now_utc().timestamp()
+    }
 }
 
 #[cfg(test)]

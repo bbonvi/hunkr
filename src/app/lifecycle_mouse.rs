@@ -221,7 +221,7 @@ impl App {
     }
 
     fn should_scroll_list_wheel(&mut self, pane: FocusPane, delta: isize) -> bool {
-        let now = Instant::now();
+        let now = self.now_instant();
         if list_wheel_event_is_duplicate(
             self.ui.diff_ui.last_list_wheel_event,
             pane,
