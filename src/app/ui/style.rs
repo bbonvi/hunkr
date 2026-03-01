@@ -5,7 +5,9 @@ use ratatui::{
 
 use crate::model::ReviewStatus;
 
-use super::super::{UiTheme, blend_colors, display_width, truncate};
+#[cfg(test)]
+use super::super::truncate;
+use super::super::{UiTheme, blend_colors, display_width};
 
 /// Determines how cursor background interacts with an existing selection background.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +93,7 @@ pub(in crate::app) fn status_style(status: ReviewStatus, theme: &UiTheme) -> Sty
     }
 }
 
+#[cfg(test)]
 pub(in crate::app) fn line_with_right(
     left: String,
     left_style: Style,

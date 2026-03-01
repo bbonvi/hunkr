@@ -47,8 +47,9 @@ mod worktree_switcher;
 use self::comment_helpers::*;
 use self::core_helpers::*;
 use self::nerd_fonts::{
-    NerdFontTheme, app_title_label, commit_selection_marker, format_file_change_badge,
-    format_path_with_icon, format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
+    NerdFontTheme, app_title_label, commit_selection_marker, commit_status_badge,
+    file_change_kind_symbol, format_file_change_badge, format_path_with_icon,
+    format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
     list_highlight_symbol_width, uncommitted_badge, unpushed_marker,
 };
 use self::selection_helpers::*;
@@ -309,6 +310,7 @@ struct TreeRow {
     depth: usize,
     selectable: bool,
     modified_ts: Option<i64>,
+    change: Option<FileChangeSummary>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]

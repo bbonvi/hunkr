@@ -80,6 +80,7 @@ impl FileTree {
                 depth,
                 selectable: false,
                 modified_ts: None,
+                change: None,
             });
             child.flatten_into(rows, path, depth + 1, nerd_fonts, nerd_font_theme);
         }
@@ -91,18 +92,12 @@ impl FileTree {
                 format!("{prefix}/{file}")
             };
             rows.push(TreeRow {
-                label: format_tree_file_label(
-                    depth,
-                    file,
-                    &full,
-                    meta.change.as_ref(),
-                    nerd_fonts,
-                    nerd_font_theme,
-                ),
+                label: format_tree_file_label(depth, file, &full, nerd_fonts, nerd_font_theme),
                 path: Some(full),
                 depth,
                 selectable: true,
                 modified_ts: Some(meta.modified_ts),
+                change: meta.change.clone(),
             });
         }
     }

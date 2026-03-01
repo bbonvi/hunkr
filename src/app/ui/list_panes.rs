@@ -1,4 +1,4 @@
-use crate::model::ReviewStatus;
+use crate::model::{FileChangeKind, ReviewStatus};
 use chrono::Utc;
 use ratatui::{
     Frame,
@@ -9,13 +9,11 @@ use ratatui::{
 
 use super::super::{
     CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme, commit_selection_marker,
-    display_width, format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
-    sanitize_terminal_text, sanitized_span, status_short_label, truncate, uncommitted_badge,
-    unpushed_marker,
+    commit_status_badge, display_width, format_file_change_badge, format_relative_time,
+    list_highlight_symbol, list_highlight_symbol_width, sanitize_terminal_text, sanitized_span,
+    truncate, uncommitted_badge, unpushed_marker,
 };
-use super::style::{
-    CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width, status_style,
-};
+use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
 /// Renders commit/file list panes so App keeps high-level orchestration only.
 pub(in crate::app) struct ListPaneRenderer<'a> {
@@ -306,13 +304,46 @@ impl<'a> ListLinePresenter<'a> {
                 .modified_ts
                 .map(|ts| format_relative_time(ts, self.now_ts))
                 .unwrap_or_default();
-            line_with_right(
-                label,
+            let badge = row
+                .change
+                .as_ref()
+                .map(|change| format_file_change_badge(change, self.nerd_fonts))
+                .unwrap_or_default();
+            let right_width = display_width(&right);
+            let badge_width = display_width(&badge);
+            let reserved = right_width
+                + usize::from(right_width > 0)
+                + badge_width
+                + usize::from(badge_width > 0);
+            let max_label = self.width.saturating_sub(reserved).max(1);
+            let left_render = truncate(&label, max_label);
+            let static_used = display_width(&left_render)
+                + badge_width
+                + usize::from(badge_width > 0)
+                + right_width;
+            let spaces = if static_used >= self.width {
+                " ".to_owned()
+            } else {
+                " ".repeat(self.width - static_used)
+            };
+            let mut spans = vec![Span::styled(
+                left_render,
                 Style::default().fg(self.theme.text),
-                right,
-                Style::default().fg(self.theme.dimmed),
-                self.width,
-            )
+            )];
+            if !badge.is_empty() {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    badge,
+                    file_change_style(row.change.as_ref().map(|change| change.kind), self.theme),
+                ));
+            }
+            if !spaces.is_empty() {
+                spans.push(Span::raw(spaces));
+            }
+            if !right.is_empty() {
+                spans.push(Span::styled(right, Style::default().fg(self.theme.dimmed)));
+            }
+            Line::from(spans)
         } else {
             Line::from(Span::styled(
                 label,
@@ -325,7 +356,6 @@ impl<'a> ListLinePresenter<'a> {
 
     pub(in crate::app) fn commit_row_line(&self, row: &CommitRow) -> Line<'static> {
         let summary = sanitize_terminal_text(&row.info.summary);
-        let decoration_suffix = commit_decoration_suffix(row);
         if row.is_uncommitted {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
             let left = format!("{marker} {} {summary}", row.info.short_id);
@@ -357,65 +387,73 @@ impl<'a> ListLinePresenter<'a> {
         }
 
         let marker = commit_selection_marker(row.selected, self.nerd_fonts);
-        let left = if decoration_suffix.is_empty() {
-            format!("{marker} {} {summary}", row.info.short_id)
-        } else {
-            format!(
-                "{marker} {} {summary} {decoration_suffix}",
-                row.info.short_id
-            )
-        };
-        let status_label = format!("[{}]", status_short_label(row.status));
-        let unpushed = if row.info.unpushed {
-            unpushed_marker(self.nerd_fonts)
-        } else {
-            ""
-        };
-        let right = format_relative_time(row.info.timestamp, self.now_ts);
-        let reserved =
-            1 + display_width(&status_label) + display_width(unpushed) + 1 + display_width(&right);
-        let max_left = self.width.saturating_sub(reserved).max(1);
+        let left = format!("{marker} {} {summary}", row.info.short_id);
+        let max_right_width = self.width.saturating_sub(1);
+        let status_badge = commit_status_badge(row.status, self.nerd_fonts).to_owned();
+        let mut right_spans = vec![Span::styled(
+            status_badge.clone(),
+            status_style(row.status, self.theme).add_modifier(Modifier::BOLD),
+        )];
+        let mut right_width = display_width(&status_badge);
+        if row.info.unpushed {
+            let unpushed = unpushed_marker(self.nerd_fonts).to_owned();
+            let needed = 1 + display_width(&unpushed);
+            if right_width + needed <= max_right_width {
+                right_spans.push(Span::raw(" "));
+                right_spans.push(Span::styled(
+                    unpushed.clone(),
+                    Style::default()
+                        .fg(self.theme.unpushed)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                right_width += needed;
+            }
+        }
+        let decorations = commit_decoration_label(row, self.nerd_fonts);
+        if !decorations.is_empty() {
+            let remaining = max_right_width.saturating_sub(right_width + 1);
+            if remaining > 0 {
+                let max_decorations = remaining.min(28);
+                let rendered = truncate(&decorations, max_decorations);
+                right_spans.push(Span::raw(" "));
+                right_spans.push(Span::styled(
+                    rendered.clone(),
+                    Style::default().fg(self.theme.accent),
+                ));
+                right_width += 1 + display_width(&rendered);
+            }
+        }
+        let age = format_relative_time(row.info.timestamp, self.now_ts);
+        let age_width = display_width(&age);
+        if right_width + 1 + age_width <= max_right_width {
+            right_spans.push(Span::raw(" "));
+            right_spans.push(Span::styled(
+                age.clone(),
+                Style::default().fg(self.theme.dimmed),
+            ));
+            right_width += 1 + age_width;
+        }
+        let max_left = self.width.saturating_sub(right_width + 1).max(1);
         let left_render = truncate(&left, max_left);
-        let static_used = display_width(&left_render)
-            + display_width(&status_label)
-            + display_width(unpushed)
-            + display_width(&right)
-            + 1;
+        let static_used = display_width(&left_render) + right_width;
         let spaces = if static_used >= self.width {
             " ".to_owned()
         } else {
             " ".repeat(self.width - static_used)
         };
-        let emphasis = if matches!(
-            row.status,
-            ReviewStatus::Unreviewed | ReviewStatus::IssueFound
-        ) {
-            Style::default().add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        Line::from(vec![
-            Span::styled(
-                left_render,
-                Style::default().fg(self.theme.text).patch(emphasis),
-            ),
-            Span::raw(" "),
-            Span::styled(status_label, status_style(row.status, self.theme)),
-            Span::styled(
-                unpushed.to_owned(),
-                Style::default().fg(self.theme.unpushed).patch(emphasis),
-            ),
-            Span::raw(spaces),
-            Span::styled(
-                right,
-                Style::default().fg(self.theme.dimmed).patch(emphasis),
-            ),
-        ])
+        let mut spans = vec![Span::styled(
+            left_render,
+            Style::default().fg(self.theme.text),
+        )];
+        if !spaces.is_empty() {
+            spans.push(Span::raw(spaces));
+        }
+        spans.extend(right_spans);
+        Line::from(spans)
     }
 }
 
-fn commit_decoration_suffix(row: &CommitRow) -> String {
+fn commit_decoration_label(row: &CommitRow, nerd_fonts: bool) -> String {
     if row.info.decorations.is_empty() {
         return String::new();
     }
@@ -426,5 +464,27 @@ fn commit_decoration_suffix(row: &CommitRow) -> String {
         .map(|item| sanitize_terminal_text(&item.label))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("({labels})")
+    if nerd_fonts {
+        format!(" {labels}")
+    } else {
+        format!("refs:{labels}")
+    }
+}
+
+fn file_change_style(kind: Option<FileChangeKind>, theme: &UiTheme) -> Style {
+    match kind {
+        Some(FileChangeKind::Added) => Style::default().fg(theme.diff_add),
+        Some(FileChangeKind::Deleted) => Style::default().fg(theme.diff_remove),
+        Some(FileChangeKind::Modified) => Style::default().fg(theme.accent),
+        Some(FileChangeKind::Renamed | FileChangeKind::Copied) => {
+            Style::default().fg(theme.focus_border)
+        }
+        Some(FileChangeKind::Unmerged) => Style::default()
+            .fg(theme.issue)
+            .add_modifier(Modifier::BOLD),
+        Some(FileChangeKind::TypeChanged | FileChangeKind::Untracked | FileChangeKind::Unknown) => {
+            Style::default().fg(theme.muted)
+        }
+        None => Style::default().fg(theme.text),
+    }
 }

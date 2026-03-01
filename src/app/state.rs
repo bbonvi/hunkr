@@ -857,21 +857,9 @@ pub(super) fn rendered_file_header_line(
 ) -> RenderedDiffLine {
     let display_path = format_path_with_icon(path, nerd_fonts, nerd_font_theme);
     let sanitized_path = sanitize_terminal_text(path);
-    let change_badge = file_change
-        .map(|change| format_file_change_badge(change, nerd_fonts))
+    let raw_change_suffix = file_change
+        .map(|change| format!(" · {}", format_file_change_badge(change, nerd_fonts)))
         .unwrap_or_default();
-    let display_badge = if change_badge.is_empty() {
-        String::new()
-    } else if change_badge.starts_with('[') {
-        change_badge.clone()
-    } else {
-        format!("[{change_badge}]")
-    };
-    let raw_change_suffix = if display_badge.is_empty() {
-        String::new()
-    } else {
-        format!(" {display_badge}")
-    };
     let rename_from = file_change
         .and_then(|change| change.old_path.as_ref())
         .map(|from| format!(" (from {})", sanitize_terminal_text(from)))
@@ -898,12 +886,28 @@ pub(super) fn rendered_file_header_line(
                 Style::default().fg(theme.muted),
             ));
         }
-        if !display_badge.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("·", Style::default().fg(theme.dimmed)));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            file_change_kind_symbol(change.kind, nerd_fonts),
+            file_change_kind_style(change.kind, theme).add_modifier(Modifier::BOLD),
+        ));
+        if change.additions > 0 {
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
-                display_badge,
+                format!("+{}", change.additions),
                 Style::default()
-                    .fg(theme.focus_border)
+                    .fg(theme.diff_add)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        if change.deletions > 0 {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("-{}", change.deletions),
+                Style::default()
+                    .fg(theme.diff_remove)
                     .add_modifier(Modifier::BOLD),
             ));
         }
@@ -914,6 +918,19 @@ pub(super) fn rendered_file_header_line(
         raw_text,
         anchor: None,
         comment_id: None,
+    }
+}
+
+fn file_change_kind_style(kind: FileChangeKind, theme: &UiTheme) -> Style {
+    match kind {
+        FileChangeKind::Added => Style::default().fg(theme.diff_add),
+        FileChangeKind::Deleted => Style::default().fg(theme.diff_remove),
+        FileChangeKind::Modified => Style::default().fg(theme.accent),
+        FileChangeKind::Renamed | FileChangeKind::Copied => Style::default().fg(theme.focus_border),
+        FileChangeKind::Unmerged => Style::default().fg(theme.issue),
+        FileChangeKind::TypeChanged => Style::default().fg(theme.diff_meta),
+        FileChangeKind::Untracked => Style::default().fg(theme.unreviewed),
+        FileChangeKind::Unknown => Style::default().fg(theme.muted),
     }
 }
 

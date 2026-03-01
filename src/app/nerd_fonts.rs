@@ -2,7 +2,7 @@ use std::{collections::HashMap, path::Path};
 
 use unicode_width::UnicodeWidthStr;
 
-use crate::model::{FileChangeKind, FileChangeSummary};
+use crate::model::{FileChangeKind, FileChangeSummary, ReviewStatus};
 
 const DEFAULT_DIRECTORY_ICON: &str = "";
 const DEFAULT_FILE_ICON: &str = "󰈔";
@@ -59,7 +59,7 @@ pub(super) fn list_highlight_symbol_width(nerd_fonts: bool) -> u16 {
 
 /// Returns the unpushed suffix badge in commit rows.
 pub(super) fn unpushed_marker(nerd_fonts: bool) -> &'static str {
-    if nerd_fonts { " " } else { " [^]" }
+    if nerd_fonts { "" } else { "[^]" }
 }
 
 /// Returns the draft badge used for uncommitted pseudo-commit rows.
@@ -91,19 +91,15 @@ pub(super) fn format_tree_file_label(
     depth: usize,
     file_name: &str,
     full_path: &str,
-    change: Option<&FileChangeSummary>,
     nerd_fonts: bool,
     theme: &NerdFontTheme,
 ) -> String {
     let indent = "  ".repeat(depth);
-    let suffix = change
-        .map(|summary| format!(" {}", format_file_change_badge(summary, nerd_fonts)))
-        .unwrap_or_default();
     if nerd_fonts {
         let icon = nerd_file_icon_for_path(full_path, theme);
-        format!("{indent}{icon} {file_name}{suffix}")
+        format!("{indent}{icon} {file_name}")
     } else {
-        format!("{indent}[F] {file_name}{suffix}")
+        format!("{indent}[F] {file_name}")
     }
 }
 
@@ -128,24 +124,36 @@ pub(super) fn format_file_change_badge(change: &FileChangeSummary, nerd_fonts: b
         parts.push(format!("-{}", change.deletions));
     }
     if parts.is_empty() {
-        if nerd_fonts {
-            kind.to_owned()
-        } else {
-            format!("[{kind}]")
-        }
-    } else if nerd_fonts {
-        format!("{kind} {}", parts.join(" "))
+        kind.to_owned()
     } else {
-        format!("[{kind} {}]", parts.join(" "))
+        format!("{kind} {}", parts.join(" "))
     }
 }
 
-fn file_change_kind_symbol(kind: FileChangeKind, nerd_fonts: bool) -> &'static str {
+/// Returns the compact per-status badge shown in commit rows.
+pub(super) fn commit_status_badge(status: ReviewStatus, nerd_fonts: bool) -> &'static str {
+    if nerd_fonts {
+        return match status {
+            ReviewStatus::Unreviewed => "",
+            ReviewStatus::Reviewed => "",
+            ReviewStatus::IssueFound => "",
+            ReviewStatus::Resolved => "",
+        };
+    }
+    match status {
+        ReviewStatus::Unreviewed => "U",
+        ReviewStatus::Reviewed => "R",
+        ReviewStatus::IssueFound => "I",
+        ReviewStatus::Resolved => "S",
+    }
+}
+
+pub(super) fn file_change_kind_symbol(kind: FileChangeKind, nerd_fonts: bool) -> &'static str {
     if nerd_fonts {
         return match kind {
             FileChangeKind::Added => "",
             FileChangeKind::Modified => "",
-            FileChangeKind::Deleted => "",
+            FileChangeKind::Deleted => "",
             FileChangeKind::Renamed => "󰁕",
             FileChangeKind::Copied => "",
             FileChangeKind::TypeChanged => "󰆩",

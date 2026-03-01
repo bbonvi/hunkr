@@ -208,7 +208,7 @@ fn compose_commit_line_renders_git_decorations() {
         },
     ];
     let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(120, 3_600, &theme, false);
+    let presenter = ListLinePresenter::new(240, 3_600, &theme, false);
     let rendered = presenter.commit_row_line(&row);
     let flattened = rendered
         .spans
@@ -216,7 +216,7 @@ fn compose_commit_line_renders_git_decorations() {
         .map(|span| span.content.to_string())
         .collect::<String>();
 
-    assert!(flattened.contains("(HEAD -> main, origin/main)"));
+    assert!(flattened.contains("refs:HEAD -> main"));
 }
 
 #[test]
@@ -227,6 +227,7 @@ fn file_row_line_sanitizes_untrusted_path_label() {
         depth: 0,
         selectable: true,
         modified_ts: Some(0),
+        change: None,
     };
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
@@ -447,11 +448,37 @@ fn file_tree_file_labels_include_change_badges_and_line_stats() {
     );
     let nerd_theme = NerdFontTheme::default();
     let rows = tree.flattened_rows(false, &nerd_theme);
+    let row = rows
+        .iter()
+        .find(|row| row.path.as_deref() == Some("src/app.rs"))
+        .expect("file row");
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
+    let rendered = presenter.file_row_line(row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
 
-    assert!(
-        rows.iter()
-            .any(|r| r.label.contains("[F] app.rs [M +4 -1]"))
+    assert!(flattened.contains("[F] app.rs"));
+    assert!(flattened.contains("M +4 -1"));
+}
+
+#[test]
+fn deleted_file_badge_uses_trash_icon_with_minus_count() {
+    let badge = format_file_change_badge(
+        &FileChangeSummary {
+            kind: FileChangeKind::Deleted,
+            old_path: None,
+            additions: 0,
+            deletions: 802,
+        },
+        true,
     );
+    assert!(badge.contains(""));
+    assert!(badge.contains("-802"));
+    assert!(badge.contains("-802"));
 }
 
 #[test]
@@ -592,7 +619,7 @@ fn rendered_file_banner_includes_change_badge_and_rename_source() {
         .collect::<String>();
 
     assert!(flattened.contains("(from src/old.rs)"));
-    assert!(flattened.contains("[R +12 -3]"));
+    assert!(flattened.contains("· R +12 -3"));
 }
 
 #[test]
@@ -1706,7 +1733,7 @@ fn compose_commit_line_marks_selected_rows() {
 }
 
 #[test]
-fn compose_commit_line_bolds_unreviewed_and_issue_found_rows() {
+fn compose_commit_line_uses_bold_status_badges() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
 
@@ -1714,19 +1741,25 @@ fn compose_commit_line_bolds_unreviewed_and_issue_found_rows() {
     let issue = presenter.commit_row_line(&commit_row("i1", false, ReviewStatus::IssueFound));
     let reviewed = presenter.commit_row_line(&commit_row("r1", false, ReviewStatus::Reviewed));
 
-    assert!(
-        unreviewed.spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD)
-    );
-    assert!(issue.spans[0].style.add_modifier.contains(Modifier::BOLD));
-    assert!(
-        !reviewed.spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD)
-    );
+    let unreviewed_badge = unreviewed
+        .spans
+        .iter()
+        .find(|span| span.content == "U")
+        .expect("U badge");
+    let issue_badge = issue
+        .spans
+        .iter()
+        .find(|span| span.content == "I")
+        .expect("I badge");
+    let reviewed_badge = reviewed
+        .spans
+        .iter()
+        .find(|span| span.content == "R")
+        .expect("R badge");
+
+    assert!(unreviewed_badge.style.add_modifier.contains(Modifier::BOLD));
+    assert!(issue_badge.style.add_modifier.contains(Modifier::BOLD));
+    assert!(reviewed_badge.style.add_modifier.contains(Modifier::BOLD));
 }
 
 #[test]
@@ -1742,6 +1775,7 @@ fn compose_commit_line_uses_nerd_symbols_when_enabled() {
         .collect::<String>();
 
     assert!(flattened.starts_with(" "));
+    assert!(flattened.contains(""));
     assert!(flattened.contains(" "));
     assert!(flattened.ends_with("1h ago"));
 }
