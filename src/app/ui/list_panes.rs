@@ -15,7 +15,7 @@ use super::super::{
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
-const MIN_RELATIVE_AGE_WIDTH: usize = 7;
+const MIN_RELATIVE_AGE_WIDTH: usize = 3;
 
 /// Renders commit/file list panes so App keeps high-level orchestration only.
 pub(in crate::app) struct ListPaneRenderer<'a> {

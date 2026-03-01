@@ -72,7 +72,7 @@ fn sample_commit_comment(anchor: CommentAnchor, text: &str) -> ReviewComment {
             start: anchor.clone(),
             end: anchor.clone(),
             commits: BTreeSet::from([anchor.commit_id.clone()]),
-            selected_lines: vec!["---- commit abc1234 add parser (1m ago)".to_owned()],
+            selected_lines: vec!["---- commit abc1234 add parser (1m)".to_owned()],
         },
         text: text.to_owned(),
         created_at: "2026-01-01T00:00:00Z".to_owned(),
@@ -256,7 +256,7 @@ fn compose_commit_line_left_pads_short_relative_age() {
     let rendered = presenter.commit_row_line(&row);
     let age_span = rendered.spans.last().expect("age span");
 
-    assert_eq!(age_span.content.as_ref(), " 1h ago");
+    assert_eq!(age_span.content.as_ref(), " 1h");
 }
 
 #[test]
@@ -1671,7 +1671,7 @@ fn line_with_right_keeps_right_text_visible() {
     let rendered = line_with_right(
         "[F] file.rs".to_owned(),
         Style::default(),
-        "3h ago".to_owned(),
+        "3h".to_owned(),
         Style::default(),
         24,
     );
@@ -1680,7 +1680,7 @@ fn line_with_right_keeps_right_text_visible() {
         .iter()
         .map(|s| s.content.to_string())
         .collect::<String>();
-    assert!(flattened.ends_with("3h ago"));
+    assert!(flattened.ends_with("3h"));
 }
 
 #[test]
@@ -1754,7 +1754,7 @@ fn compose_commit_line_preserves_age_column_on_narrow_width() {
         .iter()
         .map(|s| s.content.to_string())
         .collect::<String>();
-    assert!(flattened.ends_with("1h ago"));
+    assert!(flattened.ends_with(" 1h"));
 }
 
 #[test]
@@ -1817,7 +1817,7 @@ fn compose_commit_line_uses_nerd_symbols_when_enabled() {
     assert!(flattened.starts_with(" "));
     assert!(flattened.contains(""));
     assert!(flattened.contains(" "));
-    assert!(flattened.ends_with("1h ago"));
+    assert!(flattened.ends_with(" 1h"));
 }
 
 #[test]
@@ -2142,9 +2142,9 @@ fn selected_rows_hidden_count_tracks_active_filter() {
 
 #[test]
 fn relative_time_formats_expected_units() {
-    assert_eq!(format_relative_time(100, 130), "30s ago");
-    assert_eq!(format_relative_time(100, 220), "2m ago");
-    assert_eq!(format_relative_time(100, 3700), "1h ago");
+    assert_eq!(format_relative_time(100, 130), "30s");
+    assert_eq!(format_relative_time(100, 220), "2m");
+    assert_eq!(format_relative_time(100, 3700), "1h");
 }
 
 #[test]

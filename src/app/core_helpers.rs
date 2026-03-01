@@ -384,17 +384,17 @@ pub(super) fn centered_rect(
 pub(super) fn format_relative_time(timestamp: i64, now: i64) -> String {
     let delta = now.saturating_sub(timestamp).max(0);
     if delta < 60 {
-        format!("{}s ago", delta)
+        format!("{}s", delta)
     } else if delta < 3_600 {
-        format!("{}m ago", delta / 60)
+        format!("{}m", delta / 60)
     } else if delta < 86_400 {
-        format!("{}h ago", delta / 3_600)
+        format!("{}h", delta / 3_600)
     } else if delta < 2_592_000 {
-        format!("{}d ago", delta / 86_400)
+        format!("{}d", delta / 86_400)
     } else if delta < 31_536_000 {
-        format!("{}mo ago", delta / 2_592_000)
+        format!("{}mo", delta / 2_592_000)
     } else {
-        format!("{}y ago", delta / 31_536_000)
+        format!("{}y", delta / 31_536_000)
     }
 }
 
