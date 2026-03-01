@@ -1,4 +1,5 @@
 use super::flow::{self, AppAction};
+use super::input::global_router;
 use super::runtime::tick_scheduler::{self, PollTimeoutInputs, TickPlanInputs, TickTask};
 use super::*;
 use crate::config::AppConfig;
@@ -492,71 +493,10 @@ impl App {
             return;
         }
 
-        if theme_toggle_conflicts_with_diff_pending_op(
-            key,
-            self.ui.preferences.focused,
-            self.ui.diff_ui.pending_op,
-        ) {
-            self.dispatch_focus_key(key);
+        if global_router::dispatch_normal_mode_key(self, key) {
             return;
         }
-
-        if let Some(direction) = pane_focus_cycle_direction(key) {
-            match direction {
-                PaneCycleDirection::Next => self.focus_next(),
-                PaneCycleDirection::Prev => self.focus_prev(),
-            }
-            return;
-        }
-
-        match key.code {
-            KeyCode::Char('q') => self.runtime.should_quit = true,
-            KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
-                self.set_focus(focus_with_l(self.ui.preferences.focused))
-            }
-            KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
-                self.set_focus(focus_with_h(self.ui.preferences.focused))
-            }
-            KeyCode::Char('1') => self.set_focus(FocusPane::Commits),
-            KeyCode::Char('2') => self.set_focus(FocusPane::Files),
-            KeyCode::Char('3') => self.set_focus(FocusPane::Diff),
-            KeyCode::Char('f') if key.modifiers == KeyModifiers::NONE => {
-                self.set_focus(FocusPane::Files)
-            }
-            KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
-                self.set_focus(FocusPane::Commits)
-            }
-            KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => {
-                self.set_focus(FocusPane::Diff)
-            }
-            KeyCode::Char('!')
-                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
-            {
-                self.open_shell_command_modal();
-            }
-            KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
-                if self.ui.preferences.focused == FocusPane::Diff {
-                    self.dispatch_focus_key(key);
-                } else {
-                    self.open_worktree_switcher();
-                }
-            }
-            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.open_worktree_switcher();
-            }
-            KeyCode::Char('t') => self.toggle_theme(),
-            KeyCode::F(5) => self.refresh_now(),
-            KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => self.refresh_now(),
-            KeyCode::Char('?') => {
-                self.runtime.show_help = !self.runtime.show_help;
-                self.runtime.status = if self.runtime.show_help {
-                    "Help overlay opened".to_owned()
-                } else {
-                    "Help overlay closed".to_owned()
-                };
-            }
-            _ => self.dispatch_focus_key(key),
-        }
+        self.dispatch_focus_key(key);
     }
 
     pub(super) fn refresh_now(&mut self) {
