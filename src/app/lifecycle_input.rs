@@ -584,9 +584,7 @@ impl App {
             self.set_diff_cursor(idx);
             self.set_diff_block_cursor_col(found.char_col);
             if crossed_viewport_boundary {
-                let visible = self.visible_diff_rows();
-                let centered_scroll = self.diff_position.cursor.saturating_sub(visible / 2);
-                self.set_diff_scroll(centered_scroll);
+                self.center_diff_cursor_in_viewport();
             }
             self.runtime.status = format!("/{normalized} -> line {}", idx.saturating_add(1));
         } else {
@@ -791,6 +789,15 @@ impl App {
 
         if let Some(forward) = diff_search_repeat_direction(key) {
             self.repeat_diff_search(forward);
+            return;
+        }
+
+        if let Some(forward) = diff_comment_jump_direction(key) {
+            if forward {
+                self.move_next_comment();
+            } else {
+                self.move_prev_comment();
+            }
             return;
         }
 
@@ -1005,6 +1012,17 @@ pub(super) fn diff_search_repeat_direction(key: KeyEvent) -> Option<bool> {
         KeyCode::Char('N') if key.modifiers == KeyModifiers::SHIFT => Some(false),
         KeyCode::Char('N') if key.modifiers == KeyModifiers::NONE => Some(false),
         KeyCode::Char('n') if key.modifiers == KeyModifiers::SHIFT => Some(false),
+        _ => None,
+    }
+}
+
+/// Resolves `p/P` comment-jump keys with tolerant Shift encoding handling.
+pub(super) fn diff_comment_jump_direction(key: KeyEvent) -> Option<bool> {
+    match key.code {
+        KeyCode::Char('p') if key.modifiers == KeyModifiers::NONE => Some(true),
+        KeyCode::Char('P') if key.modifiers == KeyModifiers::SHIFT => Some(false),
+        KeyCode::Char('P') if key.modifiers == KeyModifiers::NONE => Some(false),
+        KeyCode::Char('p') if key.modifiers == KeyModifiers::SHIFT => Some(false),
         _ => None,
     }
 }

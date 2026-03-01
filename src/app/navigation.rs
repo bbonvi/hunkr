@@ -470,9 +470,7 @@ impl App {
         if self.rendered_diff.is_empty() {
             return;
         }
-        let visible = self.visible_diff_rows();
-        let scroll = self.diff_position.cursor.saturating_sub(visible / 2);
-        self.set_diff_scroll(scroll);
+        self.center_diff_cursor_in_viewport();
         self.runtime.status = "zz".to_owned();
     }
 
@@ -496,6 +494,7 @@ impl App {
         for idx in (0..self.diff_position.cursor).rev() {
             if is_hunk_header_line(&self.rendered_diff[idx]) {
                 self.set_diff_cursor(idx);
+                self.set_diff_scroll(self.diff_position.cursor);
                 self.runtime.status = format!("hunk {}", idx.saturating_add(1));
                 return;
             }
@@ -510,11 +509,48 @@ impl App {
         for idx in self.diff_position.cursor.saturating_add(1)..self.rendered_diff.len() {
             if is_hunk_header_line(&self.rendered_diff[idx]) {
                 self.set_diff_cursor(idx);
+                self.set_diff_scroll(self.diff_position.cursor);
                 self.runtime.status = format!("hunk {}", idx.saturating_add(1));
                 return;
             }
         }
         self.runtime.status = "No next hunk".to_owned();
+    }
+
+    /// Moves the diff cursor to the first row of the previous comment block.
+    pub(super) fn move_prev_comment(&mut self) {
+        let Some(idx) = prev_comment_start_index(&self.rendered_diff, self.diff_position.cursor)
+        else {
+            self.runtime.status = "No previous comment".to_owned();
+            return;
+        };
+        let crossed_viewport_boundary = !self.diff_row_visible_in_viewport(idx);
+        self.set_diff_cursor(idx);
+        if crossed_viewport_boundary {
+            self.center_diff_cursor_in_viewport();
+        }
+        let id = self.rendered_diff[idx]
+            .comment_id
+            .expect("comment jump target must have comment id");
+        self.runtime.status = format!("comment #{id}");
+    }
+
+    /// Moves the diff cursor to the first row of the next comment block.
+    pub(super) fn move_next_comment(&mut self) {
+        let Some(idx) = next_comment_start_index(&self.rendered_diff, self.diff_position.cursor)
+        else {
+            self.runtime.status = "No next comment".to_owned();
+            return;
+        };
+        let crossed_viewport_boundary = !self.diff_row_visible_in_viewport(idx);
+        self.set_diff_cursor(idx);
+        if crossed_viewport_boundary {
+            self.center_diff_cursor_in_viewport();
+        }
+        let id = self.rendered_diff[idx]
+            .comment_id
+            .expect("comment jump target must have comment id");
+        self.runtime.status = format!("comment #{id}");
     }
 
     pub(super) fn sticky_commit_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
@@ -603,6 +639,16 @@ impl App {
         }
         self.sync_diff_block_cursor_to_cursor_line();
         self.sync_selected_file_to_cursor();
+    }
+
+    /// Centers the current diff cursor row in the visible viewport when possible.
+    pub(super) fn center_diff_cursor_in_viewport(&mut self) {
+        if self.rendered_diff.is_empty() {
+            return;
+        }
+        let visible = self.visible_diff_rows();
+        let centered_scroll = self.diff_position.cursor.saturating_sub(visible / 2);
+        self.set_diff_scroll(centered_scroll);
     }
 
     pub(super) fn restore_diff_position(&mut self, path: &str) {
@@ -995,6 +1041,63 @@ impl App {
         })?;
         Ok(())
     }
+}
+
+/// Finds the first row of the previous comment block before the cursor.
+pub(super) fn prev_comment_start_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
+    if lines.is_empty() {
+        return None;
+    }
+    let cursor = cursor.min(lines.len().saturating_sub(1));
+    let start = comment_block_start_for_cursor(lines, cursor);
+    if start == 0 {
+        return None;
+    }
+    (0..start)
+        .rev()
+        .find(|&idx| is_comment_block_start(lines, idx))
+}
+
+/// Finds the first row of the next comment block after the cursor.
+pub(super) fn next_comment_start_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
+    if lines.is_empty() {
+        return None;
+    }
+    let cursor = cursor.min(lines.len().saturating_sub(1));
+    let after_current = comment_block_end_for_cursor(lines, cursor).saturating_add(1);
+    if after_current >= lines.len() {
+        return None;
+    }
+    (after_current..lines.len()).find(|&idx| is_comment_block_start(lines, idx))
+}
+
+fn comment_block_start_for_cursor(lines: &[RenderedDiffLine], cursor: usize) -> usize {
+    let Some(comment_id) = lines[cursor].comment_id else {
+        return cursor;
+    };
+    let mut idx = cursor;
+    while idx > 0 && lines[idx - 1].comment_id == Some(comment_id) {
+        idx -= 1;
+    }
+    idx
+}
+
+fn comment_block_end_for_cursor(lines: &[RenderedDiffLine], cursor: usize) -> usize {
+    let Some(comment_id) = lines[cursor].comment_id else {
+        return cursor;
+    };
+    let mut idx = cursor;
+    while idx + 1 < lines.len() && lines[idx + 1].comment_id == Some(comment_id) {
+        idx += 1;
+    }
+    idx
+}
+
+fn is_comment_block_start(lines: &[RenderedDiffLine], idx: usize) -> bool {
+    let Some(comment_id) = lines[idx].comment_id else {
+        return false;
+    };
+    idx == 0 || lines[idx - 1].comment_id != Some(comment_id)
 }
 
 impl App {

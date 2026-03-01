@@ -390,7 +390,9 @@ impl App {
                     key_chip("/", theme),
                     Span::styled(" search ", Style::default().fg(theme.muted)),
                     key_chip("n/N", theme),
-                    Span::styled(" next/prev ", Style::default().fg(theme.muted)),
+                    Span::styled(" search next/prev ", Style::default().fg(theme.muted)),
+                    key_chip("p/P", theme),
+                    Span::styled(" comment next/prev ", Style::default().fg(theme.muted)),
                     key_chip("w/e/b", theme),
                     Span::styled(" word ", Style::default().fg(theme.muted)),
                     key_chip("0/^/$/H/L", theme),
@@ -1307,6 +1309,10 @@ impl App {
             Line::from(vec![
                 key_chip("n/N", theme),
                 Span::raw(" repeat diff search next/prev"),
+            ]),
+            Line::from(vec![
+                key_chip("p/P", theme),
+                Span::raw(" jump to next/previous comment"),
             ]),
             Line::from(vec![
                 key_chip("*/#", theme),
