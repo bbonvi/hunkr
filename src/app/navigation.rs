@@ -491,30 +491,28 @@ impl App {
         if self.rendered_diff.is_empty() {
             return;
         }
-        for idx in (0..self.diff_position.cursor).rev() {
-            if is_hunk_header_line(&self.rendered_diff[idx]) {
-                self.set_diff_cursor(idx);
-                self.set_diff_scroll(self.diff_position.cursor);
-                self.runtime.status = format!("hunk {}", idx.saturating_add(1));
-                return;
-            }
-        }
-        self.runtime.status = "No previous hunk".to_owned();
+        let Some(idx) = prev_hunk_header_index(&self.rendered_diff, self.diff_position.cursor)
+        else {
+            self.runtime.status = "No previous hunk".to_owned();
+            return;
+        };
+        self.set_diff_cursor(idx);
+        self.set_diff_scroll(self.diff_position.cursor);
+        self.runtime.status = format!("hunk {}", idx.saturating_add(1));
     }
 
     pub(super) fn move_next_hunk(&mut self) {
         if self.rendered_diff.is_empty() {
             return;
         }
-        for idx in self.diff_position.cursor.saturating_add(1)..self.rendered_diff.len() {
-            if is_hunk_header_line(&self.rendered_diff[idx]) {
-                self.set_diff_cursor(idx);
-                self.set_diff_scroll(self.diff_position.cursor);
-                self.runtime.status = format!("hunk {}", idx.saturating_add(1));
-                return;
-            }
-        }
-        self.runtime.status = "No next hunk".to_owned();
+        let Some(idx) = next_hunk_header_index(&self.rendered_diff, self.diff_position.cursor)
+        else {
+            self.runtime.status = "No next hunk".to_owned();
+            return;
+        };
+        self.set_diff_cursor(idx);
+        self.set_diff_scroll(self.diff_position.cursor);
+        self.runtime.status = format!("hunk {}", idx.saturating_add(1));
     }
 
     /// Moves the diff cursor to the first row of the previous comment block.
@@ -1043,32 +1041,58 @@ impl App {
     }
 }
 
-/// Finds the first row of the previous comment block before the cursor.
+/// Finds the first row of the previous comment block, wrapping at boundaries.
 pub(super) fn prev_comment_start_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
     if lines.is_empty() {
         return None;
     }
     let cursor = cursor.min(lines.len().saturating_sub(1));
     let start = comment_block_start_for_cursor(lines, cursor);
-    if start == 0 {
-        return None;
-    }
-    (0..start)
-        .rev()
-        .find(|&idx| is_comment_block_start(lines, idx))
+    let starts = comment_block_starts(lines);
+    let Some(last_before) = starts.iter().copied().rev().find(|&idx| idx < start) else {
+        return starts.last().copied();
+    };
+    Some(last_before)
 }
 
-/// Finds the first row of the next comment block after the cursor.
+/// Finds the first row of the next comment block, wrapping at boundaries.
 pub(super) fn next_comment_start_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
     if lines.is_empty() {
         return None;
     }
     let cursor = cursor.min(lines.len().saturating_sub(1));
-    let after_current = comment_block_end_for_cursor(lines, cursor).saturating_add(1);
-    if after_current >= lines.len() {
+    let start = comment_block_start_for_cursor(lines, cursor);
+    let starts = comment_block_starts(lines);
+    let Some(first_after) = starts.iter().copied().find(|&idx| idx > start) else {
+        return starts.first().copied();
+    };
+    Some(first_after)
+}
+
+/// Finds the previous hunk-header row, wrapping at boundaries.
+pub(super) fn prev_hunk_header_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
+    if lines.is_empty() {
         return None;
     }
-    (after_current..lines.len()).find(|&idx| is_comment_block_start(lines, idx))
+    let cursor = cursor.min(lines.len().saturating_sub(1));
+    let hunk_indexes = hunk_header_indexes(lines);
+    let Some(last_before) = hunk_indexes.iter().copied().rev().find(|&idx| idx < cursor) else {
+        return hunk_indexes.last().copied();
+    };
+    Some(last_before)
+}
+
+/// Finds the next hunk-header row, wrapping at boundaries.
+pub(super) fn next_hunk_header_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
+    if lines.is_empty() {
+        return None;
+    }
+    let cursor = cursor.min(lines.len().saturating_sub(1));
+    let hunk_indexes = hunk_header_indexes(lines);
+    let Some(first_after) = hunk_indexes.iter().copied().find(|&idx| idx > cursor) else {
+        return hunk_indexes.first().copied();
+    };
+    Some(first_after)
 }
 
 fn comment_block_start_for_cursor(lines: &[RenderedDiffLine], cursor: usize) -> usize {
@@ -1082,15 +1106,12 @@ fn comment_block_start_for_cursor(lines: &[RenderedDiffLine], cursor: usize) -> 
     idx
 }
 
-fn comment_block_end_for_cursor(lines: &[RenderedDiffLine], cursor: usize) -> usize {
-    let Some(comment_id) = lines[cursor].comment_id else {
-        return cursor;
-    };
-    let mut idx = cursor;
-    while idx + 1 < lines.len() && lines[idx + 1].comment_id == Some(comment_id) {
-        idx += 1;
-    }
-    idx
+fn comment_block_starts(lines: &[RenderedDiffLine]) -> Vec<usize> {
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, _)| is_comment_block_start(lines, idx).then_some(idx))
+        .collect()
 }
 
 fn is_comment_block_start(lines: &[RenderedDiffLine], idx: usize) -> bool {
@@ -1098,6 +1119,14 @@ fn is_comment_block_start(lines: &[RenderedDiffLine], idx: usize) -> bool {
         return false;
     };
     idx == 0 || lines[idx - 1].comment_id != Some(comment_id)
+}
+
+fn hunk_header_indexes(lines: &[RenderedDiffLine]) -> Vec<usize> {
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| is_hunk_header_line(line).then_some(idx))
+        .collect()
 }
 
 impl App {

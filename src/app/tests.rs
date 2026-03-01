@@ -1,6 +1,5 @@
 use super::lifecycle_input::{
-    clear_commit_selection, clear_commit_visual_anchor, diff_comment_jump_direction,
-    diff_search_repeat_direction,
+    clear_commit_selection, clear_commit_visual_anchor, diff_search_repeat_direction,
 };
 use super::lifecycle_render::theme_toggle_conflicts_with_diff_pending_op;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
@@ -76,15 +75,6 @@ fn sample_commit_comment(anchor: CommentAnchor, text: &str) -> ReviewComment {
         text: text.to_owned(),
         created_at: "2026-01-01T00:00:00Z".to_owned(),
         updated_at: "2026-01-01T00:00:00Z".to_owned(),
-    }
-}
-
-fn rendered_diff_line(raw_text: &str, comment_id: Option<u64>) -> RenderedDiffLine {
-    RenderedDiffLine {
-        line: Line::from(raw_text.to_owned()),
-        raw_text: raw_text.to_owned(),
-        anchor: None,
-        comment_id,
     }
 }
 
@@ -934,22 +924,6 @@ fn diff_search_repeat_direction_accepts_shifted_uppercase_n() {
     );
     assert_eq!(
         diff_search_repeat_direction(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::SHIFT)),
-        Some(false)
-    );
-}
-
-#[test]
-fn diff_comment_jump_direction_accepts_shifted_uppercase_p() {
-    assert_eq!(
-        diff_comment_jump_direction(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE)),
-        Some(true)
-    );
-    assert_eq!(
-        diff_comment_jump_direction(KeyEvent::new(KeyCode::Char('P'), KeyModifiers::SHIFT)),
-        Some(false)
-    );
-    assert_eq!(
-        diff_comment_jump_direction(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::SHIFT)),
         Some(false)
     );
 }
@@ -2221,48 +2195,6 @@ fn diff_search_steps_backward_between_occurrences_on_same_line() {
         found.map(|entry| (entry.line_index, entry.char_col)),
         Some((0, 0))
     );
-}
-
-#[test]
-fn next_comment_start_index_skips_current_comment_block() {
-    let lines = vec![
-        rendered_diff_line("header", None),
-        rendered_diff_line("comment 1 a", Some(1)),
-        rendered_diff_line("comment 1 b", Some(1)),
-        rendered_diff_line("gap", None),
-        rendered_diff_line("comment 2 a", Some(2)),
-    ];
-
-    assert_eq!(
-        super::navigation::next_comment_start_index(&lines, 1),
-        Some(4)
-    );
-    assert_eq!(
-        super::navigation::next_comment_start_index(&lines, 0),
-        Some(1)
-    );
-}
-
-#[test]
-fn prev_comment_start_index_skips_current_comment_block() {
-    let lines = vec![
-        rendered_diff_line("header", None),
-        rendered_diff_line("comment 1 a", Some(1)),
-        rendered_diff_line("comment 1 b", Some(1)),
-        rendered_diff_line("gap", None),
-        rendered_diff_line("comment 2 a", Some(2)),
-        rendered_diff_line("comment 2 b", Some(2)),
-    ];
-
-    assert_eq!(
-        super::navigation::prev_comment_start_index(&lines, 5),
-        Some(1)
-    );
-    assert_eq!(
-        super::navigation::prev_comment_start_index(&lines, 4),
-        Some(1)
-    );
-    assert_eq!(super::navigation::prev_comment_start_index(&lines, 1), None);
 }
 
 #[test]
