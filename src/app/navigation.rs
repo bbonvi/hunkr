@@ -673,11 +673,12 @@ impl App {
             self.persist_selected_file_position();
             self.diff_cache.selected_file = Some(path.clone());
         }
+        let visible_file_indices = self.visible_file_indices();
         if should_preserve_directory_row_focus(
             self.preferences.focused,
             current_visible_file_row_selectable(
                 &self.file_rows,
-                &self.visible_file_indices(),
+                &visible_file_indices,
                 self.file_ui.list_state.selected(),
             ),
         ) {
@@ -1080,6 +1081,7 @@ fn file_focus_target_path_for_visible_row(
     None
 }
 
+/// Resolves whether the currently selected visible file-tree row is selectable.
 fn current_visible_file_row_selectable(
     file_rows: &[TreeRow],
     visible_file_indices: &[usize],
@@ -1090,6 +1092,7 @@ fn current_visible_file_row_selectable(
     file_rows.get(full_idx).map(|row| row.selectable)
 }
 
+/// Keeps directory cursor focus stable while browsing the Files pane.
 fn should_preserve_directory_row_focus(
     focused: FocusPane,
     selected_row_selectable: Option<bool>,
