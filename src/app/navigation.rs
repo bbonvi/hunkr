@@ -25,19 +25,10 @@ impl App {
             return;
         }
 
-        let mut idx = self.file_ui.list_state.selected().unwrap_or(0) as isize;
+        let current = self.file_ui.list_state.selected().unwrap_or(0) as isize;
         let len = visible.len() as isize;
-        loop {
-            idx = (idx + delta).clamp(0, len - 1);
-            if self.file_rows[visible[idx as usize]].selectable || idx == 0 || idx == len - 1 {
-                break;
-            }
-            if (delta > 0 && idx == len - 1) || (delta < 0 && idx == 0) {
-                break;
-            }
-        }
-
-        self.select_file_row(idx as usize);
+        let next = (current + delta).clamp(0, len - 1) as usize;
+        self.select_file_row(next);
     }
 
     pub(super) fn scroll_file_list_lines(&mut self, delta: isize) {
@@ -53,10 +44,7 @@ impl App {
             return;
         }
 
-        self.file_ui.list_state.select(Some(next));
-        if self.file_rows[visible[next]].selectable {
-            self.select_file_row(next);
-        }
+        self.select_file_row(next);
     }
 
     pub(super) fn page_files(&mut self, multiplier: f32) {
@@ -65,22 +53,15 @@ impl App {
     }
 
     pub(super) fn select_first_file(&mut self) {
-        let visible = self.visible_file_indices();
-        if let Some(idx) = visible
-            .iter()
-            .position(|entry| self.file_rows[*entry].selectable)
-        {
-            self.select_file_row(idx);
+        if !self.visible_file_indices().is_empty() {
+            self.select_file_row(0);
         }
     }
 
     pub(super) fn select_last_file(&mut self) {
         let visible = self.visible_file_indices();
-        if let Some(idx) = visible
-            .iter()
-            .rposition(|entry| self.file_rows[*entry].selectable)
-        {
-            self.select_file_row(idx);
+        if !visible.is_empty() {
+            self.select_file_row(visible.len() - 1);
         }
     }
 
@@ -89,17 +70,20 @@ impl App {
         let Some(full_idx) = visible.get(visible_idx).copied() else {
             return;
         };
-        if !self.file_rows[full_idx].selectable {
+        self.file_ui.list_state.select(Some(visible_idx));
+        let Some(path) = file_focus_target_path_for_visible_row(
+            &self.file_rows,
+            &visible,
+            visible_idx,
+            full_idx,
+        ) else {
+            return;
+        };
+        if self.diff_cache.selected_file.as_deref() == Some(path.as_str()) {
             return;
         }
 
         self.persist_selected_file_position();
-
-        self.file_ui.list_state.select(Some(visible_idx));
-        let path = self.file_rows[full_idx]
-            .path
-            .clone()
-            .expect("selectable rows always contain path");
         self.diff_cache.selected_file = Some(path.clone());
         self.restore_diff_position(&path);
         self.sync_diff_cursor_to_content_bounds();
@@ -1060,9 +1044,35 @@ fn format_path_with_home_tilde(path: &std::path::Path) -> String {
     path.display().to_string()
 }
 
+fn file_focus_target_path_for_visible_row(
+    file_rows: &[TreeRow],
+    visible: &[usize],
+    visible_idx: usize,
+    full_idx: usize,
+) -> Option<String> {
+    let selected_row = file_rows.get(full_idx)?;
+    if selected_row.selectable {
+        return selected_row.path.clone();
+    }
+
+    let selected_depth = selected_row.depth;
+    for descendant_full_idx in visible.iter().skip(visible_idx.saturating_add(1)) {
+        let Some(descendant) = file_rows.get(*descendant_full_idx) else {
+            continue;
+        };
+        if descendant.depth <= selected_depth {
+            break;
+        }
+        if descendant.selectable {
+            return descendant.path.clone();
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::format_path_with_home_tilde;
+    use super::{TreeRow, file_focus_target_path_for_visible_row, format_path_with_home_tilde};
 
     #[test]
     fn non_home_path_stays_absolute() {
@@ -1071,5 +1081,44 @@ mod tests {
             format_path_with_home_tilde(path),
             "/opt/tools/review-tasks.md"
         );
+    }
+
+    fn row(path: Option<&str>, depth: usize, selectable: bool) -> TreeRow {
+        TreeRow {
+            label: String::new(),
+            path: path.map(str::to_owned),
+            depth,
+            selectable,
+            modified_ts: None,
+            change: None,
+        }
+    }
+
+    #[test]
+    fn directory_focus_targets_first_visible_descendant_file() {
+        let rows = vec![
+            row(None, 0, false),
+            row(None, 1, false),
+            row(Some("src/app/main.rs"), 2, true),
+            row(Some("src/lib.rs"), 1, true),
+        ];
+        let visible = vec![0, 1, 2, 3];
+
+        assert_eq!(
+            file_focus_target_path_for_visible_row(&rows, &visible, 0, 0).as_deref(),
+            Some("src/app/main.rs")
+        );
+        assert_eq!(
+            file_focus_target_path_for_visible_row(&rows, &visible, 1, 1).as_deref(),
+            Some("src/app/main.rs")
+        );
+    }
+
+    #[test]
+    fn focus_target_returns_none_for_directory_without_visible_file_descendant() {
+        let rows = vec![row(None, 0, false), row(Some("tests/mod.rs"), 0, true)];
+        let visible = vec![0];
+
+        assert!(file_focus_target_path_for_visible_row(&rows, &visible, 0, 0).is_none());
     }
 }
