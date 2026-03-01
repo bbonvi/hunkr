@@ -84,3 +84,64 @@ pub(in crate::app) fn plan_tick(inputs: TickPlanInputs) -> Vec<TickTask> {
     }
     tasks
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_poll_timeout_short_circuits_onboarding() {
+        let timeout = compute_poll_timeout(PollTimeoutInputs {
+            onboarding_active: true,
+            selection_rebuild_due: None,
+            now: Instant::now(),
+            last_refresh_elapsed: Duration::from_secs(10),
+            last_relative_redraw_elapsed: Duration::from_secs(10),
+            shell_running: true,
+            shell_flash_timeout: Some(Duration::from_millis(1)),
+        });
+        assert_eq!(timeout, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn compute_poll_timeout_clamps_to_shell_stream_polling() {
+        let timeout = compute_poll_timeout(PollTimeoutInputs {
+            onboarding_active: false,
+            selection_rebuild_due: None,
+            now: Instant::now(),
+            last_refresh_elapsed: Duration::from_secs(0),
+            last_relative_redraw_elapsed: Duration::from_secs(0),
+            shell_running: true,
+            shell_flash_timeout: None,
+        });
+        assert_eq!(timeout, SHELL_STREAM_POLL_EVERY);
+    }
+
+    #[test]
+    fn compute_poll_timeout_prefers_flash_deadline_when_earlier() {
+        let timeout = compute_poll_timeout(PollTimeoutInputs {
+            onboarding_active: false,
+            selection_rebuild_due: None,
+            now: Instant::now(),
+            last_refresh_elapsed: Duration::from_secs(0),
+            last_relative_redraw_elapsed: Duration::from_secs(0),
+            shell_running: true,
+            shell_flash_timeout: Some(Duration::from_millis(5)),
+        });
+        assert_eq!(timeout, Duration::from_millis(5));
+    }
+
+    #[test]
+    fn plan_tick_prefers_refresh_over_relative_redraw() {
+        let tasks = plan_tick(TickPlanInputs {
+            onboarding_active: false,
+            now: Instant::now(),
+            terminal_clear_elapsed: Duration::from_secs(0),
+            selection_rebuild_due: None,
+            last_refresh_elapsed: AUTO_REFRESH_EVERY,
+            last_relative_redraw_elapsed: RELATIVE_TIME_REDRAW_EVERY,
+        });
+        assert!(tasks.contains(&TickTask::ReloadCommits));
+        assert!(!tasks.contains(&TickTask::RedrawRelativeTime));
+    }
+}
