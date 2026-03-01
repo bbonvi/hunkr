@@ -268,10 +268,21 @@ fn compose_commit_line_allows_wider_git_decorations_before_truncating() {
 }
 
 #[test]
-fn compose_commit_line_left_pads_short_relative_age() {
+fn compose_commit_line_uses_unpadded_age_without_column_hint() {
     let row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
     let theme = UiTheme::from_mode(ThemeMode::Dark);
     let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
+    let rendered = presenter.commit_row_line(&row);
+    let age_span = rendered.spans.last().expect("age span");
+
+    assert_eq!(age_span.content.as_ref(), "1h");
+}
+
+#[test]
+fn compose_commit_line_left_pads_age_with_column_hint() {
+    let row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(80, 3_600, &theme, true).with_age_column_width(3);
     let rendered = presenter.commit_row_line(&row);
     let age_span = rendered.spans.last().expect("age span");
 
@@ -1773,7 +1784,7 @@ fn compose_commit_line_preserves_age_column_on_narrow_width() {
         .iter()
         .map(|s| s.content.to_string())
         .collect::<String>();
-    assert!(flattened.ends_with(" 1h"));
+    assert!(flattened.ends_with("1h"));
 }
 
 #[test]
@@ -1836,7 +1847,7 @@ fn compose_commit_line_uses_nerd_symbols_when_enabled() {
     assert!(flattened.starts_with(" "));
     assert!(flattened.contains(""));
     assert!(flattened.contains(" "));
-    assert!(flattened.ends_with(" 1h"));
+    assert!(flattened.ends_with("1h"));
 }
 
 #[test]

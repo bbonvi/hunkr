@@ -15,7 +15,6 @@ use super::super::{
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
-const MIN_RELATIVE_AGE_WIDTH: usize = 3;
 const MAX_COMMIT_DECORATION_WIDTH: usize = 40;
 
 /// Renders commit/file list panes so App keeps high-level orchestration only.
@@ -106,7 +105,16 @@ impl<'a> ListPaneRenderer<'a> {
         let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
         let line_width = width as u16;
         let cursor_idx = file_list_state.selected();
-        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts);
+        let visible_rows = rect.height.saturating_sub(2) as usize;
+        let file_age_column_width = max_visible_age_width(
+            file_rows,
+            self.now_ts,
+            file_list_state.offset(),
+            visible_rows,
+            |row| row.modified_ts,
+        );
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts)
+            .with_age_column_width(file_age_column_width);
 
         let items: Vec<ListItem<'static>> = file_rows
             .iter()
@@ -203,7 +211,16 @@ impl<'a> ListPaneRenderer<'a> {
         let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
         let line_width = width as u16;
         let cursor_idx = commit_list_state.selected();
-        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts);
+        let visible_rows = rect.height.saturating_sub(2) as usize;
+        let commit_age_column_width = max_visible_age_width(
+            commits,
+            self.now_ts,
+            commit_list_state.offset(),
+            visible_rows,
+            |row| (!row.is_uncommitted).then_some(row.info.timestamp),
+        );
+        let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts)
+            .with_age_column_width(commit_age_column_width);
         let items: Vec<ListItem<'static>> = commits
             .iter()
             .enumerate()
@@ -283,6 +300,7 @@ pub(in crate::app) struct ListLinePresenter<'a> {
     now_ts: i64,
     theme: &'a UiTheme,
     nerd_fonts: bool,
+    age_column_width: usize,
 }
 
 impl<'a> ListLinePresenter<'a> {
@@ -297,7 +315,13 @@ impl<'a> ListLinePresenter<'a> {
             now_ts,
             theme,
             nerd_fonts,
+            age_column_width: 0,
         }
+    }
+
+    pub(in crate::app) fn with_age_column_width(mut self, age_column_width: usize) -> Self {
+        self.age_column_width = age_column_width;
+        self
     }
 
     pub(in crate::app) fn file_row_line(&self, row: &TreeRow) -> Line<'static> {
@@ -306,10 +330,7 @@ impl<'a> ListLinePresenter<'a> {
             let right = row
                 .modified_ts
                 .map(|ts| {
-                    pad_min_width(
-                        format_relative_time(ts, self.now_ts),
-                        MIN_RELATIVE_AGE_WIDTH,
-                    )
+                    pad_min_width(format_relative_time(ts, self.now_ts), self.age_column_width)
                 })
                 .unwrap_or_default();
             let badge = row
@@ -444,7 +465,7 @@ impl<'a> ListLinePresenter<'a> {
         }
         let age = pad_min_width(
             format_relative_time(row.info.timestamp, self.now_ts),
-            MIN_RELATIVE_AGE_WIDTH,
+            self.age_column_width,
         );
         let age_width = display_width(&age);
         if right_width + 1 + age_width <= max_right_width {
@@ -500,6 +521,29 @@ fn pad_min_width(value: String, min_width: usize) -> String {
     }
 
     format!("{}{}", " ".repeat(min_width - width), value)
+}
+
+fn max_visible_age_width<T, F>(
+    rows: &[T],
+    now_ts: i64,
+    top: usize,
+    visible_rows: usize,
+    mut timestamp_of: F,
+) -> usize
+where
+    F: FnMut(&T) -> Option<i64>,
+{
+    if visible_rows == 0 || top >= rows.len() {
+        return 0;
+    }
+
+    let end = (top + visible_rows).min(rows.len());
+    rows[top..end]
+        .iter()
+        .filter_map(&mut timestamp_of)
+        .map(|ts| display_width(&format_relative_time(ts, now_ts)))
+        .max()
+        .unwrap_or(0)
 }
 
 fn file_change_style(kind: Option<FileChangeKind>, theme: &UiTheme) -> Style {
