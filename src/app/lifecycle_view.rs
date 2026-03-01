@@ -1,6 +1,8 @@
 //! Render pipeline and modal/footer presentation for the lifecycle flow.
 use std::collections::BTreeSet;
 
+use super::ui::contracts::PaneViewModelBuilder;
+use super::ui::view_models::{CommitPaneVmBuilder, FilePaneVmBuilder};
 use super::*;
 use ratatui::widgets::{List, ListItem};
 
@@ -50,23 +52,7 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let files_search_mode = matches!(
-            self.ui.preferences.input_mode,
-            InputMode::ListSearch(FocusPane::Files)
-        );
-        let file_query = self.ui.search.file_query.trim();
-        let files_search_display = if !file_query.is_empty() {
-            format!("/{file_query}")
-        } else if files_search_mode {
-            "/".to_owned()
-        } else {
-            "off".to_owned()
-        };
-        let visible_indices = self.visible_file_indices();
-        let visible_rows: Vec<TreeRow> = visible_indices
-            .iter()
-            .filter_map(|idx| self.domain.file_rows.get(*idx).cloned())
-            .collect();
+        let vm = FilePaneVmBuilder.build(self);
         ListPaneRenderer::new(
             theme,
             self.ui.preferences.focused,
@@ -76,11 +62,11 @@ impl App {
             frame,
             rect,
             FilePaneModel {
-                file_rows: &visible_rows,
-                changed_files: self.domain.aggregate.files.len(),
-                shown_files: visible_rows.iter().filter(|row| row.selectable).count(),
-                search_display: &files_search_display,
-                search_enabled: files_search_mode || !file_query.is_empty(),
+                file_rows: &vm.file_rows,
+                changed_files: vm.changed_files,
+                shown_files: vm.shown_files,
+                search_display: &vm.search_display,
+                search_enabled: vm.search_enabled,
                 file_list_state: &mut self.ui.file_ui.list_state,
             },
         );
@@ -92,36 +78,7 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let commits_search_mode = matches!(
-            self.ui.preferences.input_mode,
-            InputMode::ListSearch(FocusPane::Commits)
-        );
-        let commit_query = self.ui.search.commit_query.trim();
-        let commits_search_display = if !commit_query.is_empty() {
-            format!("/{commit_query}")
-        } else if commits_search_mode {
-            "/".to_owned()
-        } else {
-            "off".to_owned()
-        };
-        let visible_indices = self.visible_commit_indices();
-        let visible_rows: Vec<CommitRow> = visible_indices
-            .iter()
-            .filter_map(|idx| self.domain.commits.get(*idx).cloned())
-            .collect();
-        let commented_commit_ids = self
-            .deps
-            .comments
-            .comments()
-            .iter()
-            .flat_map(|comment| comment.target.commits.iter().cloned())
-            .collect::<BTreeSet<_>>();
-        let selected_total = self
-            .domain
-            .commits
-            .iter()
-            .filter(|row| row.selected)
-            .count();
+        let vm = CommitPaneVmBuilder.build(self);
         ListPaneRenderer::new(
             theme,
             self.ui.preferences.focused,
@@ -131,15 +88,15 @@ impl App {
             frame,
             rect,
             CommitPaneModel {
-                commits: &visible_rows,
-                commented_commit_ids: &commented_commit_ids,
-                status_counts: self.status_counts(),
-                selected_total,
-                shown_commits: visible_rows.len(),
-                total_commits: self.domain.commits.len(),
-                status_filter: self.ui.commit_ui.status_filter,
-                search_display: &commits_search_display,
-                search_enabled: commits_search_mode || !commit_query.is_empty(),
+                commits: &vm.commits,
+                commented_commit_ids: &vm.commented_commit_ids,
+                status_counts: vm.status_counts,
+                selected_total: vm.selected_total,
+                shown_commits: vm.shown_commits,
+                total_commits: vm.total_commits,
+                status_filter: vm.status_filter,
+                search_display: &vm.search_display,
+                search_enabled: vm.search_enabled,
                 commit_list_state: &mut self.ui.commit_ui.list_state,
             },
         );
