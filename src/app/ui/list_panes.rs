@@ -8,10 +8,11 @@ use ratatui::{
 };
 
 use super::super::{
-    CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme, commit_selection_marker,
-    commit_status_badge, display_width, format_file_change_badge, format_relative_time,
-    list_highlight_symbol, list_highlight_symbol_width, sanitize_terminal_text, sanitized_span,
-    truncate, uncommitted_badge, unpushed_marker,
+    CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
+    commit_push_chain_marker, commit_selection_marker, commit_status_badge, display_width,
+    format_file_change_badge, format_relative_time, list_highlight_symbol,
+    list_highlight_symbol_width, sanitize_terminal_text, sanitized_span, truncate,
+    uncommitted_badge,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
@@ -221,18 +222,20 @@ impl<'a> ListPaneRenderer<'a> {
         );
         let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts)
             .with_age_column_width(commit_age_column_width);
+        let push_chain_kinds = commit_push_chain_kinds(commits);
         let items: Vec<ListItem<'static>> = commits
             .iter()
             .enumerate()
             .map(|(idx, row)| {
                 let is_cursor = cursor_idx == Some(idx);
+                let push_chain_kind = push_chain_kinds.get(idx).copied().flatten();
                 let cursor_bg = if self.focused == FocusPane::Commits {
                     self.theme.visual_bg
                 } else {
                     self.theme.cursor_bg
                 };
                 let line = apply_row_highlight(
-                    &presenter.commit_row_line(row),
+                    &presenter.commit_row_line_with_push_chain(row, push_chain_kind),
                     line_width,
                     row.selected,
                     is_cursor,
@@ -383,7 +386,23 @@ impl<'a> ListLinePresenter<'a> {
         }
     }
 
+    #[cfg(test)]
     pub(in crate::app) fn commit_row_line(&self, row: &CommitRow) -> Line<'static> {
+        let default_push_chain = if row.is_uncommitted {
+            None
+        } else if row.info.unpushed {
+            Some(CommitPushChainMarkerKind::Unpushed)
+        } else {
+            Some(CommitPushChainMarkerKind::Pushed)
+        };
+        self.commit_row_line_with_push_chain(row, default_push_chain)
+    }
+
+    pub(in crate::app) fn commit_row_line_with_push_chain(
+        &self,
+        row: &CommitRow,
+        push_chain_kind: Option<CommitPushChainMarkerKind>,
+    ) -> Line<'static> {
         let summary = sanitize_terminal_text(&row.info.summary);
         if row.is_uncommitted {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
@@ -449,16 +468,14 @@ impl<'a> ListLinePresenter<'a> {
             ));
             right_width += status_needed;
         }
-        if row.info.unpushed {
-            let unpushed = unpushed_marker(self.nerd_fonts).to_owned();
-            let needed = 1 + display_width(&unpushed);
+        if let Some(push_chain_kind) = push_chain_kind {
+            let marker = commit_push_chain_marker(push_chain_kind, self.nerd_fonts).to_owned();
+            let needed = 1 + display_width(&marker);
             if right_width + needed <= max_right_width {
                 right_spans.push(Span::raw(" "));
                 right_spans.push(Span::styled(
-                    unpushed.clone(),
-                    Style::default()
-                        .fg(self.theme.unpushed)
-                        .add_modifier(Modifier::BOLD),
+                    marker.clone(),
+                    commit_push_chain_style(push_chain_kind, self.theme),
                 ));
                 right_width += needed;
             }
@@ -494,6 +511,43 @@ impl<'a> ListLinePresenter<'a> {
         spans.extend(right_spans);
         Line::from(spans)
     }
+}
+
+pub(in crate::app) fn commit_push_chain_kinds(
+    commits: &[CommitRow],
+) -> Vec<Option<CommitPushChainMarkerKind>> {
+    let mut markers = vec![None; commits.len()];
+    let top_real = commits.iter().position(|row| !row.is_uncommitted);
+    let first_pushed = commits
+        .iter()
+        .position(|row| !row.is_uncommitted && !row.info.unpushed);
+    let first_unpushed = commits
+        .iter()
+        .position(|row| !row.is_uncommitted && row.info.unpushed);
+
+    for (idx, row) in commits.iter().enumerate() {
+        if row.is_uncommitted {
+            continue;
+        }
+        let kind = if Some(idx) == top_real {
+            if row.info.unpushed {
+                CommitPushChainMarkerKind::TopUnpushed
+            } else {
+                CommitPushChainMarkerKind::TopPushed
+            }
+        } else if Some(idx) == first_unpushed {
+            CommitPushChainMarkerKind::FirstUnpushed
+        } else if Some(idx) == first_pushed {
+            CommitPushChainMarkerKind::FirstPushed
+        } else if row.info.unpushed {
+            CommitPushChainMarkerKind::Unpushed
+        } else {
+            CommitPushChainMarkerKind::Pushed
+        };
+        markers[idx] = Some(kind);
+    }
+
+    markers
 }
 
 fn commit_decoration_label(row: &CommitRow, nerd_fonts: bool) -> String {
@@ -561,5 +615,18 @@ fn file_change_style(kind: Option<FileChangeKind>, theme: &UiTheme) -> Style {
             Style::default().fg(theme.muted)
         }
         None => Style::default().fg(theme.text),
+    }
+}
+
+fn commit_push_chain_style(kind: CommitPushChainMarkerKind, theme: &UiTheme) -> Style {
+    match kind {
+        CommitPushChainMarkerKind::FirstUnpushed
+        | CommitPushChainMarkerKind::TopUnpushed
+        | CommitPushChainMarkerKind::Unpushed => Style::default()
+            .fg(theme.unpushed)
+            .add_modifier(Modifier::BOLD),
+        CommitPushChainMarkerKind::Pushed
+        | CommitPushChainMarkerKind::FirstPushed
+        | CommitPushChainMarkerKind::TopPushed => Style::default().fg(theme.muted),
     }
 }

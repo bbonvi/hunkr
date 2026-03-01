@@ -8,7 +8,9 @@ use super::lifecycle_render::{
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::state::{format_uncommitted_summary, should_hide_deleted_file_content};
 use super::ui::diff_pane::scrollbar_thumb;
-use super::ui::list_panes::{ListLinePresenter, commit_status_filter_spans};
+use super::ui::list_panes::{
+    ListLinePresenter, commit_push_chain_kinds, commit_status_filter_spans,
+};
 use super::ui::style::{
     CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
     pad_line_to_width, resolve_row_background, status_style, tint_line_background,
@@ -243,9 +245,47 @@ fn compose_commit_line_places_status_markers_after_git_decorations() {
 
     let refs_idx = flattened.find(" HEAD -> main, main").expect("refs");
     let status_idx = flattened.find("").expect("status badge");
-    let unpushed_idx = flattened.find("").expect("unpushed marker");
+    let unpushed_idx = flattened.find("󰜛").expect("unpushed marker");
     assert!(status_idx > refs_idx);
     assert!(unpushed_idx > status_idx);
+}
+
+#[test]
+fn commit_push_chain_kinds_mark_top_and_boundary_segments() {
+    let mut top_unpushed = commit_row("u-top", false, ReviewStatus::Unreviewed);
+    top_unpushed.info.unpushed = true;
+    let mut middle_unpushed = commit_row("u-mid", false, ReviewStatus::Unreviewed);
+    middle_unpushed.info.unpushed = true;
+    let mut first_pushed = commit_row("p-first", false, ReviewStatus::Reviewed);
+    first_pushed.info.unpushed = false;
+    let mut pushed = commit_row("p-tail", false, ReviewStatus::Reviewed);
+    pushed.info.unpushed = false;
+    let rows = vec![top_unpushed, middle_unpushed, first_pushed, pushed];
+
+    let kinds = commit_push_chain_kinds(&rows);
+
+    assert_eq!(kinds[0], Some(CommitPushChainMarkerKind::TopUnpushed));
+    assert_eq!(kinds[1], Some(CommitPushChainMarkerKind::Unpushed));
+    assert_eq!(kinds[2], Some(CommitPushChainMarkerKind::FirstPushed));
+    assert_eq!(kinds[3], Some(CommitPushChainMarkerKind::Pushed));
+}
+
+#[test]
+fn commit_push_chain_kinds_skip_uncommitted_rows_for_top_marker() {
+    let mut draft = commit_row("draft", false, ReviewStatus::Unreviewed);
+    draft.is_uncommitted = true;
+    draft.info.unpushed = false;
+    let mut top_pushed = commit_row("p-top", false, ReviewStatus::Reviewed);
+    top_pushed.info.unpushed = false;
+    let mut first_unpushed = commit_row("u-first", false, ReviewStatus::Unreviewed);
+    first_unpushed.info.unpushed = true;
+    let rows = vec![draft, top_pushed, first_unpushed];
+
+    let kinds = commit_push_chain_kinds(&rows);
+
+    assert_eq!(kinds[0], None);
+    assert_eq!(kinds[1], Some(CommitPushChainMarkerKind::TopPushed));
+    assert_eq!(kinds[2], Some(CommitPushChainMarkerKind::FirstUnpushed));
 }
 
 #[test]
@@ -1846,7 +1886,7 @@ fn compose_commit_line_uses_nerd_symbols_when_enabled() {
 
     assert!(flattened.starts_with(" "));
     assert!(flattened.contains(""));
-    assert!(flattened.contains(" "));
+    assert!(flattened.contains(" 󰜛"));
     assert!(flattened.ends_with("1h"));
 }
 

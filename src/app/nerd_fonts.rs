@@ -58,8 +58,40 @@ pub(super) fn list_highlight_symbol_width(nerd_fonts: bool) -> u16 {
 }
 
 /// Returns the unpushed suffix badge in commit rows.
-pub(super) fn unpushed_marker(nerd_fonts: bool) -> &'static str {
-    if nerd_fonts { "" } else { "[^]" }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CommitPushChainMarkerKind {
+    Pushed,
+    FirstPushed,
+    FirstUnpushed,
+    TopPushed,
+    TopUnpushed,
+    Unpushed,
+}
+
+/// Returns the commit-chain marker used to visualize pushed/unpushed topology.
+pub(super) fn commit_push_chain_marker(
+    kind: CommitPushChainMarkerKind,
+    nerd_fonts: bool,
+) -> &'static str {
+    if nerd_fonts {
+        return match kind {
+            CommitPushChainMarkerKind::Pushed => "󰜘",
+            CommitPushChainMarkerKind::FirstPushed => "󰜙",
+            CommitPushChainMarkerKind::FirstUnpushed => "󰜚",
+            CommitPushChainMarkerKind::TopPushed => "󰜝",
+            CommitPushChainMarkerKind::TopUnpushed => "󰜞",
+            CommitPushChainMarkerKind::Unpushed => "󰜛",
+        };
+    }
+
+    match kind {
+        CommitPushChainMarkerKind::Pushed => "[=]",
+        CommitPushChainMarkerKind::FirstPushed => "[v]",
+        CommitPushChainMarkerKind::FirstUnpushed => "[^]",
+        CommitPushChainMarkerKind::TopPushed => "[T]",
+        CommitPushChainMarkerKind::TopUnpushed => "[!]",
+        CommitPushChainMarkerKind::Unpushed => "[+]",
+    }
 }
 
 /// Returns the draft badge used for uncommitted pseudo-commit rows.
@@ -466,5 +498,33 @@ mod tests {
         let compose = icon_prefix(&compose_path);
         let dockerfile = icon_prefix(&dockerfile_path);
         assert_eq!(compose, dockerfile);
+    }
+
+    #[test]
+    fn commit_push_chain_markers_match_expected_nerd_font_icons() {
+        assert_eq!(
+            commit_push_chain_marker(CommitPushChainMarkerKind::Pushed, true),
+            "󰜘"
+        );
+        assert_eq!(
+            commit_push_chain_marker(CommitPushChainMarkerKind::FirstPushed, true),
+            "󰜙"
+        );
+        assert_eq!(
+            commit_push_chain_marker(CommitPushChainMarkerKind::FirstUnpushed, true),
+            "󰜚"
+        );
+        assert_eq!(
+            commit_push_chain_marker(CommitPushChainMarkerKind::TopPushed, true),
+            "󰜝"
+        );
+        assert_eq!(
+            commit_push_chain_marker(CommitPushChainMarkerKind::TopUnpushed, true),
+            "󰜞"
+        );
+        assert_eq!(
+            commit_push_chain_marker(CommitPushChainMarkerKind::Unpushed, true),
+            "󰜛"
+        );
     }
 }
