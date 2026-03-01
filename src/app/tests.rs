@@ -1,7 +1,7 @@
+use super::input::policy::theme_toggle_conflicts_with_diff_pending_op;
 use super::lifecycle_input::{
     clear_commit_selection, clear_commit_visual_anchor, diff_search_repeat_direction,
 };
-use super::lifecycle_render::theme_toggle_conflicts_with_diff_pending_op;
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
 use super::state::should_hide_deleted_file_content;
 use super::ui::list_panes::{

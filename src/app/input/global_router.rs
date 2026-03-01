@@ -1,7 +1,7 @@
-use super::super::lifecycle_render::{
+use super::super::*;
+use super::policy::{
     PaneCycleDirection, pane_focus_cycle_direction, theme_toggle_conflicts_with_diff_pending_op,
 };
-use super::super::*;
 
 /// Handles normal-mode global keys and returns whether the key was consumed.
 pub(in crate::app) fn dispatch_normal_mode_key(app: &mut App, key: KeyEvent) -> bool {

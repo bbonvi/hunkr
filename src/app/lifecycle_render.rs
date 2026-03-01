@@ -526,18 +526,6 @@ pub(super) fn help_overlay_close_key(key: KeyEvent) -> bool {
         )
 }
 
-/// Maps pane-cycle keyboard shortcuts while preserving Ctrl-modified bindings.
-pub(super) fn pane_focus_cycle_direction(key: KeyEvent) -> Option<PaneCycleDirection> {
-    match (key.code, key.modifiers) {
-        (KeyCode::Tab, KeyModifiers::NONE) => Some(PaneCycleDirection::Next),
-        (KeyCode::Tab, KeyModifiers::SHIFT) => Some(PaneCycleDirection::Prev),
-        (KeyCode::BackTab, KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-            Some(PaneCycleDirection::Prev)
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -610,21 +598,4 @@ mod tests {
             Err(err) => assert!(format!("{err:#}").contains("git open failed")),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PaneCycleDirection {
-    Prev,
-    Next,
-}
-
-pub(super) fn theme_toggle_conflicts_with_diff_pending_op(
-    key: KeyEvent,
-    focused: FocusPane,
-    pending_op: Option<DiffPendingOp>,
-) -> bool {
-    key.modifiers == KeyModifiers::NONE
-        && key.code == KeyCode::Char('t')
-        && focused == FocusPane::Diff
-        && matches!(pending_op, Some(DiffPendingOp::Z))
 }
