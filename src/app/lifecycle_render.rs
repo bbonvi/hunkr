@@ -1,4 +1,5 @@
 use super::flow::{self, AppAction};
+use super::runtime::tick_scheduler::{self, PollTimeoutInputs, TickPlanInputs, TickTask};
 use super::*;
 use crate::config::AppConfig;
 
@@ -333,29 +334,15 @@ impl App {
     }
 
     pub fn poll_timeout(&self) -> Duration {
-        if self.onboarding_active() {
-            return Duration::from_millis(250);
-        }
-
-        let selection_rebuild_in = self
-            .runtime
-            .selection_rebuild_due
-            .map(|due| due.saturating_duration_since(self.now_instant()));
-        let timeout = next_poll_timeout(
-            self.runtime.last_refresh.elapsed(),
-            self.runtime.last_relative_time_redraw.elapsed(),
-            selection_rebuild_in,
-        );
-        let timeout = if self.ui.shell_command.running.is_some() {
-            timeout.min(SHELL_STREAM_POLL_EVERY)
-        } else {
-            timeout
-        };
-        if let Some(flash_timeout) = self.shell_output_flash_timeout() {
-            timeout.min(flash_timeout)
-        } else {
-            timeout
-        }
+        tick_scheduler::compute_poll_timeout(PollTimeoutInputs {
+            onboarding_active: self.onboarding_active(),
+            selection_rebuild_due: self.runtime.selection_rebuild_due,
+            now: self.now_instant(),
+            last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
+            last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
+            shell_running: self.ui.shell_command.running.is_some(),
+            shell_flash_timeout: self.shell_output_flash_timeout(),
+        })
     }
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
@@ -430,39 +417,37 @@ impl App {
     }
 
     pub(in crate::app) fn run_tick_cycle(&mut self, now: Instant) {
-        if self.onboarding_active() {
-            return;
-        }
-        self.poll_shell_command_stream();
-        self.poll_shell_output_flash();
-        if self.runtime.last_terminal_clear.elapsed() >= TERMINAL_CLEAR_EVERY {
-            self.request_terminal_clear();
-        }
-
-        if self
-            .runtime
-            .selection_rebuild_due
-            .is_some_and(|due| now >= due)
-        {
-            self.flush_pending_selection_rebuild();
-            self.runtime.needs_redraw = true;
-        }
-
-        let mut refreshed = false;
-        if self.runtime.last_refresh.elapsed() >= AUTO_REFRESH_EVERY {
-            if let Err(err) = self.reload_commits(true) {
-                self.runtime.status = format!("refresh failed: {err:#}");
+        let tasks = tick_scheduler::plan_tick(TickPlanInputs {
+            onboarding_active: self.onboarding_active(),
+            now,
+            terminal_clear_elapsed: self.runtime.last_terminal_clear.elapsed(),
+            selection_rebuild_due: self.runtime.selection_rebuild_due,
+            last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
+            last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
+        });
+        for task in tasks {
+            match task {
+                TickTask::PollShellStream => self.poll_shell_command_stream(),
+                TickTask::PollShellFlash => self.poll_shell_output_flash(),
+                TickTask::RequestTerminalClear => self.request_terminal_clear(),
+                TickTask::FlushSelectionRebuild => {
+                    self.flush_pending_selection_rebuild();
+                    self.runtime.needs_redraw = true;
+                }
+                TickTask::ReloadCommits => {
+                    if let Err(err) = self.reload_commits(true) {
+                        self.runtime.status = format!("refresh failed: {err:#}");
+                    }
+                    let refreshed_at = self.now_instant();
+                    self.runtime.last_refresh = refreshed_at;
+                    self.runtime.last_relative_time_redraw = refreshed_at;
+                    self.runtime.needs_redraw = true;
+                }
+                TickTask::RedrawRelativeTime => {
+                    self.runtime.last_relative_time_redraw = self.now_instant();
+                    self.runtime.needs_redraw = true;
+                }
             }
-            self.runtime.last_refresh = self.now_instant();
-            refreshed = true;
-            self.runtime.needs_redraw = true;
-        }
-
-        if refreshed {
-            self.runtime.last_relative_time_redraw = self.now_instant();
-        } else if self.runtime.last_relative_time_redraw.elapsed() >= RELATIVE_TIME_REDRAW_EVERY {
-            self.runtime.last_relative_time_redraw = self.now_instant();
-            self.runtime.needs_redraw = true;
         }
     }
 

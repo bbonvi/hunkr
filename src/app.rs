@@ -40,6 +40,7 @@ mod lifecycle_view;
 mod navigation;
 mod nerd_fonts;
 mod ports;
+mod runtime;
 mod selection_helpers;
 mod services;
 mod shell_command;
