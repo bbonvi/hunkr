@@ -616,6 +616,60 @@ pub(super) fn pane_focus_cycle_direction(key: KeyEvent) -> Option<PaneCycleDirec
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    struct TestClock;
+
+    impl AppClock for TestClock {
+        fn now_utc(&self) -> DateTime<Utc> {
+            Utc::now()
+        }
+
+        fn now_instant(&self) -> Instant {
+            Instant::now()
+        }
+    }
+
+    struct FailingGitBootstrapPorts;
+
+    impl AppBootstrapPorts for FailingGitBootstrapPorts {
+        fn open_current_git(&self) -> anyhow::Result<GitService> {
+            Err(anyhow!("git open failed"))
+        }
+
+        fn load_config(&self) -> anyhow::Result<AppConfig> {
+            panic!("load_config should not be called when git open fails");
+        }
+
+        fn state_store_for_repo(&self, _repo_root: &Path) -> StateStore {
+            panic!("state_store_for_repo should not be called when git open fails");
+        }
+
+        fn open_comment_store(
+            &self,
+            _store_root: &Path,
+            _branch: &str,
+        ) -> anyhow::Result<CommentStore> {
+            panic!("open_comment_store should not be called when git open fails");
+        }
+
+        fn clock(&self) -> Arc<dyn AppClock> {
+            Arc::new(TestClock)
+        }
+    }
+
+    #[test]
+    fn bootstrap_with_propagates_git_open_errors() {
+        match App::bootstrap_with(&FailingGitBootstrapPorts) {
+            Ok(_) => panic!("bootstrap should fail"),
+            Err(err) => assert!(format!("{err:#}").contains("git open failed")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PaneCycleDirection {
     Prev,
