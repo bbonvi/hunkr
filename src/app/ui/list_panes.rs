@@ -2,15 +2,15 @@ use crate::model::{FileChangeKind, ReviewStatus};
 use chrono::Utc;
 use ratatui::{
     Frame,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
 
 use super::super::{
     CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
-    commit_push_chain_marker, commit_selection_marker, commit_status_badge, display_width,
-    format_file_change_badge, format_relative_time, list_highlight_symbol,
+    blend_colors, commit_push_chain_marker, commit_selection_marker, commit_status_badge,
+    display_width, format_file_change_badge, format_relative_time, list_highlight_symbol,
     list_highlight_symbol_width, sanitize_terminal_text, sanitized_span, truncate,
     uncommitted_badge,
 };
@@ -656,11 +656,15 @@ fn commit_push_chain_style(kind: CommitPushChainMarkerKind, theme: &UiTheme) -> 
     match kind {
         CommitPushChainMarkerKind::FirstUnpushed
         | CommitPushChainMarkerKind::TopUnpushed
-        | CommitPushChainMarkerKind::Unpushed => Style::default()
-            .fg(theme.unpushed)
-            .add_modifier(Modifier::BOLD),
+        | CommitPushChainMarkerKind::Unpushed => Style::default().fg(theme.muted),
         CommitPushChainMarkerKind::Pushed
         | CommitPushChainMarkerKind::FirstPushed
-        | CommitPushChainMarkerKind::TopPushed => Style::default().fg(theme.muted),
+        | CommitPushChainMarkerKind::TopPushed => {
+            Style::default().fg(subdued_pushed_chain_color(theme))
+        }
     }
+}
+
+fn subdued_pushed_chain_color(theme: &UiTheme) -> Color {
+    blend_colors(theme.unpushed, theme.muted, 110)
 }
