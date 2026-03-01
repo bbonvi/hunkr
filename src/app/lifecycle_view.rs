@@ -9,60 +9,30 @@ impl App {
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
     ) {
-        let selected = self.commits.iter().filter(|row| row.selected).count();
-        let (unreviewed, reviewed, issue_found, resolved) = self.status_counts();
-        let focus = match self.preferences.focused {
-            FocusPane::Files => "FILES",
-            FocusPane::Commits => "COMMITS",
-            FocusPane::Diff => "DIFF",
+        let nerd_fonts = self.preferences.nerd_fonts;
+        let branch_prefix = branch_label_prefix(nerd_fonts);
+        let wt_prefix = worktree_label_prefix(nerd_fonts);
+        let branch_label = if nerd_fonts {
+            format!("{branch_prefix} {} ", self.git.branch_name())
+        } else {
+            format!("{branch_prefix}{} ", self.git.branch_name())
+        };
+        let wt_label = if nerd_fonts {
+            format!("{wt_prefix} {} ", short_path_label(self.git.root()))
+        } else {
+            format!("{wt_prefix}{} ", short_path_label(self.git.root()))
         };
         let headline = Line::from(vec![
             Span::styled(
-                app_title_label(self.preferences.nerd_fonts),
+                app_title_label(nerd_fonts),
                 Style::default()
                     .fg(theme.panel_title_fg)
                     .bg(theme.panel_title_bg)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
-            Span::styled(
-                format!("branch:{} ", self.git.branch_name()),
-                Style::default().fg(theme.text),
-            ),
-            Span::styled(
-                format!("wt:{} ", short_path_label(self.git.root())),
-                Style::default().fg(theme.muted),
-            ),
-            Span::styled(
-                format!("focus:{} ", focus),
-                Style::default().fg(theme.accent),
-            ),
-            Span::styled(
-                format!("selected:{} ", selected),
-                Style::default().fg(theme.muted),
-            ),
-            Span::styled(
-                format!(
-                    "U:{} R:{} I:{} Z:{} ",
-                    unreviewed, reviewed, issue_found, resolved
-                ),
-                Style::default().fg(theme.muted),
-            ),
-            Span::styled(
-                format!("theme:{} ", self.preferences.theme_mode.label()),
-                Style::default().fg(theme.dimmed),
-            ),
-            Span::styled(
-                format!(
-                    "nf:{} ",
-                    if self.preferences.nerd_fonts {
-                        "on"
-                    } else {
-                        "off"
-                    }
-                ),
-                Style::default().fg(theme.dimmed),
-            ),
+            Span::styled(branch_label, Style::default().fg(theme.text)),
+            Span::styled(wt_label, Style::default().fg(theme.muted)),
         ]);
 
         let header = Paragraph::new(headline).block(

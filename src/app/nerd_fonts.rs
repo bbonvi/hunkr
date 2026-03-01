@@ -37,6 +37,16 @@ pub(super) fn app_title_label(nerd_fonts: bool) -> &'static str {
     if nerd_fonts { "  HUNKR " } else { " HUNKR " }
 }
 
+/// Returns the branch label prefix for the header.
+pub(super) fn branch_label_prefix(nerd_fonts: bool) -> &'static str {
+    if nerd_fonts { "" } else { "branch:" }
+}
+
+/// Returns the worktree label prefix for the header.
+pub(super) fn worktree_label_prefix(nerd_fonts: bool) -> &'static str {
+    if nerd_fonts { "󱘎" } else { "wt:" }
+}
+
 /// Returns commit selection marker for list rows.
 pub(super) fn commit_selection_marker(selected: bool, nerd_fonts: bool) -> &'static str {
     match (selected, nerd_fonts) {
@@ -178,6 +188,16 @@ pub(super) fn commit_status_badge(status: ReviewStatus, nerd_fonts: bool) -> &'s
         ReviewStatus::IssueFound => "I",
         ReviewStatus::Resolved => "S",
     }
+}
+
+/// Returns the commit-pane status-filter label prefix.
+pub(super) fn commit_status_filter_label_prefix(nerd_fonts: bool) -> &'static str {
+    if nerd_fonts { "" } else { "sf:" }
+}
+
+/// Returns the commit-pane status-filter token for the "all" scope.
+pub(super) fn commit_status_filter_all_badge(nerd_fonts: bool) -> &'static str {
+    if nerd_fonts { "" } else { "all" }
 }
 
 pub(super) fn file_change_kind_symbol(kind: FileChangeKind, nerd_fonts: bool) -> &'static str {
@@ -462,5 +482,21 @@ mod tests {
         assert_ne!(rendered, "src/app.rs");
         assert!(rendered.ends_with("src/app.rs"));
         assert!(rendered.contains(' '));
+    }
+
+    #[test]
+    fn header_prefixes_follow_font_mode() {
+        assert_eq!(branch_label_prefix(true), "");
+        assert_eq!(branch_label_prefix(false), "branch:");
+        assert_eq!(worktree_label_prefix(true), "󱘎");
+        assert_eq!(worktree_label_prefix(false), "wt:");
+    }
+
+    #[test]
+    fn status_filter_tokens_follow_font_mode() {
+        assert_eq!(commit_status_filter_label_prefix(true), "");
+        assert_eq!(commit_status_filter_label_prefix(false), "sf:");
+        assert_eq!(commit_status_filter_all_badge(true), "");
+        assert_eq!(commit_status_filter_all_badge(false), "all");
     }
 }

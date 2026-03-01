@@ -10,7 +10,8 @@ use ratatui::{
 use super::super::{
     CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
     blend_colors, commit_push_chain_marker, commit_selection_marker, commit_status_badge,
-    display_width, format_file_change_badge, format_relative_time, list_highlight_symbol,
+    commit_status_filter_all_badge, commit_status_filter_label_prefix, display_width,
+    format_file_change_badge, format_relative_time, list_highlight_symbol,
     list_highlight_symbol_width, sanitize_terminal_text, sanitized_span, truncate,
     uncommitted_badge,
 };
@@ -192,13 +193,28 @@ impl<'a> ListPaneRenderer<'a> {
             ),
             Span::raw(" "),
             Span::styled(
-                format!(
-                    "sel:{selected_total} U:{unreviewed} R:{reviewed} I:{issue_found} Z:{resolved} {shown_commits}/{total_commits} sf:",
-                ),
+                format!("sel:{selected_total} "),
                 Style::default().fg(self.theme.muted),
             ),
         ];
-        title_spans.extend(commit_status_filter_spans(status_filter, self.theme));
+        title_spans.extend(commit_status_count_spans(
+            (unreviewed, reviewed, issue_found, resolved),
+            self.theme,
+            self.nerd_fonts,
+        ));
+        title_spans.push(Span::styled(
+            format!("{shown_commits}/{total_commits} "),
+            Style::default().fg(self.theme.muted),
+        ));
+        title_spans.push(Span::styled(
+            format!("{} ", commit_status_filter_label_prefix(self.nerd_fonts)),
+            Style::default().fg(self.theme.muted),
+        ));
+        title_spans.extend(commit_status_filter_spans(
+            status_filter,
+            self.theme,
+            self.nerd_fonts,
+        ));
         title_spans.extend([
             Span::raw(" "),
             Span::styled("filter:", Style::default().fg(self.theme.muted)),
@@ -272,35 +288,58 @@ impl<'a> ListPaneRenderer<'a> {
 pub(in crate::app) fn commit_status_filter_spans(
     status_filter: CommitStatusFilter,
     theme: &UiTheme,
+    nerd_fonts: bool,
 ) -> Vec<Span<'static>> {
     match status_filter {
         CommitStatusFilter::All => vec![Span::styled(
-            status_filter.label().to_owned(),
+            commit_status_filter_all_badge(nerd_fonts).to_owned(),
             Style::default().fg(theme.muted),
         )],
         CommitStatusFilter::UnreviewedOrIssueFound => vec![
             Span::styled(
-                "unreviewed".to_owned(),
+                commit_status_badge(ReviewStatus::Unreviewed, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::Unreviewed, theme),
             ),
             Span::styled("|", Style::default().fg(theme.muted)),
             Span::styled(
-                "issue_found".to_owned(),
+                commit_status_badge(ReviewStatus::IssueFound, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::IssueFound, theme),
             ),
         ],
         CommitStatusFilter::ReviewedOrResolved => vec![
             Span::styled(
-                "reviewed".to_owned(),
+                commit_status_badge(ReviewStatus::Reviewed, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::Reviewed, theme),
             ),
             Span::styled("|", Style::default().fg(theme.muted)),
             Span::styled(
-                "resolved".to_owned(),
+                commit_status_badge(ReviewStatus::Resolved, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::Resolved, theme),
             ),
         ],
     }
+}
+
+fn commit_status_count_spans(
+    status_counts: (usize, usize, usize, usize),
+    theme: &UiTheme,
+    nerd_fonts: bool,
+) -> Vec<Span<'static>> {
+    let (unreviewed, reviewed, issue_found, resolved) = status_counts;
+    [
+        (ReviewStatus::Unreviewed, unreviewed),
+        (ReviewStatus::Reviewed, reviewed),
+        (ReviewStatus::IssueFound, issue_found),
+        (ReviewStatus::Resolved, resolved),
+    ]
+    .into_iter()
+    .map(|(status, count)| {
+        Span::styled(
+            format!("{}:{count} ", commit_status_badge(status, nerd_fonts)),
+            status_style(status, theme),
+        )
+    })
+    .collect()
 }
 
 /// Presenter for composing list pane rows with shared truncation and age columns.
@@ -667,4 +706,35 @@ fn commit_push_chain_style(kind: CommitPushChainMarkerKind, theme: &UiTheme) -> 
 
 fn subdued_pushed_chain_color(theme: &UiTheme) -> Color {
     blend_colors(theme.unpushed, theme.muted, 110)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::ThemeMode;
+
+    #[test]
+    fn commit_status_filter_spans_use_icons_in_nerd_font_mode() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let spans =
+            commit_status_filter_spans(CommitStatusFilter::ReviewedOrResolved, &theme, true);
+        let text = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text, "|");
+    }
+
+    #[test]
+    fn commit_status_filter_spans_keep_ascii_badges_without_nerd_fonts() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let spans = commit_status_filter_spans(CommitStatusFilter::All, &theme, false);
+        let text = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text, "all");
+    }
 }

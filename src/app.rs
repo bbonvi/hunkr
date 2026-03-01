@@ -47,10 +47,11 @@ mod worktree_switcher;
 use self::comment_helpers::*;
 use self::core_helpers::*;
 use self::nerd_fonts::{
-    CommitPushChainMarkerKind, NerdFontTheme, app_title_label, commit_push_chain_marker,
-    commit_selection_marker, commit_status_badge, file_change_kind_symbol,
+    CommitPushChainMarkerKind, NerdFontTheme, app_title_label, branch_label_prefix,
+    commit_push_chain_marker, commit_selection_marker, commit_status_badge,
+    commit_status_filter_all_badge, commit_status_filter_label_prefix, file_change_kind_symbol,
     format_file_change_badge, format_path_with_icon, format_tree_dir_label, format_tree_file_label,
-    list_highlight_symbol, list_highlight_symbol_width, uncommitted_badge,
+    list_highlight_symbol, list_highlight_symbol_width, uncommitted_badge, worktree_label_prefix,
 };
 use self::selection_helpers::*;
 use self::text_edit::*;
