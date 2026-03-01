@@ -144,4 +144,46 @@ mod tests {
         assert!(tasks.contains(&TickTask::ReloadCommits));
         assert!(!tasks.contains(&TickTask::RedrawRelativeTime));
     }
+
+    #[test]
+    fn plan_tick_skips_all_tasks_when_onboarding_is_active() {
+        let tasks = plan_tick(TickPlanInputs {
+            onboarding_active: true,
+            now: Instant::now(),
+            terminal_clear_elapsed: TERMINAL_CLEAR_EVERY,
+            selection_rebuild_due: Some(Instant::now()),
+            last_refresh_elapsed: AUTO_REFRESH_EVERY,
+            last_relative_redraw_elapsed: RELATIVE_TIME_REDRAW_EVERY,
+        });
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn plan_tick_includes_selection_rebuild_when_due() {
+        let now = Instant::now();
+        let tasks = plan_tick(TickPlanInputs {
+            onboarding_active: false,
+            now,
+            terminal_clear_elapsed: Duration::from_secs(0),
+            selection_rebuild_due: Some(now),
+            last_refresh_elapsed: Duration::from_secs(0),
+            last_relative_redraw_elapsed: Duration::from_secs(0),
+        });
+        assert!(tasks.contains(&TickTask::FlushSelectionRebuild));
+    }
+
+    #[test]
+    fn compute_poll_timeout_respects_selection_rebuild_deadline() {
+        let now = Instant::now();
+        let timeout = compute_poll_timeout(PollTimeoutInputs {
+            onboarding_active: false,
+            selection_rebuild_due: Some(now + Duration::from_millis(2)),
+            now,
+            last_refresh_elapsed: Duration::from_secs(0),
+            last_relative_redraw_elapsed: Duration::from_secs(0),
+            shell_running: false,
+            shell_flash_timeout: None,
+        });
+        assert!(timeout <= Duration::from_millis(2));
+    }
 }
