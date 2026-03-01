@@ -176,6 +176,7 @@ impl<'a> ListPaneRenderer<'a> {
             commit_list_state,
         } = model;
         let (unreviewed, reviewed, issue_found, resolved) = status_counts;
+        let selected_prefix = if self.nerd_fonts { "" } else { "sel:" };
         let filter_style = if search_enabled {
             Style::default()
                 .fg(self.theme.accent)
@@ -193,7 +194,7 @@ impl<'a> ListPaneRenderer<'a> {
             ),
             Span::raw(" "),
             Span::styled(
-                format!("sel:{selected_total} "),
+                format!("{selected_prefix}{selected_total} "),
                 Style::default().fg(self.theme.muted),
             ),
         ];
@@ -334,8 +335,12 @@ fn commit_status_count_spans(
     ]
     .into_iter()
     .map(|(status, count)| {
+        let separator = if nerd_fonts { "" } else { ":" };
         Span::styled(
-            format!("{}:{count} ", commit_status_badge(status, nerd_fonts)),
+            format!(
+                "{}{separator}{count} ",
+                commit_status_badge(status, nerd_fonts)
+            ),
             status_style(status, theme),
         )
     })
@@ -736,5 +741,29 @@ mod tests {
             .collect::<String>();
 
         assert_eq!(text, "all");
+    }
+
+    #[test]
+    fn commit_status_count_spans_drop_colons_in_nerd_font_mode() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let spans = commit_status_count_spans((9, 8, 7, 6), &theme, true);
+        let text = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text, "9 8 7 6 ");
+    }
+
+    #[test]
+    fn commit_status_count_spans_keep_colons_without_nerd_fonts() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let spans = commit_status_count_spans((9, 8, 7, 6), &theme, false);
+        let text = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text, "U:9 R:8 I:7 S:6 ");
     }
 }
