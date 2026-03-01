@@ -297,6 +297,7 @@ impl App {
                         .add_comment(&target, &self.comment_editor.buffer);
                     match result {
                         Ok(id) => {
+                            self.capture_pending_diff_view_anchor();
                             self.set_status_for_ids(&target.commits, ReviewStatus::IssueFound);
                             self.invalidate_diff_cache();
                             if let Err(err) = self.sync_comment_report() {
@@ -340,6 +341,7 @@ impl App {
                     .update_comment(id, &self.comment_editor.buffer)
                 {
                     Ok(true) => {
+                        self.capture_pending_diff_view_anchor();
                         self.invalidate_diff_cache();
                         if let Err(err) = self.sync_comment_report() {
                             self.runtime.status = format!(
@@ -610,6 +612,7 @@ impl App {
         };
         match self.comments.delete_comment(id) {
             Ok(true) => {
+                self.capture_pending_diff_view_anchor();
                 self.invalidate_diff_cache();
                 if let Err(err) = self.sync_comment_report() {
                     self.runtime.status = format!(
