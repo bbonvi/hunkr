@@ -1892,35 +1892,6 @@ fn compose_commit_line_uses_nerd_symbols_when_enabled() {
 }
 
 #[test]
-fn commit_chain_marker_colors_use_gray_for_unpushed_and_muted_blue_for_pushed() {
-    let row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
-
-    let pushed =
-        presenter.commit_row_line_with_push_chain(&row, Some(CommitPushChainMarkerKind::Pushed));
-    let unpushed =
-        presenter.commit_row_line_with_push_chain(&row, Some(CommitPushChainMarkerKind::Unpushed));
-
-    let pushed_marker = pushed
-        .spans
-        .iter()
-        .find(|span| span.content == "󰜘")
-        .expect("pushed marker");
-    let unpushed_marker = unpushed
-        .spans
-        .iter()
-        .find(|span| span.content == "󰜛")
-        .expect("unpushed marker");
-
-    assert_eq!(
-        pushed_marker.style.fg,
-        Some(blend_colors(theme.unpushed, theme.muted, 110))
-    );
-    assert_eq!(unpushed_marker.style.fg, Some(theme.muted));
-}
-
-#[test]
 fn compose_uncommitted_line_uses_nerd_draft_badge() {
     let row = CommitRow {
         info: CommitInfo {

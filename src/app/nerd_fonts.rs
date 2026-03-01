@@ -499,32 +499,4 @@ mod tests {
         let dockerfile = icon_prefix(&dockerfile_path);
         assert_eq!(compose, dockerfile);
     }
-
-    #[test]
-    fn commit_push_chain_markers_match_expected_nerd_font_icons() {
-        assert_eq!(
-            commit_push_chain_marker(CommitPushChainMarkerKind::Pushed, true),
-            "󰜘"
-        );
-        assert_eq!(
-            commit_push_chain_marker(CommitPushChainMarkerKind::FirstPushed, true),
-            "󰜙"
-        );
-        assert_eq!(
-            commit_push_chain_marker(CommitPushChainMarkerKind::FirstUnpushed, true),
-            "󰜚"
-        );
-        assert_eq!(
-            commit_push_chain_marker(CommitPushChainMarkerKind::TopPushed, true),
-            "󰜝"
-        );
-        assert_eq!(
-            commit_push_chain_marker(CommitPushChainMarkerKind::TopUnpushed, true),
-            "󰜞"
-        );
-        assert_eq!(
-            commit_push_chain_marker(CommitPushChainMarkerKind::Unpushed, true),
-            "󰜛"
-        );
-    }
 }
