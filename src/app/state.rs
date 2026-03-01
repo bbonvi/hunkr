@@ -405,9 +405,16 @@ impl App {
         if self.diff_position.cursor >= self.rendered_diff.len() {
             self.diff_position.cursor = self.rendered_diff.len() - 1;
         }
+        if self.diff_position.scroll >= self.rendered_diff.len() {
+            self.diff_position.scroll = self.rendered_diff.len() - 1;
+        }
         self.sync_diff_visual_bounds();
 
-        self.ensure_cursor_visible();
+        if diff_viewport_layout_ready(&self.diff_ui.pane_rects) {
+            self.ensure_cursor_visible();
+        } else {
+            self.sync_diff_block_cursor_to_cursor_line();
+        }
     }
 
     pub(super) fn invalidate_diff_cache(&mut self) {
@@ -929,6 +936,10 @@ impl App {
     }
 }
 
+fn diff_viewport_layout_ready(rects: &PaneRects) -> bool {
+    rects.diff.height > 2
+}
+
 /// Renders one commit banner row and injects commit-scoped comments under it.
 fn push_commit_banner_and_comments(
     rendered: &mut Vec<RenderedDiffLine>,
@@ -1299,5 +1310,15 @@ mod restore_tests {
             restore_focus_with_availability(FocusPane::Diff, false),
             FocusPane::Diff
         );
+    }
+
+    #[test]
+    fn diff_viewport_layout_ready_requires_inner_rows() {
+        let mut rects = crate::app::PaneRects::default();
+        rects.diff.height = 2;
+        assert!(!super::diff_viewport_layout_ready(&rects));
+
+        rects.diff.height = 3;
+        assert!(super::diff_viewport_layout_ready(&rects));
     }
 }

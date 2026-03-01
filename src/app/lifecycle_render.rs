@@ -381,6 +381,7 @@ impl App {
             files: left_chunks[1],
             diff: main_chunks[1],
         };
+        self.sync_diff_cursor_to_content_bounds();
 
         self.render_header(frame, root_chunks[0], &theme);
         self.render_commits(frame, self.diff_ui.pane_rects.commits, &theme);
