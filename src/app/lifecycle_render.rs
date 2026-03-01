@@ -142,9 +142,12 @@ impl App {
             },
             search: SearchState {
                 diff_buffer: String::new(),
+                diff_cursor: 0,
                 diff_query: None,
                 commit_query: String::new(),
+                commit_cursor: 0,
                 file_query: String::new(),
+                file_cursor: 0,
             },
             runtime: RuntimeState {
                 status: String::new(),

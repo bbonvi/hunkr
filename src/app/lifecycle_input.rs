@@ -383,38 +383,65 @@ impl App {
 
     pub(super) fn handle_diff_search_input(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc => {
-                self.preferences.input_mode = InputMode::Normal;
-                self.search.diff_buffer.clear();
-                let cleared = self.clear_diff_search();
-                self.runtime.status = if cleared {
-                    "Diff search cleared".to_owned()
-                } else {
-                    "Diff search canceled".to_owned()
-                };
-            }
+            KeyCode::Esc => self.cancel_diff_search_input(),
             KeyCode::Enter => {
                 let query = self.search.diff_buffer.trim().to_owned();
                 self.preferences.input_mode = InputMode::Normal;
                 self.search.diff_buffer.clear();
+                self.search.diff_cursor = 0;
                 if query.is_empty() {
                     self.runtime.status = "Diff search canceled".to_owned();
                     return;
                 }
                 self.execute_diff_search(&query, true);
             }
-            KeyCode::Backspace => {
-                self.search.diff_buffer.pop();
-                self.runtime.status = format!("/{}", self.search.diff_buffer);
+            KeyCode::Backspace if self.search.diff_buffer.is_empty() => {
+                self.cancel_diff_search_input();
             }
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    return;
+            _ => {
+                let edit = apply_single_line_edit_key(
+                    &mut self.search.diff_buffer,
+                    &mut self.search.diff_cursor,
+                    key,
+                );
+                if !matches!(edit, SingleLineEditOutcome::NotHandled) {
+                    self.runtime.status = format!("/{}", self.search.diff_buffer);
                 }
-                self.search.diff_buffer.push(c);
-                self.runtime.status = format!("/{}", self.search.diff_buffer);
             }
-            _ => {}
+        }
+    }
+
+    fn cancel_diff_search_input(&mut self) {
+        self.preferences.input_mode = InputMode::Normal;
+        let cleared = self.clear_diff_search();
+        self.runtime.status = if cleared {
+            "Diff search cleared".to_owned()
+        } else {
+            "Diff search canceled".to_owned()
+        };
+    }
+
+    fn cancel_list_search_input(
+        &mut self,
+        pane: FocusPane,
+        preferred_commit_id: Option<&str>,
+        fallback_visible_idx: Option<usize>,
+    ) {
+        self.preferences.input_mode = InputMode::Normal;
+        match pane {
+            FocusPane::Commits => {
+                self.search.commit_query.clear();
+                self.search.commit_cursor = 0;
+                self.sync_commit_cursor_for_filters(preferred_commit_id, fallback_visible_idx);
+                self.runtime.status = "Commit search cleared".to_owned();
+            }
+            FocusPane::Files => {
+                self.search.file_query.clear();
+                self.search.file_cursor = 0;
+                self.sync_file_cursor_for_filters();
+                self.runtime.status = "File search cleared".to_owned();
+            }
+            FocusPane::Diff => {}
         }
     }
 
@@ -424,26 +451,32 @@ impl App {
             .flatten();
         let fallback_visible_idx = self.commit_ui.list_state.selected();
 
-        match key.code {
-            KeyCode::Esc => {
-                self.preferences.input_mode = InputMode::Normal;
-                match pane {
-                    FocusPane::Commits => {
-                        self.search.commit_query.clear();
-                        self.sync_commit_cursor_for_filters(
-                            preferred_commit_id.as_deref(),
-                            fallback_visible_idx,
-                        );
-                        self.runtime.status = "Commit search cleared".to_owned();
-                    }
-                    FocusPane::Files => {
-                        self.search.file_query.clear();
-                        self.sync_file_cursor_for_filters();
-                        self.runtime.status = "File search cleared".to_owned();
-                    }
-                    FocusPane::Diff => {}
-                }
+        if matches!(key.code, KeyCode::Esc) {
+            self.cancel_list_search_input(
+                pane,
+                preferred_commit_id.as_deref(),
+                fallback_visible_idx,
+            );
+            return;
+        }
+
+        if matches!(key.code, KeyCode::Backspace) {
+            let is_empty = match pane {
+                FocusPane::Commits => self.search.commit_query.is_empty(),
+                FocusPane::Files => self.search.file_query.is_empty(),
+                FocusPane::Diff => false,
+            };
+            if is_empty {
+                self.cancel_list_search_input(
+                    pane,
+                    preferred_commit_id.as_deref(),
+                    fallback_visible_idx,
+                );
+                return;
             }
+        }
+
+        match key.code {
             KeyCode::Enter => {
                 self.preferences.input_mode = InputMode::Normal;
                 let query = match pane {
@@ -474,44 +507,41 @@ impl App {
                     }
                 };
             }
-            KeyCode::Backspace => match pane {
-                FocusPane::Commits => {
-                    self.search.commit_query.pop();
-                    self.sync_commit_cursor_for_filters(
-                        preferred_commit_id.as_deref(),
-                        fallback_visible_idx,
-                    );
-                    self.runtime.status = format!("/{}", self.search.commit_query);
-                }
-                FocusPane::Files => {
-                    self.search.file_query.pop();
-                    self.sync_file_cursor_for_filters();
-                    self.runtime.status = format!("/{}", self.search.file_query);
-                }
-                FocusPane::Diff => {}
-            },
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    return;
-                }
-                match pane {
-                    FocusPane::Commits => {
-                        self.search.commit_query.push(c);
+            _ => {
+                let edit = match pane {
+                    FocusPane::Commits => apply_single_line_edit_key(
+                        &mut self.search.commit_query,
+                        &mut self.search.commit_cursor,
+                        key,
+                    ),
+                    FocusPane::Files => apply_single_line_edit_key(
+                        &mut self.search.file_query,
+                        &mut self.search.file_cursor,
+                        key,
+                    ),
+                    FocusPane::Diff => SingleLineEditOutcome::NotHandled,
+                };
+                match (pane, edit) {
+                    (FocusPane::Commits, SingleLineEditOutcome::BufferChanged) => {
                         self.sync_commit_cursor_for_filters(
                             preferred_commit_id.as_deref(),
                             fallback_visible_idx,
                         );
                         self.runtime.status = format!("/{}", self.search.commit_query);
                     }
-                    FocusPane::Files => {
-                        self.search.file_query.push(c);
+                    (FocusPane::Files, SingleLineEditOutcome::BufferChanged) => {
                         self.sync_file_cursor_for_filters();
                         self.runtime.status = format!("/{}", self.search.file_query);
                     }
-                    FocusPane::Diff => {}
+                    (FocusPane::Commits, SingleLineEditOutcome::CursorMoved) => {
+                        self.runtime.status = format!("/{}", self.search.commit_query);
+                    }
+                    (FocusPane::Files, SingleLineEditOutcome::CursorMoved) => {
+                        self.runtime.status = format!("/{}", self.search.file_query);
+                    }
+                    _ => {}
                 }
             }
-            _ => {}
         }
     }
 
@@ -632,6 +662,7 @@ impl App {
             KeyCode::PageUp => self.page_files(-1.0),
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.preferences.input_mode = InputMode::ListSearch(FocusPane::Files);
+                self.search.file_cursor = self.search.file_query.len();
                 self.runtime.status = format!("/{}", self.search.file_query);
             }
             KeyCode::Enter | KeyCode::Char(' ') => self.set_focus(FocusPane::Diff),
@@ -671,6 +702,7 @@ impl App {
             KeyCode::PageUp => self.page_commits(-1.0),
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.preferences.input_mode = InputMode::ListSearch(FocusPane::Commits);
+                self.search.commit_cursor = self.search.commit_query.len();
                 self.runtime.status = format!("/{}", self.search.commit_query);
             }
             KeyCode::Char('v') => {
@@ -831,6 +863,7 @@ impl App {
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.preferences.input_mode = InputMode::DiffSearch;
                 self.search.diff_buffer.clear();
+                self.search.diff_cursor = 0;
                 self.diff_ui.pending_op = None;
                 self.runtime.status = "/".to_owned();
             }
@@ -924,6 +957,7 @@ impl App {
 
     fn clear_diff_search(&mut self) -> bool {
         self.search.diff_buffer.clear();
+        self.search.diff_cursor = 0;
         self.search.diff_query.take().is_some()
     }
 }

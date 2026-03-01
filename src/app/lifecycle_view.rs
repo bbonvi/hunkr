@@ -465,43 +465,21 @@ impl App {
                 ));
             }
             InputMode::DiffSearch => {
-                let query = if self.search.diff_buffer.is_empty() {
-                    "/".to_owned()
-                } else {
-                    format!("/{}", self.search.diff_buffer)
-                };
                 status.push(footer_separator(theme));
-                status.push(footer_chip(
-                    &query,
-                    Style::default().fg(theme.accent).bg(blend_colors(
-                        theme.panel_title_bg,
-                        theme.border,
-                        176,
-                    )),
-                    Modifier::BOLD,
+                status.extend(search_prompt_spans(
+                    &self.search.diff_buffer,
+                    self.search.diff_cursor,
+                    theme,
                 ));
             }
             InputMode::ListSearch(pane) => {
-                let query = match pane {
-                    FocusPane::Commits => &self.search.commit_query,
-                    FocusPane::Files => &self.search.file_query,
-                    FocusPane::Diff => "",
-                };
-                let query = if query.is_empty() {
-                    "/".to_owned()
-                } else {
-                    format!("/{}", query)
+                let (query, cursor) = match pane {
+                    FocusPane::Commits => (self.search.commit_query.as_str(), self.search.commit_cursor),
+                    FocusPane::Files => (self.search.file_query.as_str(), self.search.file_cursor),
+                    FocusPane::Diff => ("", 0),
                 };
                 status.push(footer_separator(theme));
-                status.push(footer_chip(
-                    &query,
-                    Style::default().fg(theme.accent).bg(blend_colors(
-                        theme.panel_title_bg,
-                        theme.border,
-                        176,
-                    )),
-                    Modifier::BOLD,
-                ));
+                status.extend(search_prompt_spans(query, cursor, theme));
             }
             InputMode::ShellCommand => {
                 status.push(footer_separator(theme));
@@ -1571,6 +1549,37 @@ pub(super) fn footer_mode_label(
 
 fn short_id(id: &str) -> String {
     id.chars().take(7).collect()
+}
+
+fn search_prompt_spans(buffer: &str, cursor: usize, theme: &UiTheme) -> Vec<Span<'static>> {
+    let prompt_style = Style::default()
+        .fg(theme.accent)
+        .bg(blend_colors(theme.panel_title_bg, theme.border, 176))
+        .add_modifier(Modifier::BOLD);
+    let cursor_style = Style::default()
+        .fg(theme.modal_cursor_fg)
+        .bg(theme.modal_cursor_bg);
+    let clamped = clamp_char_boundary(buffer, cursor.min(buffer.len()));
+    let cursor_char = buffer[clamped..].chars().next();
+    let cursor_end = cursor_char
+        .map(|ch| clamped.saturating_add(ch.len_utf8()))
+        .unwrap_or(clamped);
+
+    let mut spans = Vec::new();
+    spans.push(Span::styled(" ", prompt_style));
+    spans.push(Span::styled("/", prompt_style));
+    if clamped > 0 {
+        spans.push(sanitized_span(&buffer[..clamped], Some(prompt_style)));
+    }
+    match cursor_char {
+        Some(ch) => spans.push(Span::styled(ch.to_string(), cursor_style)),
+        None => spans.push(Span::styled(" ", cursor_style)),
+    }
+    if cursor_end < buffer.len() {
+        spans.push(sanitized_span(&buffer[cursor_end..], Some(prompt_style)));
+    }
+    spans.push(Span::styled(" ", prompt_style));
+    spans
 }
 
 fn shell_prompt_line(buffer: &str, cursor: usize, theme: &UiTheme) -> Line<'static> {

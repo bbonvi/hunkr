@@ -518,12 +518,15 @@ struct RunningShellCommand {
     exit_status: Option<ExitStatus>,
 }
 
-/// Search/filter query buffers.
+/// Search/filter query buffers and edit cursors.
 struct SearchState {
     diff_buffer: String,
+    diff_cursor: usize,
     diff_query: Option<String>,
     commit_query: String,
+    commit_cursor: usize,
     file_query: String,
+    file_cursor: usize,
 }
 
 /// Runtime control flags and status text.
