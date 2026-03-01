@@ -16,6 +16,7 @@ use super::super::{
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
 const MIN_RELATIVE_AGE_WIDTH: usize = 3;
+const MAX_COMMIT_DECORATION_WIDTH: usize = 40;
 
 /// Renders commit/file list panes so App keeps high-level orchestration only.
 pub(in crate::app) struct ListPaneRenderer<'a> {
@@ -403,7 +404,7 @@ impl<'a> ListLinePresenter<'a> {
             let remaining =
                 max_right_width.saturating_sub(right_width + usize::from(right_width > 0));
             if remaining > 0 {
-                let max_decorations = remaining.min(28);
+                let max_decorations = remaining.min(MAX_COMMIT_DECORATION_WIDTH);
                 let rendered = truncate(&decorations, max_decorations);
                 if right_width > 0 {
                     right_spans.push(Span::raw(" "));

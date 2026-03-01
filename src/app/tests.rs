@@ -249,6 +249,25 @@ fn compose_commit_line_places_status_markers_after_git_decorations() {
 }
 
 #[test]
+fn compose_commit_line_allows_wider_git_decorations_before_truncating() {
+    let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
+    row.info.decorations = vec![CommitDecoration {
+        kind: CommitDecorationKind::Head,
+        label: "HEAD -> long-mainline-branch-name".to_owned(),
+    }];
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(240, 3_600, &theme, false);
+    let rendered = presenter.commit_row_line(&row);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+
+    assert!(flattened.contains("refs:HEAD -> long-mainline-branch-name"));
+}
+
+#[test]
 fn compose_commit_line_left_pads_short_relative_age() {
     let row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
     let theme = UiTheme::from_mode(ThemeMode::Dark);
