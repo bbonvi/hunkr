@@ -673,6 +673,16 @@ impl App {
             self.persist_selected_file_position();
             self.diff_cache.selected_file = Some(path.clone());
         }
+        if should_preserve_directory_row_focus(
+            self.preferences.focused,
+            current_visible_file_row_selectable(
+                &self.file_rows,
+                &self.visible_file_indices(),
+                self.file_ui.list_state.selected(),
+            ),
+        ) {
+            return;
+        }
         self.select_file_row_for_path(&path);
     }
 
@@ -1070,9 +1080,30 @@ fn file_focus_target_path_for_visible_row(
     None
 }
 
+fn current_visible_file_row_selectable(
+    file_rows: &[TreeRow],
+    visible_file_indices: &[usize],
+    selected_visible_idx: Option<usize>,
+) -> Option<bool> {
+    let selected_visible_idx = selected_visible_idx?;
+    let full_idx = *visible_file_indices.get(selected_visible_idx)?;
+    file_rows.get(full_idx).map(|row| row.selectable)
+}
+
+fn should_preserve_directory_row_focus(
+    focused: FocusPane,
+    selected_row_selectable: Option<bool>,
+) -> bool {
+    focused == FocusPane::Files && selected_row_selectable == Some(false)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TreeRow, file_focus_target_path_for_visible_row, format_path_with_home_tilde};
+    use super::{
+        FocusPane, TreeRow, current_visible_file_row_selectable,
+        file_focus_target_path_for_visible_row, format_path_with_home_tilde,
+        should_preserve_directory_row_focus,
+    };
 
     #[test]
     fn non_home_path_stays_absolute() {
@@ -1120,5 +1151,40 @@ mod tests {
         let visible = vec![0];
 
         assert!(file_focus_target_path_for_visible_row(&rows, &visible, 0, 0).is_none());
+    }
+
+    #[test]
+    fn preserve_directory_focus_only_in_files_pane() {
+        assert!(should_preserve_directory_row_focus(
+            FocusPane::Files,
+            Some(false)
+        ));
+        assert!(!should_preserve_directory_row_focus(
+            FocusPane::Diff,
+            Some(false)
+        ));
+        assert!(!should_preserve_directory_row_focus(
+            FocusPane::Files,
+            Some(true)
+        ));
+    }
+
+    #[test]
+    fn selected_visible_row_selectable_resolves_directory_vs_file() {
+        let rows = vec![row(None, 0, false), row(Some("src/main.rs"), 1, true)];
+        let visible = vec![0, 1];
+
+        assert_eq!(
+            current_visible_file_row_selectable(&rows, &visible, Some(0)),
+            Some(false)
+        );
+        assert_eq!(
+            current_visible_file_row_selectable(&rows, &visible, Some(1)),
+            Some(true)
+        );
+        assert_eq!(
+            current_visible_file_row_selectable(&rows, &visible, Some(9)),
+            None
+        );
     }
 }
