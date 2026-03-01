@@ -63,8 +63,9 @@ pub(in crate::app) struct CommitPaneVmInput {
     pub commits_search_mode: bool,
     pub commit_query: String,
     pub visible_commits: Vec<CommitRow>,
-    pub all_commits: Vec<CommitRow>,
-    pub comments: Vec<ReviewComment>,
+    pub commented_commit_ids: BTreeSet<String>,
+    pub selected_total: usize,
+    pub total_commits: usize,
     pub status_counts: (usize, usize, usize, usize),
     pub status_filter: CommitStatusFilter,
 }
@@ -81,26 +82,28 @@ pub(in crate::app) fn build_commit_pane_view_model(
     } else {
         "off".to_owned()
     };
-    let commented_commit_ids = input
-        .comments
-        .iter()
-        .flat_map(|comment| comment.target.commits.iter().cloned())
-        .collect::<BTreeSet<_>>();
-    let selected_total = input.all_commits.iter().filter(|row| row.selected).count();
     let shown_commits = input.visible_commits.len();
-    let total_commits = input.all_commits.len();
 
     CommitPaneViewModel {
         shown_commits,
-        total_commits,
+        total_commits: input.total_commits,
         status_counts: input.status_counts,
         status_filter: input.status_filter,
         search_enabled: input.commits_search_mode || !query.is_empty(),
         search_display,
         commits: input.visible_commits,
-        commented_commit_ids,
-        selected_total,
+        commented_commit_ids: input.commented_commit_ids,
+        selected_total: input.selected_total,
     }
+}
+
+pub(in crate::app) fn commented_commit_ids_from_comments(
+    comments: &[ReviewComment],
+) -> BTreeSet<String> {
+    comments
+        .iter()
+        .flat_map(|comment| comment.target.commits.iter().cloned())
+        .collect()
 }
 
 pub(in crate::app) struct FilePaneVmBuilder;
@@ -144,8 +147,9 @@ impl PaneViewModelBuilder for CommitPaneVmBuilder {
             ),
             commit_query: app.ui.search.commit_query.clone(),
             visible_commits,
-            all_commits: app.domain.commits.clone(),
-            comments: app.deps.comments.comments().to_vec(),
+            commented_commit_ids: commented_commit_ids_from_comments(app.deps.comments.comments()),
+            selected_total: app.domain.commits.iter().filter(|row| row.selected).count(),
+            total_commits: app.domain.commits.len(),
             status_counts: app.status_counts(),
             status_filter: app.ui.commit_ui.status_filter,
         })
@@ -265,12 +269,9 @@ mod tests {
             commits_search_mode: false,
             commit_query: String::new(),
             visible_commits: vec![commit_row("a", true)],
-            all_commits: vec![
-                commit_row("a", true),
-                commit_row("b", false),
-                commit_row("c", true),
-            ],
-            comments: Vec::new(),
+            commented_commit_ids: BTreeSet::new(),
+            selected_total: 2,
+            total_commits: 3,
             status_counts: (1, 0, 0, 0),
             status_filter: CommitStatusFilter::All,
         });
@@ -283,12 +284,15 @@ mod tests {
 
     #[test]
     fn commit_vm_aggregates_commented_commit_ids() {
+        let ids =
+            commented_commit_ids_from_comments(&[comment(1, &["a", "b"]), comment(2, &["b", "c"])]);
         let vm = build_commit_pane_view_model(CommitPaneVmInput {
             commits_search_mode: true,
             commit_query: " bug ".to_owned(),
             visible_commits: vec![commit_row("a", false)],
-            all_commits: vec![commit_row("a", false)],
-            comments: vec![comment(1, &["a", "b"]), comment(2, &["b", "c"])],
+            commented_commit_ids: ids,
+            selected_total: 0,
+            total_commits: 1,
             status_counts: (1, 0, 0, 0),
             status_filter: CommitStatusFilter::All,
         });
