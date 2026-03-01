@@ -17,9 +17,7 @@ pub trait AppBootstrapPorts: Send + Sync {
     fn state_store_for_repo(&self, repo_root: &Path) -> StateStore;
     fn open_comment_store(&self, store_root: &Path, branch: &str) -> anyhow::Result<CommentStore>;
     fn clock(&self) -> Arc<dyn AppClock>;
-    fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts> {
-        Arc::new(SystemRuntimePorts)
-    }
+    fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts>;
 }
 
 /// Runtime dependency ports used after initial bootstrap.
@@ -74,5 +72,9 @@ impl AppBootstrapPorts for SystemBootstrapPorts {
 
     fn clock(&self) -> Arc<dyn AppClock> {
         Arc::new(SystemClock)
+    }
+
+    fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts> {
+        Arc::new(SystemRuntimePorts)
     }
 }

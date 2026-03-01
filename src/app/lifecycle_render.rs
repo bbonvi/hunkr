@@ -557,6 +557,21 @@ mod tests {
     }
 
     struct FailingGitBootstrapPorts;
+    struct FailingRuntimePorts;
+
+    impl AppRuntimePorts for FailingRuntimePorts {
+        fn open_git_at(&self, _path: &Path) -> anyhow::Result<GitService> {
+            panic!("runtime open_git_at should not be called when bootstrap fails");
+        }
+
+        fn open_comment_store(
+            &self,
+            _store_root: &Path,
+            _branch: &str,
+        ) -> anyhow::Result<CommentStore> {
+            panic!("runtime open_comment_store should not be called when bootstrap fails");
+        }
+    }
 
     impl AppBootstrapPorts for FailingGitBootstrapPorts {
         fn open_current_git(&self) -> anyhow::Result<GitService> {
@@ -581,6 +596,10 @@ mod tests {
 
         fn clock(&self) -> Arc<dyn AppClock> {
             Arc::new(TestClock)
+        }
+
+        fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts> {
+            Arc::new(FailingRuntimePorts)
         }
     }
 

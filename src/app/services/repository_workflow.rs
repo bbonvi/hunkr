@@ -176,3 +176,146 @@ pub(in crate::app) fn rebuild_selection_dependent_views(app: &mut App) -> anyhow
     app.ensure_rendered_diff();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::{Path, PathBuf},
+        process::Command,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Instant,
+    };
+
+    use chrono::{DateTime, Utc};
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::config::AppConfig;
+
+    struct TestClock;
+
+    impl AppClock for TestClock {
+        fn now_utc(&self) -> DateTime<Utc> {
+            Utc::now()
+        }
+
+        fn now_instant(&self) -> Instant {
+            Instant::now()
+        }
+    }
+
+    #[derive(Default)]
+    struct RuntimePortCalls {
+        open_git_at: AtomicUsize,
+        open_comment_store: AtomicUsize,
+    }
+
+    struct TestRuntimePorts {
+        calls: Arc<RuntimePortCalls>,
+    }
+
+    impl AppRuntimePorts for TestRuntimePorts {
+        fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService> {
+            self.calls.open_git_at.fetch_add(1, Ordering::Relaxed);
+            GitService::open_at(path)
+        }
+
+        fn open_comment_store(
+            &self,
+            store_root: &Path,
+            branch: &str,
+        ) -> anyhow::Result<CommentStore> {
+            self.calls
+                .open_comment_store
+                .fetch_add(1, Ordering::Relaxed);
+            CommentStore::new(store_root, branch)
+        }
+    }
+
+    struct TestBootstrapPorts {
+        repo_root: PathBuf,
+        runtime_ports: Arc<dyn AppRuntimePorts>,
+    }
+
+    impl AppBootstrapPorts for TestBootstrapPorts {
+        fn open_current_git(&self) -> anyhow::Result<GitService> {
+            GitService::open_at(&self.repo_root)
+        }
+
+        fn load_config(&self) -> anyhow::Result<AppConfig> {
+            Ok(AppConfig::default())
+        }
+
+        fn state_store_for_repo(&self, repo_root: &Path) -> StateStore {
+            StateStore::for_project(repo_root)
+        }
+
+        fn open_comment_store(
+            &self,
+            store_root: &Path,
+            branch: &str,
+        ) -> anyhow::Result<CommentStore> {
+            CommentStore::new(store_root, branch)
+        }
+
+        fn clock(&self) -> Arc<dyn AppClock> {
+            Arc::new(TestClock)
+        }
+
+        fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts> {
+            Arc::clone(&self.runtime_ports)
+        }
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_test_repo() -> TempDir {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        run_git(root, &["init", "-q"]);
+        run_git(root, &["config", "user.name", "hunkr-test"]);
+        run_git(root, &["config", "user.email", "hunkr-test@example.com"]);
+        std::fs::write(root.join("README.md"), "init\n").expect("seed readme");
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "init", "-q"]);
+        tmp
+    }
+
+    #[test]
+    fn switch_repository_context_uses_injected_runtime_ports() {
+        let repo = init_test_repo();
+        let store = StateStore::for_project(repo.path());
+        store
+            .save(&ReviewState::default())
+            .expect("seed persisted state to bypass onboarding");
+
+        let calls = Arc::new(RuntimePortCalls::default());
+        let runtime_ports = Arc::new(TestRuntimePorts {
+            calls: Arc::clone(&calls),
+        });
+        let ports = TestBootstrapPorts {
+            repo_root: repo.path().to_path_buf(),
+            runtime_ports,
+        };
+        let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
+
+        switch_repository_context(&mut app, repo.path()).expect("switch repository context");
+        assert_eq!(calls.open_git_at.load(Ordering::Relaxed), 1);
+        assert_eq!(calls.open_comment_store.load(Ordering::Relaxed), 1);
+    }
+}

@@ -37,6 +37,18 @@ struct TestBootstrapPorts {
     repo_root: PathBuf,
 }
 
+struct TestRuntimePorts;
+
+impl AppRuntimePorts for TestRuntimePorts {
+    fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService> {
+        GitService::open_at(path)
+    }
+
+    fn open_comment_store(&self, store_root: &Path, branch: &str) -> anyhow::Result<CommentStore> {
+        CommentStore::new(store_root, branch)
+    }
+}
+
 impl AppBootstrapPorts for TestBootstrapPorts {
     fn open_current_git(&self) -> anyhow::Result<GitService> {
         GitService::open_at(&self.repo_root)
@@ -56,6 +68,10 @@ impl AppBootstrapPorts for TestBootstrapPorts {
 
     fn clock(&self) -> Arc<dyn AppClock> {
         Arc::new(TestClock)
+    }
+
+    fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts> {
+        Arc::new(TestRuntimePorts)
     }
 }
 
