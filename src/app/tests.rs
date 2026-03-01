@@ -10,6 +10,7 @@ use super::state::{format_uncommitted_summary, should_hide_deleted_file_content}
 use super::ui::diff_pane::scrollbar_thumb;
 use super::ui::list_panes::{
     ListLinePresenter, commit_push_chain_kinds, commit_status_filter_spans,
+    effective_list_top_for_selection,
 };
 use super::ui::style::{
     CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
@@ -2268,6 +2269,26 @@ fn viewport_scroll_preserves_cursor_offset() {
     );
     assert_eq!(next.scroll, 13);
     assert_eq!(next.cursor, 17);
+}
+
+#[test]
+fn effective_list_top_for_selection_keeps_existing_top_when_cursor_stays_visible() {
+    assert_eq!(effective_list_top_for_selection(Some(12), 10, 8, 40), 10);
+}
+
+#[test]
+fn effective_list_top_for_selection_scrolls_immediately_for_jump_below_viewport() {
+    assert_eq!(effective_list_top_for_selection(Some(30), 10, 8, 40), 23);
+}
+
+#[test]
+fn effective_list_top_for_selection_scrolls_immediately_for_jump_above_viewport() {
+    assert_eq!(effective_list_top_for_selection(Some(2), 10, 8, 40), 2);
+}
+
+#[test]
+fn effective_list_top_for_selection_clamps_to_bottom_limit() {
+    assert_eq!(effective_list_top_for_selection(Some(99), 70, 8, 75), 67);
 }
 
 #[test]

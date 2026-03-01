@@ -107,13 +107,16 @@ impl<'a> ListPaneRenderer<'a> {
         let line_width = width as u16;
         let cursor_idx = file_list_state.selected();
         let visible_rows = rect.height.saturating_sub(2) as usize;
-        let file_age_column_width = max_visible_age_width(
-            file_rows,
-            self.now_ts,
+        let file_top = effective_list_top_for_selection(
+            cursor_idx,
             file_list_state.offset(),
             visible_rows,
-            |row| row.modified_ts,
+            file_rows.len(),
         );
+        let file_age_column_width =
+            max_visible_age_width(file_rows, self.now_ts, file_top, visible_rows, |row| {
+                row.modified_ts
+            });
         let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts)
             .with_age_column_width(file_age_column_width);
 
@@ -213,13 +216,16 @@ impl<'a> ListPaneRenderer<'a> {
         let line_width = width as u16;
         let cursor_idx = commit_list_state.selected();
         let visible_rows = rect.height.saturating_sub(2) as usize;
-        let commit_age_column_width = max_visible_age_width(
-            commits,
-            self.now_ts,
+        let commit_top = effective_list_top_for_selection(
+            cursor_idx,
             commit_list_state.offset(),
             visible_rows,
-            |row| (!row.is_uncommitted).then_some(row.info.timestamp),
+            commits.len(),
         );
+        let commit_age_column_width =
+            max_visible_age_width(commits, self.now_ts, commit_top, visible_rows, |row| {
+                (!row.is_uncommitted).then_some(row.info.timestamp)
+            });
         let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts)
             .with_age_column_width(commit_age_column_width);
         let push_chain_kinds = commit_push_chain_kinds(commits);
@@ -595,6 +601,37 @@ where
         .map(|ts| display_width(&format_relative_time(ts, now_ts)))
         .max()
         .unwrap_or(0)
+}
+
+/// Predicts the effective top list row after selection changes so one-frame layout calculations
+/// (like age-column width) stay in sync with jump navigation before widget state is committed.
+pub(in crate::app) fn effective_list_top_for_selection(
+    selected: Option<usize>,
+    current_top: usize,
+    visible_rows: usize,
+    total_rows: usize,
+) -> usize {
+    if visible_rows == 0 || total_rows == 0 {
+        return 0;
+    }
+
+    let max_top = total_rows.saturating_sub(visible_rows);
+    let mut top = current_top.min(max_top);
+    let Some(selected) = selected else {
+        return top;
+    };
+
+    let selected = selected.min(total_rows - 1);
+    if selected < top {
+        top = selected;
+    } else {
+        let bottom_exclusive = top.saturating_add(visible_rows);
+        if selected >= bottom_exclusive {
+            top = selected + 1 - visible_rows;
+        }
+    }
+
+    top.min(max_top)
 }
 
 fn file_change_style(kind: Option<FileChangeKind>, theme: &UiTheme) -> Style {
