@@ -57,6 +57,7 @@ impl App {
             theme,
             self.ui.preferences.focused,
             self.ui.preferences.nerd_fonts,
+            self.now_timestamp(),
         )
         .render_files(
             frame,
@@ -83,6 +84,7 @@ impl App {
             theme,
             self.ui.preferences.focused,
             self.ui.preferences.nerd_fonts,
+            self.now_timestamp(),
         )
         .render_commits(
             frame,
@@ -1473,7 +1475,7 @@ impl App {
                 Style::default().fg(theme.muted),
             )))]
         } else {
-            let now_ts = Utc::now().timestamp();
+            let now_ts = self.now_timestamp();
             visible
                 .iter()
                 .filter_map(|idx| self.ui.worktree_switch.entries.get(*idx))

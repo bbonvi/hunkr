@@ -599,6 +599,7 @@ pub(super) fn pane_focus_cycle_direction(key: KeyEvent) -> Option<PaneCycleDirec
 mod tests {
     use super::*;
     use anyhow::anyhow;
+    use chrono::{DateTime, Utc};
 
     struct TestClock;
 

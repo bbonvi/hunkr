@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use crate::model::{FileChangeKind, ReviewStatus};
-use chrono::Utc;
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -54,12 +53,17 @@ pub(in crate::app) struct CommitPaneModel<'a> {
 }
 
 impl<'a> ListPaneRenderer<'a> {
-    pub(in crate::app) fn new(theme: &'a UiTheme, focused: FocusPane, nerd_fonts: bool) -> Self {
+    pub(in crate::app) fn new(
+        theme: &'a UiTheme,
+        focused: FocusPane,
+        nerd_fonts: bool,
+        now_ts: i64,
+    ) -> Self {
         Self {
             theme,
             focused,
             nerd_fonts,
-            now_ts: Utc::now().timestamp(),
+            now_ts,
         }
     }
 

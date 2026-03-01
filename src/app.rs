@@ -11,7 +11,6 @@ use std::{
 };
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
