@@ -338,9 +338,13 @@ impl App {
         let mut rendered = Vec::new();
         let theme = UiTheme::from_mode(self.preferences.theme_mode);
         let now_ts = Utc::now().timestamp();
-        let hide_deleted_payload =
-            should_hide_deleted_file_content(self.aggregate.file_changes.get(&patch.path));
-        if hide_deleted_payload {
+        let file_comments: Vec<&ReviewComment> = self
+            .comments
+            .comments()
+            .iter()
+            .filter(|comment| comment.target.end.file_path == patch.path)
+            .collect();
+        if should_hide_deleted_file_content(self.aggregate.file_changes.get(&patch.path)) {
             rendered.push(RenderedDiffLine {
                 line: Line::from(vec![
                     Span::styled("~ ", Style::default().fg(theme.diff_meta)),
@@ -355,13 +359,15 @@ impl App {
                 anchor: None,
                 comment_id: None,
             });
+
+            let mut sorted_comments = file_comments;
+            sorted_comments.sort_by_key(|comment| comment.id);
+            for comment in sorted_comments {
+                push_comment_lines(&mut rendered, comment, &theme, now_ts);
+            }
+            rendered.push(rendered_separator_line(&theme));
+            return rendered;
         }
-        let file_comments: Vec<&ReviewComment> = self
-            .comments
-            .comments()
-            .iter()
-            .filter(|comment| comment.target.end.file_path == patch.path)
-            .collect();
         let mut last_commit_banner: Option<String> = None;
         let mut inserted_commit_comments = BTreeSet::new();
 
@@ -477,31 +483,29 @@ impl App {
                 now_ts,
             );
 
-            if !hide_deleted_payload {
-                for line in &hunk.lines {
-                    let anchor = CommentAnchor {
-                        commit_id: hunk.commit_id.clone(),
-                        commit_summary: hunk.commit_summary.clone(),
-                        file_path: patch.path.clone(),
-                        hunk_header: hunk.header.clone(),
-                        old_lineno: line.old_lineno,
-                        new_lineno: line.new_lineno,
-                    };
-                    rendered.push(RenderedDiffLine {
-                        line: self.render_code_line(line, &theme),
-                        raw_text: raw_diff_text(line),
-                        anchor: Some(anchor.clone()),
-                        comment_id: None,
-                    });
-                    push_comment_lines_for_anchor(
-                        &mut rendered,
-                        &hunk_comments,
-                        &mut injected_comment_ids,
-                        &anchor,
-                        &theme,
-                        now_ts,
-                    );
-                }
+            for line in &hunk.lines {
+                let anchor = CommentAnchor {
+                    commit_id: hunk.commit_id.clone(),
+                    commit_summary: hunk.commit_summary.clone(),
+                    file_path: patch.path.clone(),
+                    hunk_header: hunk.header.clone(),
+                    old_lineno: line.old_lineno,
+                    new_lineno: line.new_lineno,
+                };
+                rendered.push(RenderedDiffLine {
+                    line: self.render_code_line(line, &theme),
+                    raw_text: raw_diff_text(line),
+                    anchor: Some(anchor.clone()),
+                    comment_id: None,
+                });
+                push_comment_lines_for_anchor(
+                    &mut rendered,
+                    &hunk_comments,
+                    &mut injected_comment_ids,
+                    &anchor,
+                    &theme,
+                    now_ts,
+                );
             }
 
             for comment in hunk_comments {
