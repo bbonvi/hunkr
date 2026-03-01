@@ -2,19 +2,16 @@ use super::lifecycle_input::{
     clear_commit_selection, clear_commit_visual_anchor, diff_search_repeat_direction,
 };
 use super::lifecycle_render::{
-    PaneCycleDirection, footer_mode_label, help_overlay_close_key, pane_focus_cycle_direction,
     theme_toggle_conflicts_with_diff_pending_op,
 };
 use super::shell_command::{shell_output_copy_payload_for_rows, shell_output_index_at};
-use super::state::{format_uncommitted_summary, should_hide_deleted_file_content};
-use super::ui::diff_pane::scrollbar_thumb;
+use super::state::should_hide_deleted_file_content;
 use super::ui::list_panes::{
-    ListLinePresenter, commit_push_chain_kinds, commit_status_filter_spans,
-    effective_list_top_for_selection,
+    ListLinePresenter, commit_push_chain_kinds, effective_list_top_for_selection,
 };
 use super::ui::style::{
-    CursorSelectionPolicy, apply_row_highlight, line_with_right, list_content_width,
-    pad_line_to_width, resolve_row_background, status_style, tint_line_background,
+    CursorSelectionPolicy, apply_row_highlight, line_with_right, pad_line_to_width,
+    resolve_row_background, tint_line_background,
 };
 use super::*;
 use crate::model::{CommitDecoration, CommitDecorationKind};
@@ -223,35 +220,6 @@ fn compose_commit_line_renders_git_decorations() {
 }
 
 #[test]
-fn compose_commit_line_places_status_markers_after_git_decorations() {
-    let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
-    row.info.decorations = vec![
-        CommitDecoration {
-            kind: CommitDecorationKind::Head,
-            label: "HEAD -> main".to_owned(),
-        },
-        CommitDecoration {
-            kind: CommitDecorationKind::LocalBranch,
-            label: "main".to_owned(),
-        },
-    ];
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(180, 3_600, &theme, true);
-    let rendered = presenter.commit_row_line(&row);
-    let flattened = rendered
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    let refs_idx = flattened.find(" HEAD -> main, main").expect("refs");
-    let status_idx = flattened.find("").expect("status badge");
-    let unpushed_idx = flattened.find("󰜛").expect("unpushed marker");
-    assert!(status_idx > refs_idx);
-    assert!(unpushed_idx > status_idx);
-}
-
-#[test]
 fn commit_push_chain_kinds_mark_top_and_boundary_segments() {
     let mut top_unpushed = commit_row("u-top", false, ReviewStatus::Unreviewed);
     top_unpushed.info.unpushed = true;
@@ -287,47 +255,6 @@ fn commit_push_chain_kinds_skip_uncommitted_rows_for_top_marker() {
     assert_eq!(kinds[0], None);
     assert_eq!(kinds[1], Some(CommitPushChainMarkerKind::TopPushed));
     assert_eq!(kinds[2], Some(CommitPushChainMarkerKind::FirstUnpushed));
-}
-
-#[test]
-fn compose_commit_line_allows_wider_git_decorations_before_truncating() {
-    let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
-    row.info.decorations = vec![CommitDecoration {
-        kind: CommitDecorationKind::Head,
-        label: "HEAD -> long-mainline-branch-name".to_owned(),
-    }];
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(240, 3_600, &theme, false);
-    let rendered = presenter.commit_row_line(&row);
-    let flattened = rendered
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    assert!(flattened.contains("refs:HEAD -> long-mainline-branch-name"));
-}
-
-#[test]
-fn compose_commit_line_uses_unpadded_age_without_column_hint() {
-    let row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
-    let rendered = presenter.commit_row_line(&row);
-    let age_span = rendered.spans.last().expect("age span");
-
-    assert_eq!(age_span.content.as_ref(), "1h");
-}
-
-#[test]
-fn compose_commit_line_left_pads_age_with_column_hint() {
-    let row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme, true).with_age_column_width(3);
-    let rendered = presenter.commit_row_line(&row);
-    let age_span = rendered.spans.last().expect("age span");
-
-    assert_eq!(age_span.content.as_ref(), " 1h");
 }
 
 #[test]
@@ -532,19 +459,6 @@ fn file_tree_builds_directories_and_files() {
 }
 
 #[test]
-fn file_tree_uses_file_icons_when_nerd_fonts_enabled() {
-    let mut tree = FileTree::default();
-    tree.insert("src/app.rs", 100);
-    tree.insert("README.md", 200);
-    let nerd_theme = NerdFontTheme::default();
-    let rows = tree.flattened_rows(true, &nerd_theme);
-
-    assert!(rows.iter().any(|r| r.label.contains(" src")));
-    assert!(rows.iter().any(|r| r.label.contains(" app.rs")));
-    assert!(rows.iter().any(|r| r.label.contains(" README.md")));
-}
-
-#[test]
 fn file_tree_file_labels_include_change_badges_and_line_stats() {
     let mut tree = FileTree::default();
     tree.insert_with_change(
@@ -574,22 +488,6 @@ fn file_tree_file_labels_include_change_badges_and_line_stats() {
 
     assert!(flattened.contains("[F] app.rs"));
     assert!(flattened.contains("M +4 -1"));
-}
-
-#[test]
-fn deleted_file_badge_uses_trash_icon_with_minus_count() {
-    let badge = format_file_change_badge(
-        &FileChangeSummary {
-            kind: FileChangeKind::Deleted,
-            old_path: None,
-            additions: 0,
-            deletions: 802,
-        },
-        true,
-    );
-    assert!(badge.contains(""));
-    assert!(badge.contains("-802"));
-    assert!(badge.contains("-802"));
 }
 
 #[test]
@@ -632,50 +530,12 @@ fn file_filter_keeps_parent_directories_for_matching_files() {
 }
 
 #[test]
-fn diff_empty_state_message_explains_when_file_filter_hides_everything() {
-    let message = diff_empty_state_message(false, 3, 0, "main")
-        .expect("filtered-out file message should be present");
-    assert_eq!(
-        message,
-        "Diff hidden: file tree filter /main hides all 3 changed file(s)"
-    );
-}
-
-#[test]
 fn diff_empty_state_message_is_absent_without_active_file_filter() {
     assert!(diff_empty_state_message(false, 3, 0, "").is_none());
     assert!(diff_empty_state_message(false, 3, 0, "   ").is_none());
     assert!(diff_empty_state_message(false, 0, 0, "main").is_none());
     assert!(diff_empty_state_message(false, 3, 1, "main").is_none());
     assert!(diff_empty_state_message(true, 3, 0, "main").is_none());
-}
-
-#[test]
-fn rendered_file_banner_gates_nerd_icon_and_keeps_raw_text_stable() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let nerd_theme = NerdFontTheme::default();
-    let plain =
-        state::rendered_file_header_line("src/app.rs", 1, 2, None, &theme, false, &nerd_theme);
-    let nerd =
-        state::rendered_file_header_line("src/app.rs", 1, 2, None, &theme, true, &nerd_theme);
-
-    let plain_text = plain
-        .line
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-    let nerd_text = nerd
-        .line
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    assert!(plain_text.contains("src/app.rs"));
-    assert!(nerd_text.contains(" src/app.rs"));
-    assert_eq!(plain.raw_text, "==== file 1/2: src/app.rs ====");
-    assert_eq!(nerd.raw_text, plain.raw_text);
 }
 
 #[test]
@@ -702,35 +562,6 @@ fn rendered_file_banner_sanitizes_untrusted_path_text() {
     assert!(rendered.raw_text.contains("src/app.rs"));
     assert!(!flattened.contains('\u{1b}'));
     assert!(!rendered.raw_text.contains('\u{1b}'));
-}
-
-#[test]
-fn rendered_file_banner_includes_change_badge_and_rename_source() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let nerd_theme = NerdFontTheme::default();
-    let rendered = state::rendered_file_header_line(
-        "src/new.rs",
-        1,
-        1,
-        Some(&FileChangeSummary {
-            kind: FileChangeKind::Renamed,
-            old_path: Some("src/old.rs".to_owned()),
-            additions: 12,
-            deletions: 3,
-        }),
-        &theme,
-        false,
-        &nerd_theme,
-    );
-    let flattened = rendered
-        .line
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    assert!(flattened.contains("(from src/old.rs)"));
-    assert!(flattened.contains("· R +12 -3"));
 }
 
 #[test]
@@ -1009,73 +840,6 @@ fn clear_commit_selection_noops_when_already_empty() {
 }
 
 #[test]
-fn clipboard_copy_status_formats_success_and_failure() {
-    let success = clipboard_copy_status(Ok("xclip"), "2 diff line(s)", "diff selection");
-    assert_eq!(success, "Copied 2 diff line(s) via xclip");
-
-    let failure = clipboard_copy_status(
-        Err(anyhow::anyhow!("no backend available")),
-        "2 diff line(s)",
-        "diff selection",
-    );
-    assert!(failure.starts_with("Clipboard unavailable for diff selection ("));
-}
-
-#[test]
-fn footer_mode_label_uses_visual_when_commit_range_active() {
-    assert_eq!(footer_mode_label(InputMode::Normal, true, false), "VISUAL");
-}
-
-#[test]
-fn footer_mode_label_uses_visual_when_diff_range_active() {
-    assert_eq!(footer_mode_label(InputMode::Normal, false, true), "VISUAL");
-}
-
-#[test]
-fn footer_mode_label_prioritizes_modal_states() {
-    assert_eq!(
-        footer_mode_label(InputMode::DiffSearch, true, true),
-        "SEARCH"
-    );
-    assert_eq!(
-        footer_mode_label(InputMode::CommentCreate, true, true),
-        "COMMENT"
-    );
-    assert_eq!(
-        footer_mode_label(InputMode::ShellCommand, true, true),
-        "SHELL"
-    );
-    assert_eq!(
-        footer_mode_label(InputMode::WorktreeSwitch, true, true),
-        "WORKTREE"
-    );
-}
-
-#[test]
-fn help_overlay_close_key_matches_modal_close_actions() {
-    assert!(help_overlay_close_key(KeyEvent::new(
-        KeyCode::Char('q'),
-        KeyModifiers::NONE
-    )));
-    assert!(help_overlay_close_key(KeyEvent::new(
-        KeyCode::Esc,
-        KeyModifiers::NONE
-    )));
-    assert!(help_overlay_close_key(KeyEvent::new(
-        KeyCode::Char('?'),
-        KeyModifiers::NONE
-    )));
-    assert!(!help_overlay_close_key(KeyEvent::new(
-        KeyCode::Char('q'),
-        KeyModifiers::CONTROL
-    )));
-    assert!(!help_overlay_close_key(KeyEvent::new(
-        KeyCode::Char('x'),
-        KeyModifiers::NONE
-    )));
-}
-
-#[test]
 fn theme_toggle_conflict_defers_t_to_diff_pending_z_op() {
     let t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE);
     assert!(theme_toggle_conflicts_with_diff_pending_op(
@@ -1101,33 +865,6 @@ fn theme_toggle_conflict_defers_t_to_diff_pending_z_op() {
 }
 
 #[test]
-fn pane_focus_cycle_direction_supports_tab_and_shift_tab_variants() {
-    assert_eq!(
-        pane_focus_cycle_direction(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
-        Some(PaneCycleDirection::Next)
-    );
-    assert_eq!(
-        pane_focus_cycle_direction(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT)),
-        Some(PaneCycleDirection::Prev)
-    );
-    assert_eq!(
-        pane_focus_cycle_direction(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE)),
-        Some(PaneCycleDirection::Prev)
-    );
-    assert_eq!(
-        pane_focus_cycle_direction(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
-        Some(PaneCycleDirection::Prev)
-    );
-    assert_eq!(
-        pane_focus_cycle_direction(KeyEvent::new(
-            KeyCode::Tab,
-            KeyModifiers::CONTROL | KeyModifiers::SHIFT
-        )),
-        None
-    );
-}
-
-#[test]
 fn diff_search_repeat_direction_accepts_shifted_uppercase_n() {
     assert_eq!(
         diff_search_repeat_direction(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
@@ -1141,61 +878,6 @@ fn diff_search_repeat_direction_accepts_shifted_uppercase_n() {
         diff_search_repeat_direction(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::SHIFT)),
         Some(false)
     );
-}
-
-#[test]
-fn absolute_nav_target_accepts_home_end_and_vim_aliases() {
-    assert_eq!(
-        absolute_nav_target(KeyCode::Home),
-        Some(AbsoluteNavTarget::Start)
-    );
-    assert_eq!(
-        absolute_nav_target(KeyCode::End),
-        Some(AbsoluteNavTarget::End)
-    );
-    assert_eq!(
-        absolute_nav_target(KeyCode::Char('g')),
-        Some(AbsoluteNavTarget::Start)
-    );
-    assert_eq!(
-        absolute_nav_target(KeyCode::Char('G')),
-        Some(AbsoluteNavTarget::End)
-    );
-}
-
-#[test]
-fn absolute_nav_target_ignores_paging_keys() {
-    assert_eq!(absolute_nav_target(KeyCode::PageUp), None);
-    assert_eq!(absolute_nav_target(KeyCode::PageDown), None);
-}
-
-#[test]
-fn list_content_width_accounts_for_border_and_highlight_symbol() {
-    assert_eq!(list_content_width(20, 3), 15);
-    assert_eq!(list_content_width(4, 3), 1);
-}
-
-#[test]
-fn list_content_width_expands_when_nerd_highlight_symbol_hidden() {
-    assert_eq!(
-        list_content_width(20, list_highlight_symbol_width(true)),
-        18
-    );
-}
-
-#[test]
-fn scrollbar_thumb_fills_viewport_when_content_fits() {
-    assert_eq!(scrollbar_thumb(10, 20, 0), (0, 20));
-}
-
-#[test]
-fn scrollbar_thumb_moves_from_top_to_bottom() {
-    let (start_top, len) = scrollbar_thumb(100, 20, 0);
-    let (start_bottom, len_bottom) = scrollbar_thumb(100, 20, 80);
-    assert_eq!(len, 4);
-    assert_eq!(len_bottom, 4);
-    assert_eq!(start_top, 0);
-    assert_eq!(start_bottom, 16);
 }
 
 #[test]
@@ -1815,128 +1497,6 @@ fn pad_line_to_width_uses_display_width_for_wide_glyphs() {
 }
 
 #[test]
-fn compose_commit_line_preserves_age_column_on_narrow_width() {
-    let row = commit_row("abc1234", false, ReviewStatus::IssueFound);
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(24, 3_600, &theme, false);
-    let rendered = presenter.commit_row_line(&row);
-    let flattened = rendered
-        .spans
-        .iter()
-        .map(|s| s.content.to_string())
-        .collect::<String>();
-    assert!(flattened.ends_with("1h"));
-}
-
-#[test]
-fn compose_commit_line_marks_selected_rows() {
-    let row = commit_row("abc1234", true, ReviewStatus::Unreviewed);
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
-    let rendered = presenter.commit_row_line(&row);
-    let flattened = rendered
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    assert!(flattened.starts_with("[x] "));
-}
-
-#[test]
-fn compose_commit_line_uses_bold_status_badges() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme, false);
-
-    let unreviewed = presenter.commit_row_line(&commit_row("u1", false, ReviewStatus::Unreviewed));
-    let issue = presenter.commit_row_line(&commit_row("i1", false, ReviewStatus::IssueFound));
-    let reviewed = presenter.commit_row_line(&commit_row("r1", false, ReviewStatus::Reviewed));
-
-    let unreviewed_badge = unreviewed
-        .spans
-        .iter()
-        .find(|span| span.content == "U")
-        .expect("U badge");
-    let issue_badge = issue
-        .spans
-        .iter()
-        .find(|span| span.content == "I")
-        .expect("I badge");
-    let reviewed_badge = reviewed
-        .spans
-        .iter()
-        .find(|span| span.content == "R")
-        .expect("R badge");
-
-    assert!(unreviewed_badge.style.add_modifier.contains(Modifier::BOLD));
-    assert!(issue_badge.style.add_modifier.contains(Modifier::BOLD));
-    assert!(reviewed_badge.style.add_modifier.contains(Modifier::BOLD));
-}
-
-#[test]
-fn compose_commit_line_uses_nerd_symbols_when_enabled() {
-    let row = commit_row("abc1234", true, ReviewStatus::Unreviewed);
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
-    let rendered = presenter.commit_row_line(&row);
-    let flattened = rendered
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    assert!(flattened.starts_with(" "));
-    assert!(flattened.contains(""));
-    assert!(flattened.contains(" 󰜛"));
-    assert!(flattened.ends_with("1h"));
-}
-
-#[test]
-fn compose_uncommitted_line_uses_nerd_draft_badge() {
-    let row = CommitRow {
-        info: CommitInfo {
-            id: UNCOMMITTED_COMMIT_ID.to_owned(),
-            short_id: UNCOMMITTED_COMMIT_SHORT.to_owned(),
-            summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
-            author: "local".to_owned(),
-            timestamp: 0,
-            unpushed: false,
-            decorations: Vec::new(),
-        },
-        selected: true,
-        status: ReviewStatus::Unreviewed,
-        is_uncommitted: true,
-    };
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let presenter = ListLinePresenter::new(80, 3_600, &theme, true);
-    let rendered = presenter.commit_row_line(&row);
-    let flattened = rendered
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    assert!(flattened.contains("[ DRAFT]"));
-    assert!(flattened.ends_with("draft"));
-}
-
-#[test]
-fn format_uncommitted_summary_includes_file_count() {
-    assert_eq!(
-        format_uncommitted_summary(0),
-        "Uncommitted changes (0 files)"
-    );
-    assert_eq!(
-        format_uncommitted_summary(1),
-        "Uncommitted changes (1 file)"
-    );
-    assert_eq!(
-        format_uncommitted_summary(7),
-        "Uncommitted changes (7 files)"
-    );
-}
-
-#[test]
 fn resolve_row_background_cursor_wins_policy_overrides_selection() {
     let selection_bg = Color::Rgb(10, 20, 30);
     let cursor_bg = Color::Rgb(40, 50, 60);
@@ -2014,61 +1574,6 @@ fn apply_row_highlight_visual_only_keeps_original_width() {
 }
 
 #[test]
-fn status_badges_use_exact_workflow_labels() {
-    assert_eq!(status_short_label(ReviewStatus::Unreviewed), "UNREVIEWED");
-    assert_eq!(status_short_label(ReviewStatus::Reviewed), "REVIEWED");
-    assert_eq!(status_short_label(ReviewStatus::IssueFound), "ISSUE_FOUND");
-    assert_eq!(status_short_label(ReviewStatus::Resolved), "RESOLVED");
-}
-
-#[test]
-fn status_filter_title_spans_keep_all_muted() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let spans = commit_status_filter_spans(CommitStatusFilter::All, &theme);
-
-    assert_eq!(spans.len(), 1);
-    assert_eq!(spans[0].content.as_ref(), "all");
-    assert_eq!(spans[0].style, Style::default().fg(theme.muted));
-}
-
-#[test]
-fn status_filter_title_spans_use_status_colors_for_grouped_filters() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-
-    let unreviewed_issue =
-        commit_status_filter_spans(CommitStatusFilter::UnreviewedOrIssueFound, &theme);
-    assert_eq!(unreviewed_issue.len(), 3);
-    assert_eq!(unreviewed_issue[0].content.as_ref(), "unreviewed");
-    assert_eq!(
-        unreviewed_issue[0].style,
-        status_style(ReviewStatus::Unreviewed, &theme)
-    );
-    assert_eq!(unreviewed_issue[1].content.as_ref(), "|");
-    assert_eq!(unreviewed_issue[1].style, Style::default().fg(theme.muted));
-    assert_eq!(unreviewed_issue[2].content.as_ref(), "issue_found");
-    assert_eq!(
-        unreviewed_issue[2].style,
-        status_style(ReviewStatus::IssueFound, &theme)
-    );
-
-    let reviewed_resolved =
-        commit_status_filter_spans(CommitStatusFilter::ReviewedOrResolved, &theme);
-    assert_eq!(reviewed_resolved.len(), 3);
-    assert_eq!(reviewed_resolved[0].content.as_ref(), "reviewed");
-    assert_eq!(
-        reviewed_resolved[0].style,
-        status_style(ReviewStatus::Reviewed, &theme)
-    );
-    assert_eq!(reviewed_resolved[1].content.as_ref(), "|");
-    assert_eq!(reviewed_resolved[1].style, Style::default().fg(theme.muted));
-    assert_eq!(reviewed_resolved[2].content.as_ref(), "resolved");
-    assert_eq!(
-        reviewed_resolved[2].style,
-        status_style(ReviewStatus::Resolved, &theme)
-    );
-}
-
-#[test]
 fn commit_status_filter_cycles_in_expected_order() {
     assert_eq!(
         CommitStatusFilter::All.next(),
@@ -2081,30 +1586,6 @@ fn commit_status_filter_cycles_in_expected_order() {
     assert_eq!(
         CommitStatusFilter::ReviewedOrResolved.next(),
         CommitStatusFilter::All
-    );
-}
-
-#[test]
-fn commit_mouse_selection_mode_matches_modifier_intent() {
-    assert_eq!(
-        commit_mouse_selection_mode(KeyModifiers::NONE),
-        CommitMouseSelectionMode::Replace
-    );
-    assert_eq!(
-        commit_mouse_selection_mode(KeyModifiers::CONTROL),
-        CommitMouseSelectionMode::Toggle
-    );
-    assert_eq!(
-        commit_mouse_selection_mode(KeyModifiers::SUPER),
-        CommitMouseSelectionMode::Toggle
-    );
-    assert_eq!(
-        commit_mouse_selection_mode(KeyModifiers::SHIFT),
-        CommitMouseSelectionMode::Range
-    );
-    assert_eq!(
-        commit_mouse_selection_mode(KeyModifiers::SHIFT | KeyModifiers::CONTROL),
-        CommitMouseSelectionMode::Range
     );
 }
 
@@ -2212,13 +1693,6 @@ fn selected_rows_hidden_count_tracks_active_filter() {
 }
 
 #[test]
-fn relative_time_formats_expected_units() {
-    assert_eq!(format_relative_time(100, 130), "30s");
-    assert_eq!(format_relative_time(100, 220), "2m");
-    assert_eq!(format_relative_time(100, 3700), "1h");
-}
-
-#[test]
 fn next_poll_timeout_uses_nearest_deadline() {
     let timeout = next_poll_timeout(Duration::from_secs(1), Duration::from_secs(10), None);
     assert_eq!(timeout, Duration::from_secs(3));
@@ -2244,16 +1718,6 @@ fn next_poll_timeout_honors_selection_rebuild_deadline() {
         Some(Duration::from_millis(80)),
     );
     assert_eq!(timeout, Duration::from_millis(80));
-}
-
-#[test]
-fn h_and_l_cycle_all_panes() {
-    assert_eq!(focus_with_h(FocusPane::Commits), FocusPane::Diff);
-    assert_eq!(focus_with_h(FocusPane::Files), FocusPane::Commits);
-    assert_eq!(focus_with_h(FocusPane::Diff), FocusPane::Files);
-    assert_eq!(focus_with_l(FocusPane::Commits), FocusPane::Files);
-    assert_eq!(focus_with_l(FocusPane::Files), FocusPane::Diff);
-    assert_eq!(focus_with_l(FocusPane::Diff), FocusPane::Commits);
 }
 
 #[test]

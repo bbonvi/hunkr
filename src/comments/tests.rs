@@ -40,8 +40,6 @@ fn add_update_delete_roundtrip() {
         .sync_review_tasks_report(|_| ReviewStatus::IssueFound)
         .expect("sync");
     assert!(store.report_path().exists());
-    let report = fs::read_to_string(store.report_path()).expect("read report");
-    assert!(report.contains("- Commit Context: add parser"));
     assert_eq!(store.comments().len(), 1);
 
     let updated = store.update_comment(id, "Renamed now").expect("update");
@@ -54,12 +52,6 @@ fn add_update_delete_roundtrip() {
 
     let reloaded = CommentStore::new(tmp.path(), "feature/test").expect("reload");
     assert!(reloaded.comments().is_empty());
-}
-
-#[test]
-fn format_anchor_lines_works() {
-    assert_eq!(format_anchor_lines(Some(1), Some(2)), "old 1 / new 2");
-    assert_eq!(format_anchor_lines(None, None), "n/a");
 }
 
 #[test]

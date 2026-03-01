@@ -1,9 +1,6 @@
 use super::*;
 use crate::config::AppConfig;
 
-#[cfg(test)]
-pub(super) use super::lifecycle_view::footer_mode_label;
-
 /// Bootstrap-only dependencies loaded from disk/environment before UI startup.
 struct BootstrapDeps {
     git: GitService,

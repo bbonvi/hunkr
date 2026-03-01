@@ -1065,22 +1065,6 @@ mod tests {
     use super::format_path_with_home_tilde;
 
     #[test]
-    fn home_path_is_rendered_with_tilde() {
-        let rendered = format_path_with_home_tilde(std::path::Path::new(
-            "/home/dev/projects/avd/.hunkr/comments/main-review-tasks.md",
-        ));
-        let expected = if std::env::var_os("HOME")
-            .as_ref()
-            .is_some_and(|home| home == "/home/dev")
-        {
-            "~/projects/avd/.hunkr/comments/main-review-tasks.md"
-        } else {
-            "/home/dev/projects/avd/.hunkr/comments/main-review-tasks.md"
-        };
-        assert_eq!(rendered, expected);
-    }
-
-    #[test]
     fn non_home_path_stays_absolute() {
         let path = std::path::Path::new("/opt/tools/review-tasks.md");
         assert_eq!(

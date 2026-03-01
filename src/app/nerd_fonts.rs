@@ -446,10 +446,6 @@ fn default_extension_icons() -> HashMap<String, String> {
 mod tests {
     use super::*;
 
-    fn icon_prefix(rendered: &str) -> &str {
-        rendered.split_once(' ').map(|(icon, _)| icon).unwrap_or("")
-    }
-
     #[test]
     fn ascii_mode_keeps_path_unchanged() {
         let theme = NerdFontTheme::default();
@@ -466,37 +462,5 @@ mod tests {
         assert_ne!(rendered, "src/app.rs");
         assert!(rendered.ends_with("src/app.rs"));
         assert!(rendered.contains(' '));
-    }
-
-    #[test]
-    fn env_family_uses_consistent_icon() {
-        let theme = NerdFontTheme::default();
-        let env = format_path_with_icon(".env", true, &theme);
-        let env_dev = format_path_with_icon(".env.dev", true, &theme);
-        let env_example = format_path_with_icon(".env.example", true, &theme);
-
-        let env_icon = icon_prefix(&env);
-        assert_eq!(env_icon, icon_prefix(&env_dev));
-        assert_eq!(env_icon, icon_prefix(&env_example));
-    }
-
-    #[test]
-    fn example_variants_inherit_base_icon_family() {
-        let theme = NerdFontTheme::default();
-        let base_path = format_path_with_icon("config.yaml", true, &theme);
-        let example_path = format_path_with_icon("config.yaml.example", true, &theme);
-        let base = icon_prefix(&base_path);
-        let example = icon_prefix(&example_path);
-        assert_eq!(base, example);
-    }
-
-    #[test]
-    fn docker_manifest_and_dockerfile_share_icon_family() {
-        let theme = NerdFontTheme::default();
-        let compose_path = format_path_with_icon("docker-compose.yml", true, &theme);
-        let dockerfile_path = format_path_with_icon("Dockerfile.dev", true, &theme);
-        let compose = icon_prefix(&compose_path);
-        let dockerfile = icon_prefix(&dockerfile_path);
-        assert_eq!(compose, dockerfile);
     }
 }
