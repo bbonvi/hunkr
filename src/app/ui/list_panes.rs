@@ -518,12 +518,7 @@ pub(in crate::app) fn commit_push_chain_kinds(
 ) -> Vec<Option<CommitPushChainMarkerKind>> {
     let mut markers = vec![None; commits.len()];
     let top_real = commits.iter().position(|row| !row.is_uncommitted);
-    let first_pushed = commits
-        .iter()
-        .position(|row| !row.is_uncommitted && !row.info.unpushed);
-    let first_unpushed = commits
-        .iter()
-        .position(|row| !row.is_uncommitted && row.info.unpushed);
+    let bottom_real = commits.iter().rposition(|row| !row.is_uncommitted);
 
     for (idx, row) in commits.iter().enumerate() {
         if row.is_uncommitted {
@@ -535,10 +530,12 @@ pub(in crate::app) fn commit_push_chain_kinds(
             } else {
                 CommitPushChainMarkerKind::TopPushed
             }
-        } else if Some(idx) == first_unpushed {
-            CommitPushChainMarkerKind::FirstUnpushed
-        } else if Some(idx) == first_pushed {
-            CommitPushChainMarkerKind::FirstPushed
+        } else if Some(idx) == bottom_real {
+            if row.info.unpushed {
+                CommitPushChainMarkerKind::FirstUnpushed
+            } else {
+                CommitPushChainMarkerKind::FirstPushed
+            }
         } else if row.info.unpushed {
             CommitPushChainMarkerKind::Unpushed
         } else {

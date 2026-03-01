@@ -266,8 +266,8 @@ fn commit_push_chain_kinds_mark_top_and_boundary_segments() {
 
     assert_eq!(kinds[0], Some(CommitPushChainMarkerKind::TopUnpushed));
     assert_eq!(kinds[1], Some(CommitPushChainMarkerKind::Unpushed));
-    assert_eq!(kinds[2], Some(CommitPushChainMarkerKind::FirstPushed));
-    assert_eq!(kinds[3], Some(CommitPushChainMarkerKind::Pushed));
+    assert_eq!(kinds[2], Some(CommitPushChainMarkerKind::Pushed));
+    assert_eq!(kinds[3], Some(CommitPushChainMarkerKind::FirstPushed));
 }
 
 #[test]
