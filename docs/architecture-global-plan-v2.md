@@ -61,3 +61,21 @@ The target remains behavior-preserving for current UX while upgrading scalabilit
 - No UX regression in current key/mouse/navigation/comment flows.
 - Commit pane rendering no longer clones full commit/comment sets per frame.
 - New contract tests exist for flow, modal controller, and bootstrap DI seam.
+
+## Execution Status
+
+Completed:
+- `Event -> Action -> Effect` runtime flow (`src/app/flow.rs`) is in place.
+- Modal input handling is unified behind `ModalInputController`.
+- Pane key handling is split by focus (`src/app/input/panes/*`).
+- Global normal-mode key routing is extracted (`src/app/input/global_router.rs`).
+- Input policy helpers are moved to input layer (`src/app/input/policy.rs`).
+- Tick timeout/task policy is extracted (`src/app/runtime/tick_scheduler.rs`).
+- Draw latency guardrails are recorded and contract-tested.
+- Repository switching uses injected runtime DI ports and has a seam contract test.
+- Clock usage in list/worktree render paths now uses injected app clock.
+
+Remaining high-value next slices:
+- Extract shell modal state machine into explicit mode subcontrollers.
+- Introduce immutable frame snapshot contract for render/view-model builders.
+- Remove ratatui primitives (`Line/Span`) from domain diff projections.
