@@ -195,11 +195,6 @@ pub(super) fn commit_status_filter_label_prefix(nerd_fonts: bool) -> &'static st
     if nerd_fonts { "" } else { "sf:" }
 }
 
-/// Returns the commit-pane status-filter token for the "all" scope.
-pub(super) fn commit_status_filter_all_badge(nerd_fonts: bool) -> &'static str {
-    if nerd_fonts { "" } else { "all" }
-}
-
 pub(super) fn file_change_kind_symbol(kind: FileChangeKind, nerd_fonts: bool) -> &'static str {
     if nerd_fonts {
         return match kind {

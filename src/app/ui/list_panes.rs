@@ -10,10 +10,9 @@ use ratatui::{
 use super::super::{
     CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
     blend_colors, commit_push_chain_marker, commit_selection_marker, commit_status_badge,
-    commit_status_filter_all_badge, commit_status_filter_label_prefix, display_width,
-    format_file_change_badge, format_relative_time, list_highlight_symbol,
-    list_highlight_symbol_width, sanitize_terminal_text, sanitized_span, truncate,
-    uncommitted_badge,
+    commit_status_filter_label_prefix, display_width, format_file_change_badge,
+    format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
+    sanitize_terminal_text, sanitized_span, truncate, uncommitted_badge,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
@@ -176,7 +175,6 @@ impl<'a> ListPaneRenderer<'a> {
             commit_list_state,
         } = model;
         let (unreviewed, reviewed, issue_found, resolved) = status_counts;
-        let selected_prefix = if self.nerd_fonts { "" } else { "sel:" };
         let filter_style = if search_enabled {
             Style::default()
                 .fg(self.theme.accent)
@@ -199,26 +197,31 @@ impl<'a> ListPaneRenderer<'a> {
             self.theme,
             self.nerd_fonts,
         ));
-        title_spans.push(Span::styled(
-            format!("{shown_commits}/{total_commits} "),
-            Style::default().fg(self.theme.muted),
-        ));
-        title_spans.push(Span::styled(
-            format!("{selected_prefix}{selected_total} "),
-            Style::default().fg(self.theme.muted),
-        ));
-        title_spans.push(Span::styled(
-            commit_status_filter_label_prefix(self.nerd_fonts).to_owned(),
-            Style::default().fg(self.theme.muted),
-        ));
-        title_spans.extend(commit_status_filter_spans(
-            status_filter,
-            self.theme,
-            self.nerd_fonts,
-        ));
+        title_spans.extend([
+            chip_separator(),
+            Span::styled(
+                format_commit_count_chip(shown_commits, total_commits, selected_total),
+                Style::default().fg(self.theme.muted),
+            ),
+        ]);
+        if status_filter != CommitStatusFilter::All {
+            title_spans.extend([
+                chip_separator(),
+                Span::styled(
+                    commit_status_filter_label_prefix(self.nerd_fonts).to_owned(),
+                    Style::default().fg(self.theme.muted),
+                ),
+                Span::raw(" "),
+            ]);
+            title_spans.extend(commit_status_filter_spans(
+                status_filter,
+                self.theme,
+                self.nerd_fonts,
+            ));
+        }
         if search_enabled {
             title_spans.extend([
-                Span::raw(" "),
+                chip_separator(),
                 sanitized_span(search_display, Some(filter_style)),
             ]);
         }
@@ -286,23 +289,19 @@ impl<'a> ListPaneRenderer<'a> {
     }
 }
 
-/// Builds styled `sf:` label tokens for the commits pane title.
+/// Builds styled status-filter tokens for the commits pane title.
 pub(in crate::app) fn commit_status_filter_spans(
     status_filter: CommitStatusFilter,
     theme: &UiTheme,
     nerd_fonts: bool,
 ) -> Vec<Span<'static>> {
     match status_filter {
-        CommitStatusFilter::All => vec![Span::styled(
-            commit_status_filter_all_badge(nerd_fonts).to_owned(),
-            Style::default().fg(theme.muted),
-        )],
+        CommitStatusFilter::All => Vec::new(),
         CommitStatusFilter::UnreviewedOrIssueFound => vec![
             Span::styled(
                 commit_status_badge(ReviewStatus::Unreviewed, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::Unreviewed, theme),
             ),
-            Span::styled("|", Style::default().fg(theme.muted)),
             Span::styled(
                 commit_status_badge(ReviewStatus::IssueFound, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::IssueFound, theme),
@@ -313,7 +312,6 @@ pub(in crate::app) fn commit_status_filter_spans(
                 commit_status_badge(ReviewStatus::Reviewed, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::Reviewed, theme),
             ),
-            Span::styled("|", Style::default().fg(theme.muted)),
             Span::styled(
                 commit_status_badge(ReviewStatus::Resolved, nerd_fonts).to_owned(),
                 status_style(ReviewStatus::Resolved, theme),
@@ -328,24 +326,41 @@ fn commit_status_count_spans(
     nerd_fonts: bool,
 ) -> Vec<Span<'static>> {
     let (unreviewed, reviewed, issue_found, resolved) = status_counts;
-    [
+    let chips = [
         (ReviewStatus::Unreviewed, unreviewed),
         (ReviewStatus::Reviewed, reviewed),
         (ReviewStatus::IssueFound, issue_found),
         (ReviewStatus::Resolved, resolved),
-    ]
-    .into_iter()
-    .map(|(status, count)| {
-        let separator = if nerd_fonts { "" } else { ":" };
-        Span::styled(
-            format!(
-                "{}{separator}{count} ",
-                commit_status_badge(status, nerd_fonts)
-            ),
-            status_style(status, theme),
-        )
-    })
-    .collect()
+    ];
+    let last_idx = chips.len().saturating_sub(1);
+    let mut spans = Vec::new();
+    for (idx, (status, count)) in chips.into_iter().enumerate() {
+        let token = if nerd_fonts {
+            format!("{} {count}", commit_status_badge(status, nerd_fonts))
+        } else {
+            format!("{}: {count}", commit_status_badge(status, nerd_fonts))
+        };
+        spans.push(Span::styled(token, status_style(status, theme)));
+        if idx < last_idx {
+            spans.push(chip_separator());
+        }
+    }
+    spans
+}
+
+fn format_commit_count_chip(
+    shown_commits: usize,
+    total_commits: usize,
+    selected_total: usize,
+) -> String {
+    if selected_total == 0 {
+        return format!("{shown_commits}/{total_commits}");
+    }
+    format!("{shown_commits}/{total_commits}({selected_total})")
+}
+
+fn chip_separator() -> Span<'static> {
+    Span::raw("  ")
 }
 
 /// Presenter for composing list pane rows with shared truncation and age columns.
@@ -739,11 +754,17 @@ mod tests {
 
         assert!(!nerd_text.contains(':'));
         for (status, count) in counts {
-            let nerd_token = format!("{}{}", commit_status_badge(status, true), count);
-            let ascii_token = format!("{}:{count}", commit_status_badge(status, false));
+            let nerd_token = format!("{} {count}", commit_status_badge(status, true));
+            let ascii_token = format!("{}: {count}", commit_status_badge(status, false));
 
             assert!(nerd_text.contains(&nerd_token));
             assert!(ascii_text.contains(&ascii_token));
         }
+    }
+
+    #[test]
+    fn format_commit_count_chip_includes_selected_only_when_non_zero() {
+        assert_eq!(format_commit_count_chip(165, 165, 0), "165/165");
+        assert_eq!(format_commit_count_chip(165, 165, 6), "165/165(6)");
     }
 }
