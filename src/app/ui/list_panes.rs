@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use crate::model::{FileChangeKind, ReviewStatus};
 use chrono::Utc;
 use ratatui::{
@@ -9,10 +11,11 @@ use ratatui::{
 
 use super::super::{
     CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
-    blend_colors, commit_push_chain_marker, commit_selection_marker, commit_status_badge,
-    commit_status_filter_label_prefix, display_width, format_file_change_badge,
-    format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
-    sanitize_terminal_text, sanitized_span, truncate, uncommitted_badge,
+    blend_colors, commit_comment_badge, commit_push_chain_marker, commit_selection_marker,
+    commit_status_badge, commit_status_filter_label_prefix, display_width,
+    format_file_change_badge, format_relative_time, list_highlight_symbol,
+    list_highlight_symbol_width, sanitize_terminal_text, sanitized_span, truncate,
+    uncommitted_badge,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
@@ -39,6 +42,7 @@ pub(in crate::app) struct FilePaneModel<'a> {
 /// Render payload for the commits pane.
 pub(in crate::app) struct CommitPaneModel<'a> {
     pub commits: &'a [CommitRow],
+    pub commented_commit_ids: &'a BTreeSet<String>,
     pub status_counts: (usize, usize, usize, usize),
     pub selected_total: usize,
     pub shown_commits: usize,
@@ -173,6 +177,7 @@ impl<'a> ListPaneRenderer<'a> {
     ) {
         let CommitPaneModel {
             commits,
+            commented_commit_ids,
             status_counts,
             selected_total,
             shown_commits,
@@ -264,13 +269,14 @@ impl<'a> ListPaneRenderer<'a> {
             .map(|(idx, row)| {
                 let is_cursor = cursor_idx == Some(idx);
                 let push_chain_kind = push_chain_kinds.get(idx).copied().flatten();
+                let has_comments = commented_commit_ids.contains(&row.info.id);
                 let cursor_bg = if self.focused == FocusPane::Commits {
                     self.theme.visual_bg
                 } else {
                     self.theme.cursor_bg
                 };
                 let line = apply_row_highlight(
-                    &presenter.commit_row_line_with_push_chain(row, push_chain_kind),
+                    &presenter.commit_row_line_with_push_chain(row, push_chain_kind, has_comments),
                     line_width,
                     row.selected,
                     is_cursor,
@@ -469,13 +475,14 @@ impl<'a> ListLinePresenter<'a> {
         } else {
             Some(CommitPushChainMarkerKind::Pushed)
         };
-        self.commit_row_line_with_push_chain(row, default_push_chain)
+        self.commit_row_line_with_push_chain(row, default_push_chain, false)
     }
 
     pub(in crate::app) fn commit_row_line_with_push_chain(
         &self,
         row: &CommitRow,
         push_chain_kind: Option<CommitPushChainMarkerKind>,
+        has_comments: bool,
     ) -> Line<'static> {
         let summary = sanitize_terminal_text(&row.info.summary);
         if row.is_uncommitted {
@@ -528,6 +535,22 @@ impl<'a> ListLinePresenter<'a> {
                     Style::default().fg(self.theme.accent),
                 ));
                 right_width += display_width(&rendered) + usize::from(right_width > 0);
+            }
+        }
+        if has_comments {
+            let comment_badge = commit_comment_badge(self.nerd_fonts).to_owned();
+            let comment_needed = display_width(&comment_badge) + usize::from(right_width > 0);
+            if right_width + comment_needed <= max_right_width {
+                if right_width > 0 {
+                    right_spans.push(Span::raw(" "));
+                }
+                right_spans.push(Span::styled(
+                    comment_badge,
+                    Style::default()
+                        .fg(self.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                right_width += comment_needed;
             }
         }
         let status_badge = commit_status_badge(row.status, self.nerd_fonts).to_owned();

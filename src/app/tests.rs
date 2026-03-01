@@ -218,6 +218,44 @@ fn compose_commit_line_renders_git_decorations() {
 }
 
 #[test]
+fn compose_commit_line_renders_comment_badge_before_status_with_nerd_fonts() {
+    let row = commit_row("abc1234", false, ReviewStatus::Reviewed);
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(120, 3_600, &theme, true);
+    let rendered = presenter.commit_row_line_with_push_chain(&row, None, true);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+    let comment_badge = commit_comment_badge(true);
+    let status_badge = commit_status_badge(ReviewStatus::Reviewed, true);
+    let comment_idx = flattened.find(comment_badge).expect("comment badge");
+    let status_idx = flattened.rfind(status_badge).expect("status badge");
+
+    assert!(comment_idx < status_idx);
+}
+
+#[test]
+fn compose_commit_line_renders_comment_badge_before_status_with_ascii_fallback() {
+    let row = commit_row("abc1234", false, ReviewStatus::Reviewed);
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let presenter = ListLinePresenter::new(120, 3_600, &theme, false);
+    let rendered = presenter.commit_row_line_with_push_chain(&row, None, true);
+    let flattened = rendered
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect::<String>();
+    let comment_badge = commit_comment_badge(false);
+    let status_badge = commit_status_badge(ReviewStatus::Reviewed, false);
+    let comment_idx = flattened.find(comment_badge).expect("comment badge");
+    let status_idx = flattened.rfind(status_badge).expect("status badge");
+
+    assert!(comment_idx < status_idx);
+}
+
+#[test]
 fn commit_push_chain_kinds_mark_top_and_boundary_segments() {
     let mut top_unpushed = commit_row("u-top", false, ReviewStatus::Unreviewed);
     top_unpushed.info.unpushed = true;

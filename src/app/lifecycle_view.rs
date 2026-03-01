@@ -1,4 +1,6 @@
 //! Render pipeline and modal/footer presentation for the lifecycle flow.
+use std::collections::BTreeSet;
+
 use super::*;
 use ratatui::widgets::{List, ListItem};
 
@@ -103,6 +105,12 @@ impl App {
             .iter()
             .filter_map(|idx| self.commits.get(*idx).cloned())
             .collect();
+        let commented_commit_ids = self
+            .comments
+            .comments()
+            .iter()
+            .flat_map(|comment| comment.target.commits.iter().cloned())
+            .collect::<BTreeSet<_>>();
         let selected_total = self.commits.iter().filter(|row| row.selected).count();
         ListPaneRenderer::new(theme, self.preferences.focused, self.preferences.nerd_fonts)
             .render_commits(
@@ -110,6 +118,7 @@ impl App {
                 rect,
                 CommitPaneModel {
                     commits: &visible_rows,
+                    commented_commit_ids: &commented_commit_ids,
                     status_counts: self.status_counts(),
                     selected_total,
                     shown_commits: visible_rows.len(),
@@ -474,7 +483,9 @@ impl App {
             }
             InputMode::ListSearch(pane) => {
                 let (query, cursor) = match pane {
-                    FocusPane::Commits => (self.search.commit_query.as_str(), self.search.commit_cursor),
+                    FocusPane::Commits => {
+                        (self.search.commit_query.as_str(), self.search.commit_cursor)
+                    }
                     FocusPane::Files => (self.search.file_query.as_str(), self.search.file_cursor),
                     FocusPane::Diff => ("", 0),
                 };
