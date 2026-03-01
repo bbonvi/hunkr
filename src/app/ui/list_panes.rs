@@ -88,14 +88,22 @@ impl<'a> ListPaneRenderer<'a> {
                     .bg(self.theme.panel_title_bg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(" "),
+            chip_separator(),
             Span::styled(
-                format!("{shown_files}/{changed_files} shown "),
+                format!("{shown_files}/{changed_files}"),
                 Style::default().fg(self.theme.muted),
             ),
-            Span::styled("filter:", Style::default().fg(self.theme.muted)),
-            sanitized_span(search_display, Some(filter_style)),
         ]);
+        let title = if search_enabled {
+            let mut spans = title.spans;
+            spans.extend([
+                chip_separator(),
+                sanitized_span(search_display, Some(filter_style)),
+            ]);
+            Line::from(spans)
+        } else {
+            title
+        };
         let border_style = if self.focused == FocusPane::Files {
             Style::default().fg(self.theme.focus_border)
         } else {
