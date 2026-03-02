@@ -102,6 +102,43 @@ pub(super) fn diff_column_at(mouse_x: u16, rect: ratatui::layout::Rect) -> usize
     mouse_x.saturating_sub(content_left).min(max_col as u16) as usize
 }
 
+/// Maps mouse x-position in the diff pane to the raw diff-text char column for the target row.
+pub(super) fn diff_column_at_for_rendered_line(
+    mouse_x: u16,
+    rect: ratatui::layout::Rect,
+    rendered_line: Option<&RenderedDiffLine>,
+) -> usize {
+    let display_col = diff_column_at(mouse_x, rect);
+    let Some(prefix_cells) = code_line_number_prefix_cells(rendered_line) else {
+        return display_col;
+    };
+
+    // Numbered code rows render "old new {+|-| |~} " before payload; raw diff text stores only
+    // the marker (`+/-/ /~`) directly adjacent to payload.
+    display_col.saturating_sub(prefix_cells.saturating_add(1))
+}
+
+fn code_line_number_prefix_cells(rendered_line: Option<&RenderedDiffLine>) -> Option<usize> {
+    let line = rendered_line?;
+    let is_numbered_code_line = line
+        .anchor
+        .as_ref()
+        .is_some_and(|anchor| !is_commit_anchor(anchor))
+        && line.line.spans.len() >= 4
+        && matches!(
+            line.raw_text.chars().next(),
+            Some('+') | Some('-') | Some(' ') | Some('~')
+        );
+    if !is_numbered_code_line {
+        return None;
+    }
+
+    line.line
+        .spans
+        .first()
+        .map(|span| display_width(span.content.as_ref()))
+}
+
 pub(super) fn diff_visual_from_drag_anchor(
     anchor: Option<usize>,
     cursor: usize,

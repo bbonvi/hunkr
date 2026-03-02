@@ -113,11 +113,7 @@ impl App {
                     self.set_focus(FocusPane::Diff);
                     self.ui.diff_ui.visual_selection = None;
                     if let Some(row) = resolve_diff_row(self, y) {
-                        self.set_diff_cursor(row);
-                        self.set_diff_block_cursor_col(diff_column_at(
-                            x,
-                            self.ui.diff_ui.pane_rects.diff,
-                        ));
+                        self.sync_diff_cursor_to_mouse_position(row, x);
                         self.ui.diff_ui.mouse_anchor = Some(self.domain.diff_position.cursor);
                     } else {
                         self.ui.diff_ui.mouse_anchor = None;
@@ -175,11 +171,7 @@ impl App {
             }
             MouseEventKind::Drag(MouseButton::Left) if in_diff => {
                 if let Some(row) = resolve_diff_row(self, y) {
-                    self.set_diff_cursor(row);
-                    self.set_diff_block_cursor_col(diff_column_at(
-                        x,
-                        self.ui.diff_ui.pane_rects.diff,
-                    ));
+                    self.sync_diff_cursor_to_mouse_position(row, x);
                     self.ui.diff_ui.visual_selection = diff_visual_from_drag_anchor(
                         self.ui.diff_ui.mouse_anchor,
                         self.domain.diff_position.cursor,
@@ -195,11 +187,7 @@ impl App {
 
                 if in_diff {
                     if let Some(row) = resolve_diff_row(self, y) {
-                        self.set_diff_cursor(row);
-                        self.set_diff_block_cursor_col(diff_column_at(
-                            x,
-                            self.ui.diff_ui.pane_rects.diff,
-                        ));
+                        self.sync_diff_cursor_to_mouse_position(row, x);
                     }
                     self.ui.diff_ui.visual_selection = diff_visual_from_drag_anchor(
                         self.ui.diff_ui.mouse_anchor,
@@ -214,6 +202,18 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn sync_diff_cursor_to_mouse_position(&mut self, row: usize, mouse_x: u16) {
+        self.set_diff_cursor(row);
+        let col = diff_column_at_for_rendered_line(
+            mouse_x,
+            self.ui.diff_ui.pane_rects.diff,
+            self.domain
+                .rendered_diff
+                .get(self.domain.diff_position.cursor),
+        );
+        self.set_diff_block_cursor_col(col);
     }
 
     fn should_scroll_list_wheel(&mut self, pane: FocusPane, delta: isize) -> bool {
