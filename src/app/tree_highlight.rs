@@ -1,5 +1,5 @@
 //! File tree construction and syntax-highlighting cache for diff rendering.
-use super::*;
+use crate::app::*;
 
 #[derive(Default)]
 pub(super) struct FileTree {

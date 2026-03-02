@@ -1,5 +1,5 @@
 //! Commit selection and status-transition operations.
-use super::*;
+use crate::app::*;
 
 pub(super) fn commit_mouse_selection_mode(modifiers: KeyModifiers) -> CommitMouseSelectionMode {
     if modifiers.contains(KeyModifiers::SHIFT) {

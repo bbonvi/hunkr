@@ -1,4 +1,4 @@
-use super::super::*;
+use crate::app::*;
 
 /// Shared contract for modal key/mouse handlers.
 pub(in crate::app) trait ModalInputController {

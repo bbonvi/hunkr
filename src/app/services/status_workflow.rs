@@ -1,4 +1,4 @@
-use super::super::*;
+use crate::app::*;
 
 /// Applies status transitions to selected commits and persists review state/report side effects.
 pub(in crate::app) fn set_status_for_ids(

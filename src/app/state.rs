@@ -1,5 +1,5 @@
 use super::services::repository_workflow;
-use super::*;
+use crate::app::*;
 
 impl App {
     pub(super) fn switch_repository_context(&mut self, target: &Path) -> anyhow::Result<()> {

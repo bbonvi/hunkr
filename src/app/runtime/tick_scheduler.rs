@@ -1,4 +1,4 @@
-use super::super::*;
+use crate::app::*;
 
 /// Scheduler input snapshot for poll timeout calculation.
 #[derive(Debug, Clone, Copy)]

@@ -1,7 +1,7 @@
 //! Keyboard/input-mode handlers for the app lifecycle.
 use super::input::{modal_controller, panes};
 use super::services::comment_workflow;
-use super::*;
+use crate::app::*;
 
 impl App {
     pub(super) fn handle_non_normal_input(&mut self, key: KeyEvent) {

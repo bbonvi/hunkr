@@ -1,4 +1,4 @@
-use super::*;
+use crate::app::*;
 
 /// Black-box snapshot of observable app state for flow-level tests.
 #[derive(Debug, Clone)]

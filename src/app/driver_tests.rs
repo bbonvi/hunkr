@@ -7,7 +7,7 @@ use std::{
 };
 
 use super::driver::AppDriver;
-use super::*;
+use crate::app::*;
 use crate::config::AppConfig;
 use chrono::{DateTime, Utc};
 use tempfile::TempDir;

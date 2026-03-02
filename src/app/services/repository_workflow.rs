@@ -1,5 +1,5 @@
 use super::super::state::format_uncommitted_summary;
-use super::super::*;
+use crate::app::*;
 
 /// Handles repository reload/rebuild orchestration independently from UI input/render modules.
 pub(in crate::app) fn switch_repository_context(
@@ -192,7 +192,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use tempfile::TempDir;
 
-    use super::*;
+    use crate::app::*;
     use crate::config::AppConfig;
 
     struct TestClock;
@@ -314,7 +314,8 @@ mod tests {
         };
         let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
 
-        switch_repository_context(&mut app, repo.path()).expect("switch repository context");
+        super::switch_repository_context(&mut app, repo.path())
+            .expect("switch repository context");
         assert_eq!(calls.open_git_at.load(Ordering::Relaxed), 1);
         assert_eq!(calls.open_comment_store.load(Ordering::Relaxed), 1);
     }

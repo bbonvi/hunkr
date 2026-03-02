@@ -1,5 +1,5 @@
 //! Comment modal presentation helpers and derived view-model state.
-use super::*;
+use crate::app::*;
 
 pub(super) struct CommentModalView {
     pub(super) lines: Vec<Line<'static>>,

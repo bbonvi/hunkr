@@ -11,7 +11,7 @@ use super::ui::style::{
     CursorSelectionPolicy, apply_row_highlight, line_with_right, pad_line_to_width,
     resolve_row_background, tint_line_background,
 };
-use super::*;
+use crate::app::*;
 use crate::model::{CommitDecoration, CommitDecorationKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;

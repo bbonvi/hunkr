@@ -1,5 +1,5 @@
 use super::services::status_workflow;
-use super::*;
+use crate::app::*;
 
 impl App {
     pub(super) fn scroll_diff_viewport(&mut self, delta: isize) {

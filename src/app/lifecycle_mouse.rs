@@ -1,6 +1,6 @@
 //! Mouse interaction handlers for list panes, diff, and comment editor modal.
 use super::input::modal_controller;
-use super::*;
+use crate::app::*;
 
 impl App {
     pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {

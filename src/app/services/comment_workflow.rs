@@ -1,4 +1,4 @@
-use super::super::*;
+use crate::app::*;
 
 /// Handles comment create/edit submission side effects and status/report synchronization.
 pub(in crate::app) fn submit_comment_from_editor(app: &mut App) -> bool {

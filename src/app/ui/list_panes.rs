@@ -766,8 +766,8 @@ fn subdued_pushed_chain_color(theme: &UiTheme) -> Color {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::app::ThemeMode;
+    use crate::app::*;
 
     #[test]
     fn commit_status_count_spans_toggle_separator_by_font_mode() {
@@ -778,11 +778,11 @@ mod tests {
             (ReviewStatus::IssueFound, 7),
             (ReviewStatus::Resolved, 6),
         ];
-        let nerd_text = commit_status_count_spans((9, 8, 7, 6), &theme, true)
+        let nerd_text = super::commit_status_count_spans((9, 8, 7, 6), &theme, true)
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
-        let ascii_text = commit_status_count_spans((9, 8, 7, 6), &theme, false)
+        let ascii_text = super::commit_status_count_spans((9, 8, 7, 6), &theme, false)
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
@@ -799,7 +799,7 @@ mod tests {
 
     #[test]
     fn format_commit_count_chip_includes_selected_only_when_non_zero() {
-        assert_eq!(format_commit_count_chip(165, 165, 0), "165/165");
-        assert_eq!(format_commit_count_chip(165, 165, 6), "165/165(6)");
+        assert_eq!(super::format_commit_count_chip(165, 165, 0), "165/165");
+        assert_eq!(super::format_commit_count_chip(165, 165, 6), "165/165(6)");
     }
 }

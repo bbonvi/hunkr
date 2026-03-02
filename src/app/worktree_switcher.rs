@@ -1,5 +1,5 @@
 //! Worktree switcher modal state and input handling.
-use super::*;
+use crate::app::*;
 
 impl App {
     pub(super) fn open_worktree_switcher(&mut self) {

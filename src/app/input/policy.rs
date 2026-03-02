@@ -1,4 +1,4 @@
-use super::super::*;
+use crate::app::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app) enum PaneCycleDirection {

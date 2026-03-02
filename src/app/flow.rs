@@ -1,4 +1,4 @@
-use super::*;
+use crate::app::*;
 
 /// Runtime-level actions entering the application state machine.
 pub(in crate::app) enum AppAction {

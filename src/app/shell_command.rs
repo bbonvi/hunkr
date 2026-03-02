@@ -1,5 +1,5 @@
 //! Shell command modal state, history, reverse search, and process streaming.
-use super::*;
+use crate::app::*;
 use std::sync::mpsc::TryRecvError;
 
 const SHELL_OUTPUT_POLICY: ShellOutputPolicy = ShellOutputPolicy::new(256, 512, 1_000, 16 * 1024);

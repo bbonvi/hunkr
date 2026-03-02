@@ -1,5 +1,5 @@
 //! Shared UI/diff helper functions used across rendering, navigation, and onboarding flows.
-use super::*;
+use crate::app::*;
 use chrono::DateTime;
 
 pub(super) fn blend_colors(base: Color, overlay: Color, overlay_weight: u8) -> Color {

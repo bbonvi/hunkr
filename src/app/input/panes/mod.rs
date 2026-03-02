@@ -1,4 +1,4 @@
-use super::super::*;
+use crate::app::*;
 
 pub(in crate::app) mod commits;
 pub(in crate::app) mod diff;
