@@ -835,7 +835,15 @@ pub(in crate::app) fn focused_commit_metadata_summary(
     match row {
         Some(row) if row.is_uncommitted => "worktree/index draft snapshot".to_owned(),
         Some(row) => {
-            let mut meta_parts = Vec::new();
+            let mut meta_parts = vec![
+                sanitize_terminal_text(&row.info.short_id),
+                sanitize_terminal_text(row.info.author.trim()),
+                if row.info.unpushed {
+                    "unpushed".to_owned()
+                } else {
+                    "pushed".to_owned()
+                },
+            ];
             let refs = compact_ref_metadata_tokens(&row.info.decorations, nerd_fonts);
             if refs.is_empty() {
                 meta_parts.push("refs -".to_owned());
@@ -1070,11 +1078,14 @@ mod tests {
 
         let metadata = super::focused_commit_metadata_summary(Some(&row), false);
         assert!(!metadata.contains("meta "));
+        assert!(metadata.contains("abc1234"));
+        assert!(metadata.contains("dev"));
+        assert!(metadata.contains("unpushed"));
         assert!(metadata.contains("refs main"));
-        assert!(!metadata.contains("author"));
         assert!(!metadata.contains("review"));
-        assert!(!metadata.contains("state"));
         assert!(!metadata.contains("id:"));
+        assert!(!metadata.contains("author:"));
+        assert!(!metadata.contains("state:"));
     }
 
     #[test]
