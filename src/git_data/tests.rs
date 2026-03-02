@@ -137,7 +137,7 @@ fn load_first_parent_history_includes_ref_decorations() {
         .map(|item| item.label.as_str())
         .collect::<Vec<_>>();
 
-    assert!(head_labels.contains(&"HEAD -> main"));
+    assert!(head_labels.contains(&"main*"));
     assert!(head_labels.contains(&"main"));
 
     let first_id = git_out(
@@ -155,8 +155,37 @@ fn load_first_parent_history_includes_ref_decorations() {
         first
             .decorations
             .iter()
-            .any(|item| item.kind == CommitDecorationKind::Tag && item.label == "tag: v0")
+            .any(|item| item.kind == CommitDecorationKind::Tag && item.label == "v0")
     );
+}
+
+#[test]
+fn load_first_parent_history_omits_remote_head_decoration() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "f.txt", "one\n", "first");
+    run(Command::new("git").current_dir(repo_dir.path()).args([
+        "update-ref",
+        "refs/remotes/origin/main",
+        "HEAD",
+    ]));
+    run(Command::new("git").current_dir(repo_dir.path()).args([
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+    ]));
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let head = history.first().expect("head commit");
+    let labels = head
+        .decorations
+        .iter()
+        .map(|item| item.label.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(labels.contains(&"origin/main"));
+    assert!(!labels.iter().any(|label| label.ends_with("/HEAD")));
 }
 
 #[test]

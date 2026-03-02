@@ -121,7 +121,7 @@ pub struct CommitInfo {
     pub decorations: Vec<CommitDecoration>,
 }
 
-/// One ref decoration shown next to commit summaries (e.g. `HEAD -> main`, `origin/main`).
+/// One ref decoration shown in commit metadata (e.g. `main*`, `origin/main`, `v1.2.3`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CommitDecoration {
     pub kind: CommitDecorationKind,

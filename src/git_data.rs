@@ -410,7 +410,7 @@ impl GitService {
         if let Some(head_oid) = head.target() {
             let head_label = if head.is_branch() {
                 let branch = head.shorthand().unwrap_or("HEAD");
-                format!("HEAD -> {branch}")
+                format!("{branch}*")
             } else {
                 "HEAD".to_owned()
             };
@@ -666,10 +666,13 @@ fn decoration_from_ref_name(name: &str) -> Option<(CommitDecorationKind, String)
         return Some((CommitDecorationKind::LocalBranch, branch.to_owned()));
     }
     if let Some(remote_branch) = name.strip_prefix("refs/remotes/") {
+        if remote_branch.ends_with("/HEAD") {
+            return None;
+        }
         return Some((CommitDecorationKind::RemoteBranch, remote_branch.to_owned()));
     }
     if let Some(tag) = name.strip_prefix("refs/tags/") {
-        return Some((CommitDecorationKind::Tag, format!("tag: {tag}")));
+        return Some((CommitDecorationKind::Tag, tag.to_owned()));
     }
     None
 }
