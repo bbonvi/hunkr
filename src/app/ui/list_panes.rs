@@ -489,7 +489,7 @@ impl<'a> ListLinePresenter<'a> {
     ) -> Line<'static> {
         let commit_text_style = if row.selected {
             Style::default()
-                .fg(self.theme.text)
+                .fg(self.theme.commit_selected_text)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(self.theme.text)
@@ -1018,6 +1018,11 @@ mod tests {
             line.spans
                 .first()
                 .is_some_and(|span| span.style.add_modifier.contains(Modifier::BOLD))
+        );
+        assert!(
+            line.spans
+                .first()
+                .is_some_and(|span| span.style.fg == Some(theme.commit_selected_text))
         );
     }
 

@@ -171,6 +171,7 @@ struct ThemeFileMode {
     block_cursor_bg: ThemeColor,
     visual_bg: ThemeColor,
     commit_selected_bg: ThemeColor,
+    commit_selected_text: Option<ThemeColor>,
     search_match_fg: ThemeColor,
     search_match_bg: ThemeColor,
     search_current_fg: ThemeColor,
@@ -198,10 +199,16 @@ impl ThemeFileMode {
             bail!("cursor_visual_overlap_weight must be between 1 and 255");
         }
 
+        let accent = self.accent.into_color();
+        let commit_selected_text = self
+            .commit_selected_text
+            .map(ThemeColor::into_color)
+            .unwrap_or(accent);
+
         Ok(UiTheme {
             border: self.border.into_color(),
             focus_border: self.focus_border.into_color(),
-            accent: self.accent.into_color(),
+            accent,
             panel_title_bg: self.panel_title_bg.into_color(),
             panel_title_fg: self.panel_title_fg.into_color(),
             footer_chip_bg: self.footer_chip_bg.into_color(),
@@ -215,6 +222,7 @@ impl ThemeFileMode {
             block_cursor_bg: self.block_cursor_bg.into_color(),
             visual_bg: self.visual_bg.into_color(),
             commit_selected_bg: self.commit_selected_bg.into_color(),
+            commit_selected_text,
             search_match_fg: self.search_match_fg.into_color(),
             search_match_bg: self.search_match_bg.into_color(),
             search_current_fg: self.search_current_fg.into_color(),
@@ -313,6 +321,10 @@ mod tests {
             state.for_mode(ThemeMode::Light).cursor_bg,
             Color::Rgb(236, 236, 236),
         );
+        assert_eq!(
+            state.for_mode(ThemeMode::Light).commit_selected_text,
+            Color::Rgb(0, 123, 184),
+        );
     }
 
     #[test]
@@ -346,5 +358,30 @@ mod tests {
             parse_text_color("#ffffff").expect("hex"),
             ThemeColor::Rgb(255, 255, 255)
         ));
+    }
+
+    #[test]
+    fn reload_if_changed_defaults_selected_commit_text_to_accent_when_missing() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_dir = temp.path().join("hunkr");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let theme_path = config_dir.join(THEME_FILE_NAME);
+        let legacy_theme = include_str!("../../theme.example.yaml")
+            .replace("  commit_selected_text: \"#78c4ff\"\n", "")
+            .replace("  commit_selected_text: \"#007bb8\"\n", "");
+        fs::write(&theme_path, legacy_theme).expect("write theme");
+
+        let mut state = ThemeRuntimeState::new(theme_path);
+        let outcome = state.reload_if_changed(true).expect("reload");
+
+        assert_eq!(outcome, ThemeReloadOutcome::LoadedFromFile);
+        assert_eq!(
+            state.for_mode(ThemeMode::Dark).commit_selected_text,
+            state.for_mode(ThemeMode::Dark).accent,
+        );
+        assert_eq!(
+            state.for_mode(ThemeMode::Light).commit_selected_text,
+            state.for_mode(ThemeMode::Light).accent,
+        );
     }
 }
