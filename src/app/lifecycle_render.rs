@@ -411,7 +411,7 @@ impl App {
             &render_snapshot,
         );
         self.render_diff(frame, self.ui.diff_ui.pane_rects.diff, &theme);
-        self.render_footer(frame, root_chunks[2], &theme);
+        self.render_footer(frame, root_chunks[2], &theme, &render_snapshot);
         if self.runtime.show_help {
             self.render_help_overlay(frame, &theme);
         }

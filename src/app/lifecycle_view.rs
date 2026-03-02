@@ -239,16 +239,17 @@ impl App {
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
+        snapshot: &AppRenderSnapshot,
     ) {
-        let commit_visual_active = self.ui.commit_ui.visual_anchor.is_some();
-        let diff_visual_active = self.ui.diff_ui.visual_selection.is_some();
+        let commit_visual_active = snapshot.footer.commit_visual_active;
+        let diff_visual_active = snapshot.footer.diff_visual_active;
         let mode = footer_mode_label(
-            self.ui.preferences.input_mode,
+            snapshot.footer.input_mode,
             commit_visual_active,
             diff_visual_active,
         );
 
-        let pane_line = match self.ui.preferences.input_mode {
+        let pane_line = match snapshot.footer.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => Line::from(vec![
                 key_chip("Enter", theme),
                 Span::styled(" save ", Style::default().fg(theme.muted)),
@@ -260,7 +261,7 @@ impl App {
                 Span::styled(" cancel comment", Style::default().fg(theme.muted)),
             ]),
             InputMode::ShellCommand => {
-                if self.ui.shell_command.running.is_some() {
+                if snapshot.footer.shell.running {
                     Line::from(vec![
                         key_chip("j/k", theme),
                         Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -275,7 +276,7 @@ impl App {
                         key_chip("Backspace", theme),
                         Span::styled(" reset", Style::default().fg(theme.muted)),
                     ])
-                } else if self.ui.shell_command.finished.is_some() {
+                } else if snapshot.footer.shell.finished {
                     Line::from(vec![
                         key_chip("j/k", theme),
                         Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -304,7 +305,7 @@ impl App {
                 }
             }
             InputMode::WorktreeSwitch => {
-                if self.ui.worktree_switch.search_active {
+                if snapshot.footer.worktree.search_active {
                     Line::from(vec![
                         key_chip("Enter", theme),
                         Span::styled(" defocus ", Style::default().fg(theme.muted)),
@@ -346,7 +347,7 @@ impl App {
                 key_chip("Backspace", theme),
                 Span::styled(" edit", Style::default().fg(theme.muted)),
             ]),
-            InputMode::Normal => match self.ui.preferences.focused {
+            InputMode::Normal => match snapshot.footer.focused {
                 FocusPane::Files => Line::from(vec![
                     key_chip("j/k", theme),
                     Span::styled(" move ", Style::default().fg(theme.muted)),
@@ -416,16 +417,16 @@ impl App {
             footer_mode_style(mode, theme),
             Modifier::BOLD,
         )];
-        let show_primary_status = !self.runtime.status.is_empty()
+        let show_primary_status = !snapshot.footer.status.is_empty()
             && !matches!(
-                self.ui.preferences.input_mode,
+                snapshot.footer.input_mode,
                 InputMode::DiffSearch | InputMode::ListSearch(_) | InputMode::WorktreeSwitch
             );
         if show_primary_status {
             status.push(Span::raw(" "));
             status.push(Span::styled(
-                self.runtime.status.clone(),
-                footer_status_style(&self.runtime.status, theme),
+                snapshot.footer.status.clone(),
+                footer_status_style(&snapshot.footer.status, theme),
             ));
         }
 
@@ -442,16 +443,14 @@ impl App {
             ));
         }
 
-        match self.ui.preferences.input_mode {
+        match snapshot.footer.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => {
-                let line_count = self.ui.comment_editor.buffer.matches('\n').count() + 1;
-                let (line, col) = comment_cursor_line_col(
-                    &self.ui.comment_editor.buffer,
-                    self.ui.comment_editor.cursor,
-                );
+                let line_count = snapshot.footer.comment_buffer.matches('\n').count() + 1;
+                let (line, col) =
+                    comment_cursor_line_col(&snapshot.footer.comment_buffer, snapshot.footer.comment_cursor);
                 status.push(footer_separator(theme));
                 status.push(footer_detail_chip(
-                    format!("{} chars", self.ui.comment_editor.buffer.chars().count()),
+                    format!("{} chars", snapshot.footer.comment_buffer.chars().count()),
                     theme,
                 ));
                 status.push(Span::raw(" "));
@@ -463,20 +462,20 @@ impl App {
             InputMode::DiffSearch => {
                 status.push(footer_separator(theme));
                 status.extend(search_prompt_spans(
-                    &self.ui.search.diff_buffer,
-                    self.ui.search.diff_cursor,
+                    &snapshot.footer.diff_search_buffer,
+                    snapshot.footer.diff_search_cursor,
                     theme,
                 ));
             }
             InputMode::ListSearch(pane) => {
                 let (query, cursor) = match pane {
                     FocusPane::Commits => (
-                        self.ui.search.commit_query.as_str(),
-                        self.ui.search.commit_cursor,
+                        snapshot.footer.commit_query.as_str(),
+                        snapshot.footer.commit_cursor,
                     ),
                     FocusPane::Files => (
-                        self.ui.search.file_query.as_str(),
-                        self.ui.search.file_cursor,
+                        snapshot.footer.file_query.as_str(),
+                        snapshot.footer.file_cursor,
                     ),
                     FocusPane::Diff => ("", 0),
                 };
@@ -485,23 +484,17 @@ impl App {
             }
             InputMode::ShellCommand => {
                 status.push(footer_separator(theme));
-                let command = self
-                    .ui
-                    .shell_command
-                    .active_command
-                    .as_deref()
-                    .unwrap_or(self.ui.shell_command.buffer.as_str());
-                let label = if self.ui.shell_command.running.is_some() {
+                let label = if snapshot.footer.shell.running {
                     "running"
-                } else if self.ui.shell_command.finished.is_some() {
+                } else if snapshot.footer.shell.finished {
                     "done"
-                } else if self.ui.shell_command.reverse_search.is_some() {
+                } else if snapshot.footer.shell.reverse_search {
                     "search"
                 } else {
                     "input"
                 };
                 status.push(footer_chip(
-                    &format!("{label}: {}", truncate(command, 42)),
+                    &format!("{label}: {}", truncate(&snapshot.footer.shell.command_label, 42)),
                     Style::default().fg(theme.accent).bg(blend_colors(
                         theme.panel_title_bg,
                         theme.border,
@@ -511,20 +504,18 @@ impl App {
                 ));
             }
             InputMode::WorktreeSwitch => {
-                if self.ui.worktree_switch.search_active
-                    || !self.ui.worktree_switch.query.is_empty()
+                if snapshot.footer.worktree.search_active || !snapshot.footer.worktree.query.is_empty()
                 {
-                    let query = if self.ui.worktree_switch.query.is_empty() {
+                    let query = if snapshot.footer.worktree.query.is_empty() {
                         "/".to_owned()
                     } else {
-                        format!("/{}", self.ui.worktree_switch.query)
+                        format!("/{}", snapshot.footer.worktree.query)
                     };
                     status.push(footer_separator(theme));
                     status.push(footer_chip(
                         &format!(
                             "{query} {}/{}",
-                            self.visible_worktree_indices().len(),
-                            self.ui.worktree_switch.entries.len()
+                            snapshot.footer.worktree.visible_count, snapshot.footer.worktree.total_count
                         ),
                         Style::default().fg(theme.accent).bg(blend_colors(
                             theme.panel_title_bg,
