@@ -1733,11 +1733,7 @@ fn footer_available_width_for_next_chip(
 }
 
 fn resolve_footer_chip_bg(theme: &UiTheme) -> Color {
-    if theme.footer_chip_bg == Color::Reset {
-        blend_colors(theme.panel_title_bg, theme.border, 176)
-    } else {
-        theme.footer_chip_bg
-    }
+    theme.footer_chip_bg
 }
 
 #[cfg(test)]
@@ -1811,10 +1807,9 @@ mod footer_contract_tests {
     }
 
     #[test]
-    fn resolve_footer_chip_bg_uses_blend_when_reset() {
+    fn resolve_footer_chip_bg_uses_reset_when_reset() {
         let theme = UiTheme::from_mode(ThemeMode::Dark);
-        let expected = blend_colors(theme.panel_title_bg, theme.border, 176);
-        assert_eq!(resolve_footer_chip_bg(&theme), expected);
+        assert_eq!(resolve_footer_chip_bg(&theme), Color::Reset);
     }
 
     #[test]
