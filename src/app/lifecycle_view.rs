@@ -2,8 +2,9 @@
 use std::collections::BTreeSet;
 
 use super::ui::contracts::PaneViewModelBuilder;
+use super::ui::snapshot::AppRenderSnapshot;
 use super::ui::view_models::{CommitPaneVmBuilder, FilePaneVmBuilder};
-use super::*;
+use crate::app::*;
 use ratatui::widgets::{List, ListItem};
 
 impl App {
@@ -12,19 +13,26 @@ impl App {
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
+        snapshot: &AppRenderSnapshot,
     ) {
-        let nerd_fonts = self.ui.preferences.nerd_fonts;
+        let nerd_fonts = snapshot.nerd_fonts;
         let branch_prefix = branch_label_prefix(nerd_fonts);
         let wt_prefix = worktree_label_prefix(nerd_fonts);
         let branch_label = if nerd_fonts {
-            format!("{branch_prefix} {} ", self.deps.git.branch_name())
+            format!("{branch_prefix} {} ", snapshot.header.branch_name)
         } else {
-            format!("{branch_prefix}{} ", self.deps.git.branch_name())
+            format!("{branch_prefix}{} ", snapshot.header.branch_name)
         };
         let wt_label = if nerd_fonts {
-            format!("{wt_prefix} {} ", short_path_label(self.deps.git.root()))
+            format!(
+                "{wt_prefix} {} ",
+                short_path_label(&snapshot.header.repo_root)
+            )
         } else {
-            format!("{wt_prefix}{} ", short_path_label(self.deps.git.root()))
+            format!(
+                "{wt_prefix}{} ",
+                short_path_label(&snapshot.header.repo_root)
+            )
         };
         let headline = Line::from(vec![
             Span::styled(
@@ -51,13 +59,14 @@ impl App {
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
+        snapshot: &AppRenderSnapshot,
     ) {
-        let vm = FilePaneVmBuilder.build(self);
+        let vm = FilePaneVmBuilder.build(&snapshot.files);
         ListPaneRenderer::new(
             theme,
-            self.ui.preferences.focused,
-            self.ui.preferences.nerd_fonts,
-            self.now_timestamp(),
+            snapshot.focused,
+            snapshot.nerd_fonts,
+            snapshot.now_ts,
         )
         .render_files(
             frame,
@@ -78,13 +87,14 @@ impl App {
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
+        snapshot: &AppRenderSnapshot,
     ) {
-        let vm = CommitPaneVmBuilder.build(self);
+        let vm = CommitPaneVmBuilder.build(&snapshot.commits);
         ListPaneRenderer::new(
             theme,
-            self.ui.preferences.focused,
-            self.ui.preferences.nerd_fonts,
-            self.now_timestamp(),
+            snapshot.focused,
+            snapshot.nerd_fonts,
+            snapshot.now_ts,
         )
         .render_commits(
             frame,

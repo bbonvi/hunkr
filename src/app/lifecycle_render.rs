@@ -1,7 +1,7 @@
 use super::flow::{self, AppAction};
 use super::input::global_router;
 use super::runtime::tick_scheduler::{self, PollTimeoutInputs, TickPlanInputs, TickTask};
-use super::*;
+use crate::app::*;
 use crate::config::AppConfig;
 
 /// Bootstrap-only dependencies loaded from disk/environment before UI startup.
@@ -395,10 +395,21 @@ impl App {
             diff: main_chunks[1],
         };
         self.sync_diff_cursor_to_content_bounds();
+        let render_snapshot = self.capture_render_snapshot();
 
-        self.render_header(frame, root_chunks[0], &theme);
-        self.render_commits(frame, self.ui.diff_ui.pane_rects.commits, &theme);
-        self.render_files(frame, self.ui.diff_ui.pane_rects.files, &theme);
+        self.render_header(frame, root_chunks[0], &theme, &render_snapshot);
+        self.render_commits(
+            frame,
+            self.ui.diff_ui.pane_rects.commits,
+            &theme,
+            &render_snapshot,
+        );
+        self.render_files(
+            frame,
+            self.ui.diff_ui.pane_rects.files,
+            &theme,
+            &render_snapshot,
+        );
         self.render_diff(frame, self.ui.diff_ui.pane_rects.diff, &theme);
         self.render_footer(frame, root_chunks[2], &theme);
         if self.runtime.show_help {

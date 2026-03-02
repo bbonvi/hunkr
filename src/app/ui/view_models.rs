@@ -1,11 +1,12 @@
 use std::collections::BTreeSet;
 
-use super::super::*;
 use super::contracts::PaneViewModelBuilder;
+use super::snapshot::{CommitPaneSnapshot, FilePaneSnapshot};
+use crate::app::{CommitRow, CommitStatusFilter};
 
 /// Owned view data for the files pane renderer.
 pub(in crate::app) struct FilePaneViewModel {
-    pub file_rows: Vec<TreeRow>,
+    pub file_rows: Vec<crate::app::TreeRow>,
     pub changed_files: usize,
     pub shown_files: usize,
     pub search_display: String,
@@ -16,7 +17,7 @@ pub(in crate::app) struct FilePaneViewModel {
 pub(in crate::app) struct FilePaneVmInput {
     pub files_search_mode: bool,
     pub file_query: String,
-    pub visible_rows: Vec<TreeRow>,
+    pub visible_rows: Vec<crate::app::TreeRow>,
     pub changed_files: usize,
 }
 
@@ -98,7 +99,7 @@ pub(in crate::app) fn build_commit_pane_view_model(
 }
 
 pub(in crate::app) fn commented_commit_ids_from_comments(
-    comments: &[ReviewComment],
+    comments: &[crate::model::ReviewComment],
 ) -> BTreeSet<String> {
     comments
         .iter()
@@ -108,50 +109,34 @@ pub(in crate::app) fn commented_commit_ids_from_comments(
 
 pub(in crate::app) struct FilePaneVmBuilder;
 
-impl PaneViewModelBuilder for FilePaneVmBuilder {
+impl PaneViewModelBuilder<FilePaneSnapshot> for FilePaneVmBuilder {
     type Output = FilePaneViewModel;
 
-    fn build(&self, app: &App) -> Self::Output {
-        let visible_rows = app
-            .visible_file_indices()
-            .into_iter()
-            .filter_map(|idx| app.domain.file_rows.get(idx).cloned())
-            .collect::<Vec<_>>();
+    fn build(&self, snapshot: &FilePaneSnapshot) -> Self::Output {
         build_file_pane_view_model(FilePaneVmInput {
-            files_search_mode: matches!(
-                app.ui.preferences.input_mode,
-                InputMode::ListSearch(FocusPane::Files)
-            ),
-            file_query: app.ui.search.file_query.clone(),
-            visible_rows,
-            changed_files: app.domain.aggregate.files.len(),
+            files_search_mode: snapshot.files_search_mode,
+            file_query: snapshot.file_query.clone(),
+            visible_rows: snapshot.visible_rows.clone(),
+            changed_files: snapshot.changed_files,
         })
     }
 }
 
 pub(in crate::app) struct CommitPaneVmBuilder;
 
-impl PaneViewModelBuilder for CommitPaneVmBuilder {
+impl PaneViewModelBuilder<CommitPaneSnapshot> for CommitPaneVmBuilder {
     type Output = CommitPaneViewModel;
 
-    fn build(&self, app: &App) -> Self::Output {
-        let visible_commits = app
-            .visible_commit_indices()
-            .into_iter()
-            .filter_map(|idx| app.domain.commits.get(idx).cloned())
-            .collect::<Vec<_>>();
+    fn build(&self, snapshot: &CommitPaneSnapshot) -> Self::Output {
         build_commit_pane_view_model(CommitPaneVmInput {
-            commits_search_mode: matches!(
-                app.ui.preferences.input_mode,
-                InputMode::ListSearch(FocusPane::Commits)
-            ),
-            commit_query: app.ui.search.commit_query.clone(),
-            visible_commits,
-            commented_commit_ids: commented_commit_ids_from_comments(app.deps.comments.comments()),
-            selected_total: app.domain.commits.iter().filter(|row| row.selected).count(),
-            total_commits: app.domain.commits.len(),
-            status_counts: app.status_counts(),
-            status_filter: app.ui.commit_ui.status_filter,
+            commits_search_mode: snapshot.commits_search_mode,
+            commit_query: snapshot.commit_query.clone(),
+            visible_commits: snapshot.visible_commits.clone(),
+            commented_commit_ids: snapshot.commented_commit_ids.clone(),
+            selected_total: snapshot.selected_total,
+            total_commits: snapshot.total_commits,
+            status_counts: snapshot.status_counts,
+            status_filter: snapshot.status_filter,
         })
     }
 }
@@ -160,6 +145,13 @@ impl PaneViewModelBuilder for CommitPaneVmBuilder {
 mod tests {
     use super::*;
     use crate::model::CommitDecoration;
+    use crate::{
+        app::TreeRow,
+        model::{
+            CommentAnchor, CommentTarget, CommentTargetKind, CommitInfo, ReviewComment,
+            ReviewStatus,
+        },
+    };
 
     fn tree_row(path: &str, selectable: bool) -> TreeRow {
         TreeRow {
