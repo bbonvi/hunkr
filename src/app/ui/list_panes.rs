@@ -522,12 +522,7 @@ impl<'a> ListLinePresenter<'a> {
             return Line::from(vec![
                 Span::styled(left_render, commit_text_style),
                 Span::raw(" "),
-                Span::styled(
-                    badge,
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(badge, Style::default().fg(self.theme.accent)),
                 Span::raw(spaces),
                 Span::styled(right, Style::default().fg(self.theme.dimmed)),
             ]);
