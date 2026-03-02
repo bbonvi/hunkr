@@ -635,6 +635,17 @@ impl App {
         }
     }
 
+    pub(in crate::app) fn apply_shell_command_editor_key(&mut self, key: KeyEvent) {
+        let edit = apply_single_line_edit_key(
+            &mut self.ui.shell_command.buffer,
+            &mut self.ui.shell_command.cursor,
+            key,
+        );
+        if !matches!(edit, SingleLineEditOutcome::NotHandled) {
+            self.ui.shell_command.history_nav = None;
+        }
+    }
+
     pub(in crate::app) fn execute_shell_command(&mut self) {
         let command = self.ui.shell_command.buffer.trim().to_owned();
         if command.is_empty() {

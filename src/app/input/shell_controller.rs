@@ -1,6 +1,4 @@
-use crate::app::{
-    App, KeyCode, KeyEvent, KeyModifiers, SingleLineEditOutcome, apply_single_line_edit_key,
-};
+use crate::app::{App, KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShellInputMode {
@@ -68,16 +66,7 @@ impl ShellModeController for EditingShellModeController {
             KeyCode::PageDown => {
                 app.scroll_shell_output_lines(app.ui.shell_command.output_viewport as isize)
             }
-            _ => {
-                let edit = apply_single_line_edit_key(
-                    &mut app.ui.shell_command.buffer,
-                    &mut app.ui.shell_command.cursor,
-                    key,
-                );
-                if !matches!(edit, SingleLineEditOutcome::NotHandled) {
-                    app.ui.shell_command.history_nav = None;
-                }
-            }
+            _ => app.apply_shell_command_editor_key(key),
         }
     }
 }
@@ -116,26 +105,100 @@ pub(in crate::app) fn dispatch_shell_modal_key(app: &mut App, key: KeyEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        path::{Path, PathBuf},
+        process::Command,
+        sync::Arc,
+        time::Instant,
+    };
 
-    fn state_mode(running: bool, finished: bool, reverse_search: bool) -> ShellInputMode {
-        if running {
-            return ShellInputMode::Running;
+    use chrono::{DateTime, Utc};
+    use tempfile::TempDir;
+
+    use crate::{app::InputMode, config::AppConfig};
+
+    struct TestClock;
+
+    impl crate::app::AppClock for TestClock {
+        fn now_utc(&self) -> DateTime<Utc> {
+            Utc::now()
         }
-        if finished {
-            return ShellInputMode::Finished;
+
+        fn now_instant(&self) -> Instant {
+            Instant::now()
         }
-        if reverse_search {
-            return ShellInputMode::ReverseSearch;
-        }
-        ShellInputMode::Editing
     }
 
-    #[test]
-    fn shell_mode_priority_prefers_running_then_finished_then_search() {
-        assert_eq!(state_mode(true, true, true), ShellInputMode::Running);
-        assert_eq!(state_mode(false, true, true), ShellInputMode::Finished);
-        assert_eq!(state_mode(false, false, true), ShellInputMode::ReverseSearch);
-        assert_eq!(state_mode(false, false, false), ShellInputMode::Editing);
+    struct TestBootstrapPorts {
+        repo_root: PathBuf,
+    }
+
+    impl crate::app::AppBootstrapPorts for TestBootstrapPorts {
+        fn open_current_git(&self) -> anyhow::Result<crate::git_data::GitService> {
+            crate::git_data::GitService::open_at(&self.repo_root)
+        }
+
+        fn load_config(&self) -> anyhow::Result<AppConfig> {
+            Ok(AppConfig::default())
+        }
+
+        fn state_store_for_repo(&self, repo_root: &Path) -> crate::store::StateStore {
+            crate::store::StateStore::for_project(repo_root)
+        }
+
+        fn open_comment_store(
+            &self,
+            store_root: &Path,
+            branch: &str,
+        ) -> anyhow::Result<crate::comments::CommentStore> {
+            crate::comments::CommentStore::new(store_root, branch)
+        }
+
+        fn clock(&self) -> Arc<dyn crate::app::AppClock> {
+            Arc::new(TestClock)
+        }
+
+        fn runtime_ports(&self) -> Arc<dyn crate::app::AppRuntimePorts> {
+            Arc::new(crate::app::ports::SystemRuntimePorts)
+        }
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        assert!(
+            output.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_test_repo() -> TempDir {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        run_git(root, &["init", "-q"]);
+        run_git(root, &["config", "user.name", "hunkr-test"]);
+        run_git(root, &["config", "user.email", "hunkr-test@example.com"]);
+        std::fs::write(root.join("README.md"), "init\n").expect("seed readme");
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "init", "-q"]);
+        tmp
+    }
+
+    fn bootstrap_app(repo_root: &Path) -> App {
+        let store = crate::store::StateStore::for_project(repo_root);
+        store
+            .save(&crate::model::ReviewState::default())
+            .expect("seed persisted state to bypass onboarding");
+
+        let ports = TestBootstrapPorts {
+            repo_root: repo_root.to_path_buf(),
+        };
+        App::bootstrap_with(&ports).expect("bootstrap app")
     }
 
     #[test]
@@ -152,5 +215,48 @@ mod tests {
             KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
             'r'
         ));
+    }
+
+    #[test]
+    fn dispatch_shell_modal_key_routes_editing_and_reverse_search_modes() {
+        let repo = init_test_repo();
+        let mut app = bootstrap_app(repo.path());
+        app.ui.preferences.input_mode = InputMode::ShellCommand;
+        app.ui.shell_command.buffer = "draft".to_owned();
+
+        dispatch_shell_modal_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        );
+        assert!(app.ui.shell_command.reverse_search.is_some());
+
+        dispatch_shell_modal_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.ui.shell_command.reverse_search.is_none());
+        assert_eq!(app.ui.shell_command.buffer, "draft");
+    }
+
+    #[test]
+    fn dispatch_shell_modal_key_routes_finished_and_running_modes() {
+        let repo = init_test_repo();
+        let mut app = bootstrap_app(repo.path());
+        app.ui.preferences.input_mode = InputMode::ShellCommand;
+
+        let exit_status = Command::new("sh")
+            .arg("-c")
+            .arg("exit 0")
+            .status()
+            .expect("spawn shell");
+        app.ui.shell_command.finished = Some(crate::app::ShellCommandResult { exit_status });
+        dispatch_shell_modal_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.ui.preferences.input_mode, InputMode::Normal);
+
+        app.ui.preferences.input_mode = InputMode::ShellCommand;
+        app.ui.shell_command.buffer = "sleep 1".to_owned();
+        app.execute_shell_command();
+        assert!(app.ui.shell_command.running.is_some());
+        dispatch_shell_modal_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.ui.shell_command.running.is_some());
+        assert!(app.runtime.status.contains("interrupted"));
+        assert_eq!(app.ui.preferences.input_mode, InputMode::ShellCommand);
     }
 }
