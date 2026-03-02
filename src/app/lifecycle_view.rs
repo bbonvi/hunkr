@@ -446,8 +446,10 @@ impl App {
         match snapshot.footer.input_mode {
             InputMode::CommentCreate | InputMode::CommentEdit(_) => {
                 let line_count = snapshot.footer.comment_buffer.matches('\n').count() + 1;
-                let (line, col) =
-                    comment_cursor_line_col(&snapshot.footer.comment_buffer, snapshot.footer.comment_cursor);
+                let (line, col) = comment_cursor_line_col(
+                    &snapshot.footer.comment_buffer,
+                    snapshot.footer.comment_cursor,
+                );
                 status.push(footer_separator(theme));
                 status.push(footer_detail_chip(
                     format!("{} chars", snapshot.footer.comment_buffer.chars().count()),
@@ -486,7 +488,10 @@ impl App {
                 status.push(footer_separator(theme));
                 let label = footer_shell_mode_label(&snapshot.footer.shell);
                 status.push(footer_chip(
-                    &format!("{label}: {}", truncate(&snapshot.footer.shell.command_label, 42)),
+                    &format!(
+                        "{label}: {}",
+                        truncate(&snapshot.footer.shell.command_label, 42)
+                    ),
                     Style::default().fg(theme.accent).bg(blend_colors(
                         theme.panel_title_bg,
                         theme.border,
@@ -501,7 +506,8 @@ impl App {
                     status.push(footer_chip(
                         &format!(
                             "{query} {}/{}",
-                            snapshot.footer.worktree.visible_count, snapshot.footer.worktree.total_count
+                            snapshot.footer.worktree.visible_count,
+                            snapshot.footer.worktree.total_count
                         ),
                         Style::default().fg(theme.accent).bg(blend_colors(
                             theme.panel_title_bg,
@@ -969,8 +975,10 @@ impl App {
                         in_visual,
                         is_cursor,
                         theme.visual_bg,
-                        theme.cursor_bg,
-                        CursorSelectionPolicy::CursorWins,
+                        theme.focused_cursor_bg,
+                        CursorSelectionPolicy::BlendCursorOverSelection {
+                            weight: theme.cursor_visual_overlap_weight,
+                        },
                     )
                 })
                 .collect::<Vec<_>>();
@@ -1509,7 +1517,7 @@ impl App {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border)),
             )
-            .highlight_style(Style::default().bg(theme.visual_bg))
+            .highlight_style(Style::default().bg(theme.focused_cursor_bg))
             .highlight_symbol(list_highlight_symbol(self.ui.preferences.nerd_fonts));
         self.ui.worktree_switch.viewport_rows = sections[1].height.saturating_sub(2) as usize;
         frame.render_stateful_widget(list, sections[1], &mut self.ui.worktree_switch.list_state);
@@ -1563,73 +1571,6 @@ fn footer_worktree_query_label(worktree: &FooterWorktreeSnapshot) -> Option<Stri
     Some(format!("/{}", worktree.query))
 }
 
-#[cfg(test)]
-mod footer_contract_tests {
-    use super::*;
-
-    #[test]
-    fn footer_shell_mode_label_contract() {
-        let base = FooterShellSnapshot {
-            running: false,
-            finished: false,
-            reverse_search: false,
-            command_label: "cmd".to_owned(),
-        };
-        assert_eq!(footer_shell_mode_label(&base), "input");
-
-        let running = FooterShellSnapshot {
-            running: true,
-            ..base
-        };
-        assert_eq!(footer_shell_mode_label(&running), "running");
-
-        let finished = FooterShellSnapshot {
-            running: false,
-            finished: true,
-            reverse_search: true,
-            command_label: "cmd".to_owned(),
-        };
-        assert_eq!(footer_shell_mode_label(&finished), "done");
-
-        let searching = FooterShellSnapshot {
-            running: false,
-            finished: false,
-            reverse_search: true,
-            command_label: "cmd".to_owned(),
-        };
-        assert_eq!(footer_shell_mode_label(&searching), "search");
-    }
-
-    #[test]
-    fn footer_worktree_query_label_contract() {
-        let idle = FooterWorktreeSnapshot {
-            search_active: false,
-            query: String::new(),
-            visible_count: 0,
-            total_count: 0,
-        };
-        assert_eq!(footer_worktree_query_label(&idle), None);
-
-        let active_empty = FooterWorktreeSnapshot {
-            search_active: true,
-            query: String::new(),
-            visible_count: 1,
-            total_count: 2,
-        };
-        assert_eq!(footer_worktree_query_label(&active_empty).as_deref(), Some("/"));
-
-        let with_query = FooterWorktreeSnapshot {
-            search_active: false,
-            query: "feat".to_owned(),
-            visible_count: 1,
-            total_count: 2,
-        };
-        assert_eq!(
-            footer_worktree_query_label(&with_query).as_deref(),
-            Some("/feat")
-        );
-    }
-}
 pub(super) fn footer_mode_label(
     input_mode: InputMode,
     commit_visual_active: bool,
@@ -1763,4 +1704,75 @@ fn footer_detail_chip(label: String, theme: &UiTheme) -> Span<'static> {
 
 fn footer_separator(theme: &UiTheme) -> Span<'static> {
     Span::styled(" | ", Style::default().fg(theme.dimmed))
+}
+
+#[cfg(test)]
+mod footer_contract_tests {
+    use super::*;
+
+    #[test]
+    fn footer_shell_mode_label_contract() {
+        let base = FooterShellSnapshot {
+            running: false,
+            finished: false,
+            reverse_search: false,
+            command_label: "cmd".to_owned(),
+        };
+        assert_eq!(footer_shell_mode_label(&base), "input");
+
+        let running = FooterShellSnapshot {
+            running: true,
+            ..base
+        };
+        assert_eq!(footer_shell_mode_label(&running), "running");
+
+        let finished = FooterShellSnapshot {
+            running: false,
+            finished: true,
+            reverse_search: true,
+            command_label: "cmd".to_owned(),
+        };
+        assert_eq!(footer_shell_mode_label(&finished), "done");
+
+        let searching = FooterShellSnapshot {
+            running: false,
+            finished: false,
+            reverse_search: true,
+            command_label: "cmd".to_owned(),
+        };
+        assert_eq!(footer_shell_mode_label(&searching), "search");
+    }
+
+    #[test]
+    fn footer_worktree_query_label_contract() {
+        let idle = FooterWorktreeSnapshot {
+            search_active: false,
+            query: String::new(),
+            visible_count: 0,
+            total_count: 0,
+        };
+        assert_eq!(footer_worktree_query_label(&idle), None);
+
+        let active_empty = FooterWorktreeSnapshot {
+            search_active: true,
+            query: String::new(),
+            visible_count: 1,
+            total_count: 2,
+        };
+        assert_eq!(
+            footer_worktree_query_label(&active_empty).as_deref(),
+            Some("/")
+        );
+
+        let with_query = FooterWorktreeSnapshot {
+            search_active: false,
+            query: "feat".to_owned(),
+            visible_count: 1,
+            total_count: 2,
+        };
+        assert_eq!(
+            footer_worktree_query_label(&with_query).as_deref(),
+            Some("/feat")
+        );
+    }
 }

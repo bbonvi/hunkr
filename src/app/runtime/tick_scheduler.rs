@@ -8,6 +8,7 @@ pub(in crate::app) struct PollTimeoutInputs {
     pub now: Instant,
     pub last_refresh_elapsed: Duration,
     pub last_relative_redraw_elapsed: Duration,
+    pub last_theme_reload_elapsed: Duration,
     pub shell_running: bool,
     pub shell_flash_timeout: Option<Duration>,
 }
@@ -21,6 +22,7 @@ pub(in crate::app) struct TickPlanInputs {
     pub selection_rebuild_due: Option<Instant>,
     pub last_refresh_elapsed: Duration,
     pub last_relative_redraw_elapsed: Duration,
+    pub last_theme_reload_elapsed: Duration,
 }
 
 /// Tick tasks due for current runtime state.
@@ -29,6 +31,7 @@ pub(in crate::app) enum TickTask {
     PollShellStream,
     PollShellFlash,
     RequestTerminalClear,
+    ReloadTheme,
     FlushSelectionRebuild,
     ReloadCommits,
     RedrawRelativeTime,
@@ -46,6 +49,7 @@ pub(in crate::app) fn compute_poll_timeout(inputs: PollTimeoutInputs) -> Duratio
     let timeout = next_poll_timeout(
         inputs.last_refresh_elapsed,
         inputs.last_relative_redraw_elapsed,
+        inputs.last_theme_reload_elapsed,
         selection_rebuild_in,
     );
     let timeout = if inputs.shell_running {
@@ -76,6 +80,9 @@ pub(in crate::app) fn plan_tick(inputs: TickPlanInputs) -> Vec<TickTask> {
     {
         tasks.push(TickTask::FlushSelectionRebuild);
     }
+    if inputs.last_theme_reload_elapsed >= THEME_RELOAD_POLL_EVERY {
+        tasks.push(TickTask::ReloadTheme);
+    }
 
     if inputs.last_refresh_elapsed >= AUTO_REFRESH_EVERY {
         tasks.push(TickTask::ReloadCommits);
@@ -97,6 +104,7 @@ mod tests {
             now: Instant::now(),
             last_refresh_elapsed: Duration::from_secs(10),
             last_relative_redraw_elapsed: Duration::from_secs(10),
+            last_theme_reload_elapsed: Duration::from_secs(10),
             shell_running: true,
             shell_flash_timeout: Some(Duration::from_millis(1)),
         });
@@ -111,6 +119,7 @@ mod tests {
             now: Instant::now(),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
+            last_theme_reload_elapsed: Duration::from_secs(0),
             shell_running: true,
             shell_flash_timeout: None,
         });
@@ -125,6 +134,7 @@ mod tests {
             now: Instant::now(),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
+            last_theme_reload_elapsed: Duration::from_secs(0),
             shell_running: true,
             shell_flash_timeout: Some(Duration::from_millis(5)),
         });
@@ -140,6 +150,7 @@ mod tests {
             selection_rebuild_due: None,
             last_refresh_elapsed: AUTO_REFRESH_EVERY,
             last_relative_redraw_elapsed: RELATIVE_TIME_REDRAW_EVERY,
+            last_theme_reload_elapsed: Duration::from_secs(0),
         });
         assert!(tasks.contains(&TickTask::ReloadCommits));
         assert!(!tasks.contains(&TickTask::RedrawRelativeTime));
@@ -154,6 +165,7 @@ mod tests {
             selection_rebuild_due: Some(Instant::now()),
             last_refresh_elapsed: AUTO_REFRESH_EVERY,
             last_relative_redraw_elapsed: RELATIVE_TIME_REDRAW_EVERY,
+            last_theme_reload_elapsed: THEME_RELOAD_POLL_EVERY,
         });
         assert!(tasks.is_empty());
     }
@@ -168,6 +180,7 @@ mod tests {
             selection_rebuild_due: Some(now),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
+            last_theme_reload_elapsed: Duration::from_secs(0),
         });
         assert!(tasks.contains(&TickTask::FlushSelectionRebuild));
     }
@@ -181,9 +194,24 @@ mod tests {
             now,
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
+            last_theme_reload_elapsed: Duration::from_secs(0),
             shell_running: false,
             shell_flash_timeout: None,
         });
         assert!(timeout <= Duration::from_millis(2));
+    }
+
+    #[test]
+    fn plan_tick_includes_theme_reload_when_due() {
+        let tasks = plan_tick(TickPlanInputs {
+            onboarding_active: false,
+            now: Instant::now(),
+            terminal_clear_elapsed: Duration::from_secs(0),
+            selection_rebuild_due: None,
+            last_refresh_elapsed: Duration::from_secs(0),
+            last_relative_redraw_elapsed: Duration::from_secs(0),
+            last_theme_reload_elapsed: THEME_RELOAD_POLL_EVERY,
+        });
+        assert!(tasks.contains(&TickTask::ReloadTheme));
     }
 }

@@ -1742,25 +1742,41 @@ fn selected_rows_hidden_count_tracks_active_filter() {
 
 #[test]
 fn next_poll_timeout_uses_nearest_deadline() {
-    let timeout = next_poll_timeout(Duration::from_secs(1), Duration::from_secs(10), None);
-    assert_eq!(timeout, Duration::from_secs(3));
+    let timeout = next_poll_timeout(
+        Duration::from_secs(1),
+        Duration::from_millis(100),
+        Duration::from_millis(100),
+        None,
+    );
+    assert_eq!(timeout, Duration::from_millis(150));
 }
 
 #[test]
 fn next_poll_timeout_zero_when_any_deadline_elapsed() {
-    let timeout = next_poll_timeout(Duration::from_secs(5), Duration::from_secs(1), None);
+    let timeout = next_poll_timeout(
+        Duration::from_secs(5),
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        None,
+    );
     assert_eq!(timeout, Duration::from_secs(0));
 }
 
 #[test]
-fn next_poll_timeout_after_refresh_waits_for_auto_refresh_window() {
-    let timeout = next_poll_timeout(Duration::from_secs(0), Duration::from_secs(0), None);
-    assert_eq!(timeout, AUTO_REFRESH_EVERY);
+fn next_poll_timeout_after_refresh_waits_for_theme_poll_window() {
+    let timeout = next_poll_timeout(
+        Duration::from_secs(0),
+        Duration::from_secs(0),
+        Duration::from_secs(0),
+        None,
+    );
+    assert_eq!(timeout, THEME_RELOAD_POLL_EVERY);
 }
 
 #[test]
 fn next_poll_timeout_honors_selection_rebuild_deadline() {
     let timeout = next_poll_timeout(
+        Duration::from_secs(0),
         Duration::from_secs(0),
         Duration::from_secs(0),
         Some(Duration::from_millis(80)),

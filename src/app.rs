@@ -45,6 +45,7 @@ mod services;
 mod shell_command;
 mod state;
 mod text_edit;
+mod theme_palette;
 mod tree_highlight;
 mod ui;
 mod worktree_switcher;
@@ -60,6 +61,7 @@ use self::nerd_fonts::{
 use self::ports::{AppBootstrapPorts, AppClock, AppRuntimePorts, SystemBootstrapPorts};
 use self::selection_helpers::*;
 use self::text_edit::*;
+use self::theme_palette::ThemeRuntimeState;
 use self::tree_highlight::*;
 use self::ui::diff_pane::{
     DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, PendingDiffViewAnchor,
@@ -85,6 +87,7 @@ use crate::{
 const HISTORY_LIMIT: usize = 400;
 const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
 const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
+const THEME_RELOAD_POLL_EVERY: Duration = Duration::from_millis(250);
 const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
@@ -205,9 +208,11 @@ struct UiTheme {
     dimmed: Color,
     cursor_bg: Color,
     focused_cursor_bg: Color,
+    cursor_visual_overlap_weight: u8,
     block_cursor_fg: Color,
     block_cursor_bg: Color,
     visual_bg: Color,
+    commit_selected_bg: Color,
     search_match_fg: Color,
     search_match_bg: Color,
     search_current_fg: Color,
@@ -243,10 +248,12 @@ impl UiTheme {
                 muted: Color::Rgb(170, 170, 170),
                 dimmed: Color::Rgb(115, 115, 115),
                 cursor_bg: Color::Rgb(52, 52, 62),
-                focused_cursor_bg: Color::Rgb(57, 67, 93),
+                focused_cursor_bg: Color::Rgb(50, 56, 70),
+                cursor_visual_overlap_weight: 150,
                 block_cursor_fg: Color::Rgb(245, 245, 245),
                 block_cursor_bg: Color::Rgb(95, 128, 255),
-                visual_bg: Color::Rgb(57, 67, 93),
+                visual_bg: Color::Rgb(62, 78, 108),
+                commit_selected_bg: Color::Rgb(62, 78, 108),
                 search_match_fg: Color::Rgb(30, 30, 30),
                 search_match_bg: Color::Rgb(219, 196, 96),
                 search_current_fg: Color::Rgb(12, 12, 12),
@@ -277,11 +284,13 @@ impl UiTheme {
                 text: Color::Rgb(40, 40, 40),
                 muted: Color::Rgb(90, 90, 90),
                 dimmed: Color::Rgb(140, 140, 140),
-                cursor_bg: Color::Rgb(234, 234, 234),
-                focused_cursor_bg: Color::Rgb(230, 230, 230),
+                cursor_bg: Color::Rgb(236, 236, 236),
+                focused_cursor_bg: Color::Rgb(226, 226, 226),
+                cursor_visual_overlap_weight: 155,
                 block_cursor_fg: Color::Rgb(255, 255, 255),
                 block_cursor_bg: Color::Rgb(41, 94, 214),
-                visual_bg: Color::Rgb(215, 225, 241),
+                visual_bg: Color::Rgb(207, 218, 230),
+                commit_selected_bg: Color::Rgb(207, 218, 230),
                 search_match_fg: Color::Rgb(35, 35, 35),
                 search_match_bg: Color::Rgb(247, 234, 172),
                 search_current_fg: Color::Rgb(28, 22, 0),
@@ -555,6 +564,7 @@ struct RuntimeState {
     onboarding_step: Option<OnboardingStep>,
     last_refresh: Instant,
     last_relative_time_redraw: Instant,
+    last_theme_reload_check: Instant,
     last_terminal_clear: Instant,
     terminal_clear_requested: bool,
     needs_redraw: bool,
@@ -609,6 +619,7 @@ pub struct App {
     deps: AppDependencies,
     domain: AppDomainState,
     ui: AppUiState,
+    theme: ThemeRuntimeState,
     runtime: RuntimeState,
 }
 
@@ -619,6 +630,10 @@ struct RenderedDiffKey {
 }
 
 impl App {
+    fn active_theme(&self) -> &UiTheme {
+        self.theme.for_mode(self.ui.preferences.theme_mode)
+    }
+
     pub(super) fn now_instant(&self) -> Instant {
         self.deps.clock.now_instant()
     }

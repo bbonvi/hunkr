@@ -19,7 +19,8 @@ struct EditingShellModeController;
 
 static RUNNING_CONTROLLER: RunningShellModeController = RunningShellModeController;
 static FINISHED_CONTROLLER: FinishedShellModeController = FinishedShellModeController;
-static REVERSE_SEARCH_CONTROLLER: ReverseSearchShellModeController = ReverseSearchShellModeController;
+static REVERSE_SEARCH_CONTROLLER: ReverseSearchShellModeController =
+    ReverseSearchShellModeController;
 static EDITING_CONTROLLER: EditingShellModeController = EditingShellModeController;
 
 impl ShellModeController for RunningShellModeController {

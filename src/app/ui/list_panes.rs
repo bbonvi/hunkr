@@ -153,7 +153,9 @@ impl<'a> ListPaneRenderer<'a> {
                     is_cursor,
                     self.theme.cursor_bg,
                     cursor_bg,
-                    CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
+                    CursorSelectionPolicy::BlendCursorOverSelection {
+                        weight: self.theme.cursor_visual_overlap_weight,
+                    },
                 );
                 ListItem::new(line).style(Style::default())
             })
@@ -267,6 +269,7 @@ impl<'a> ListPaneRenderer<'a> {
         let presenter = ListLinePresenter::new(width, self.now_ts, self.theme, self.nerd_fonts)
             .with_age_column_width(commit_age_column_width);
         let push_chain_kinds = commit_push_chain_kinds(commits);
+        let selected_commit_bg = commit_selection_background(self.theme);
         let items: Vec<ListItem<'static>> = commits
             .iter()
             .enumerate()
@@ -284,9 +287,11 @@ impl<'a> ListPaneRenderer<'a> {
                     line_width,
                     row.selected,
                     is_cursor,
-                    self.theme.cursor_bg,
+                    selected_commit_bg,
                     cursor_bg,
-                    CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
+                    CursorSelectionPolicy::BlendCursorOverSelection {
+                        weight: self.theme.cursor_visual_overlap_weight,
+                    },
                 );
                 ListItem::new(line).style(Style::default())
             })
@@ -488,6 +493,13 @@ impl<'a> ListLinePresenter<'a> {
         push_chain_kind: Option<CommitPushChainMarkerKind>,
         has_comments: bool,
     ) -> Line<'static> {
+        let commit_text_style = if row.selected {
+            Style::default()
+                .fg(self.theme.text)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.theme.text)
+        };
         let summary = sanitize_terminal_text(&row.info.summary);
         if row.is_uncommitted {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
@@ -506,7 +518,7 @@ impl<'a> ListLinePresenter<'a> {
             };
 
             return Line::from(vec![
-                Span::styled(left_render, Style::default().fg(self.theme.text)),
+                Span::styled(left_render, commit_text_style),
                 Span::raw(" "),
                 Span::styled(
                     badge,
@@ -602,10 +614,7 @@ impl<'a> ListLinePresenter<'a> {
         } else {
             " ".repeat(self.width - static_used)
         };
-        let mut spans = vec![Span::styled(
-            left_render,
-            Style::default().fg(self.theme.text),
-        )];
+        let mut spans = vec![Span::styled(left_render, commit_text_style)];
         if !spaces.is_empty() {
             spans.push(Span::raw(spaces));
         }
@@ -760,6 +769,10 @@ fn commit_push_chain_style(kind: CommitPushChainMarkerKind, theme: &UiTheme) -> 
     }
 }
 
+fn commit_selection_background(theme: &UiTheme) -> Color {
+    theme.commit_selected_bg
+}
+
 fn subdued_pushed_chain_color(theme: &UiTheme) -> Color {
     blend_colors(theme.unpushed, theme.muted, 110)
 }
@@ -801,5 +814,32 @@ mod tests {
     fn format_commit_count_chip_includes_selected_only_when_non_zero() {
         assert_eq!(super::format_commit_count_chip(165, 165, 0), "165/165");
         assert_eq!(super::format_commit_count_chip(165, 165, 6), "165/165(6)");
+    }
+
+    #[test]
+    fn selected_commit_row_text_is_bold() {
+        let theme = UiTheme::from_mode(ThemeMode::Light);
+        let presenter = super::ListLinePresenter::new(120, 1_710_000_000, &theme, false);
+        let row = CommitRow {
+            info: crate::model::CommitInfo {
+                id: "abc123".to_owned(),
+                short_id: "abc123".to_owned(),
+                summary: "Make selected commits bold".to_owned(),
+                author: "dev".to_owned(),
+                timestamp: 1_709_999_000,
+                unpushed: true,
+                decorations: Vec::new(),
+            },
+            selected: true,
+            status: ReviewStatus::Unreviewed,
+            is_uncommitted: false,
+        };
+
+        let line = presenter.commit_row_line(&row);
+        assert!(
+            line.spans
+                .first()
+                .is_some_and(|span| span.style.add_modifier.contains(Modifier::BOLD))
+        );
     }
 }

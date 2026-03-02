@@ -1,8 +1,9 @@
 use super::flow::{self, AppAction};
 use super::input::global_router;
 use super::runtime::tick_scheduler::{self, PollTimeoutInputs, TickPlanInputs, TickTask};
+use super::theme_palette::{THEME_FILE_NAME, ThemeReloadOutcome};
 use crate::app::*;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, config_path};
 
 /// Bootstrap-only dependencies loaded from disk/environment before UI startup.
 struct BootstrapDeps {
@@ -39,6 +40,7 @@ impl App {
             review_state,
         };
         let mut app = Self::from_bootstrap_deps(deps, &config, first_open);
+        app.reload_theme_from_disk(true);
 
         if app.onboarding_active() {
             app.runtime.status.clear();
@@ -53,6 +55,7 @@ impl App {
 
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
         let now = deps.clock.now_instant();
+        let theme_path = config_path().with_file_name(THEME_FILE_NAME);
         let shell_history = deps
             .store
             .load_shell_history()
@@ -170,6 +173,7 @@ impl App {
                     file_cursor: 0,
                 },
             },
+            theme: ThemeRuntimeState::new(theme_path),
             runtime: RuntimeState {
                 status: String::new(),
                 selection_rebuild_due: None,
@@ -177,6 +181,7 @@ impl App {
                 onboarding_step: first_open.then_some(OnboardingStep::ConsentProjectDataDir),
                 last_refresh: now,
                 last_relative_time_redraw: now,
+                last_theme_reload_check: now,
                 last_terminal_clear: now,
                 terminal_clear_requested: false,
                 needs_redraw: true,
@@ -344,13 +349,14 @@ impl App {
             now: self.now_instant(),
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
+            last_theme_reload_elapsed: self.runtime.last_theme_reload_check.elapsed(),
             shell_running: self.ui.shell_command.running.is_some(),
             shell_flash_timeout: self.shell_output_flash_timeout(),
         })
     }
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
-        let theme = UiTheme::from_mode(self.ui.preferences.theme_mode);
+        let theme = self.active_theme().clone();
         if self.onboarding_active() {
             self.render_onboarding(frame, &theme);
             return;
@@ -439,12 +445,17 @@ impl App {
             selection_rebuild_due: self.runtime.selection_rebuild_due,
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
+            last_theme_reload_elapsed: self.runtime.last_theme_reload_check.elapsed(),
         });
         for task in tasks {
             match task {
                 TickTask::PollShellStream => self.poll_shell_command_stream(),
                 TickTask::PollShellFlash => self.poll_shell_output_flash(),
                 TickTask::RequestTerminalClear => self.request_terminal_clear(),
+                TickTask::ReloadTheme => {
+                    self.reload_theme_from_disk(false);
+                    self.runtime.last_theme_reload_check = self.now_instant();
+                }
                 TickTask::FlushSelectionRebuild => {
                     self.flush_pending_selection_rebuild();
                     self.runtime.needs_redraw = true;
@@ -453,6 +464,7 @@ impl App {
                     if let Err(err) = self.reload_commits(true) {
                         self.runtime.status = format!("refresh failed: {err:#}");
                     }
+                    self.reload_theme_from_disk(false);
                     let refreshed_at = self.now_instant();
                     self.runtime.last_refresh = refreshed_at;
                     self.runtime.last_relative_time_redraw = refreshed_at;
@@ -514,9 +526,32 @@ impl App {
         if let Err(err) = self.reload_commits(true) {
             self.runtime.status = format!("reload failed: {err:#}");
         }
+        self.reload_theme_from_disk(true);
         let now = self.now_instant();
         self.runtime.last_refresh = now;
         self.runtime.last_relative_time_redraw = now;
+        self.runtime.last_theme_reload_check = now;
+    }
+
+    pub(super) fn reload_theme_from_disk(&mut self, force: bool) {
+        match self.theme.reload_if_changed(force) {
+            Ok(ThemeReloadOutcome::Unchanged) => {}
+            Ok(ThemeReloadOutcome::LoadedFromFile) => {
+                self.invalidate_diff_cache();
+                self.runtime.needs_redraw = true;
+                self.runtime.status =
+                    format!("Theme reloaded from {}", self.theme.path().display());
+            }
+            Ok(ThemeReloadOutcome::ResetToDefaults) => {
+                self.invalidate_diff_cache();
+                self.runtime.needs_redraw = true;
+                self.runtime.status =
+                    "Theme file removed; reverted to built-in defaults".to_owned();
+            }
+            Err(err) => {
+                self.runtime.status = format!("theme reload failed: {err:#}");
+            }
+        }
     }
 
     pub(super) fn toggle_theme(&mut self) {

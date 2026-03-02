@@ -22,7 +22,9 @@ pub(in crate::app) struct FilePaneVmInput<'a> {
 }
 
 /// Builds file pane model from a pure input contract.
-pub(in crate::app) fn build_file_pane_view_model(input: FilePaneVmInput<'_>) -> FilePaneViewModel<'_> {
+pub(in crate::app) fn build_file_pane_view_model(
+    input: FilePaneVmInput<'_>,
+) -> FilePaneViewModel<'_> {
     let query = input.file_query.trim();
     let search_display = if !query.is_empty() {
         format!("/{query}")

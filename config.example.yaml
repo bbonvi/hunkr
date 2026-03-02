@@ -1,4 +1,8 @@
 # hunkr runtime config
+# theme.yaml: optional live-reloaded color palette at:
+#   $XDG_CONFIG_HOME/hunkr/theme.yaml
+#   ~/.config/hunkr/theme.yaml
+# Start from ./theme.example.yaml.
 # startup_theme: initial UI theme on launch. Allowed: dark, light.
 startup_theme: dark
 # diff_wheel_scroll_lines: number of diff lines moved per mouse wheel tick (must be >= 1).

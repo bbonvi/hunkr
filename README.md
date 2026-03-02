@@ -63,6 +63,13 @@ Optional config file:
 
 See [`config.example.yaml`](./config.example.yaml) for supported options.
 
+Optional theme palette file (live-reloaded while app runs):
+
+- `$XDG_CONFIG_HOME/hunkr/theme.yaml`
+- `~/.config/hunkr/theme.yaml`
+
+Start from [`theme.example.yaml`](./theme.example.yaml).
+
 ## Quality Checks
 
 ```bash

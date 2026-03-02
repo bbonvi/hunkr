@@ -196,7 +196,7 @@ impl App {
             return;
         }
 
-        let theme = UiTheme::from_mode(self.ui.preferences.theme_mode);
+        let theme = self.active_theme().clone();
         let mut rendered = Vec::new();
         let mut ranges = Vec::new();
         let mut range_by_path = HashMap::new();
@@ -302,7 +302,7 @@ impl App {
 
     pub(super) fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
-        let theme = UiTheme::from_mode(self.ui.preferences.theme_mode);
+        let theme = self.active_theme().clone();
         let now_ts = self.now_timestamp();
         let file_comments: Vec<&ReviewComment> = self
             .deps

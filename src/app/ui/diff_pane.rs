@@ -13,8 +13,6 @@ use super::super::{
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
 
-const VISUAL_OVER_CURSOR_BLEND_WEIGHT: u8 = 230;
-
 #[derive(Debug, Clone)]
 pub(in crate::app) struct PendingDiffViewAnchor {
     pub cursor_line: DiffLineLocator,
@@ -586,7 +584,7 @@ fn apply_row_highlight_without_line_numbers(
         false,
         is_cursor,
         theme.visual_bg,
-        theme.cursor_bg,
+        theme.focused_cursor_bg,
         CursorSelectionPolicy::CursorWins,
     );
     if !in_visual {
@@ -609,11 +607,7 @@ fn apply_row_highlight_without_line_numbers(
     let payload_start = prefix_span.content.len();
     let payload_end = payload_start.saturating_add(payload_len);
     let payload_bg = if is_cursor {
-        blend_colors(
-            theme.cursor_bg,
-            theme.visual_bg,
-            VISUAL_OVER_CURSOR_BLEND_WEIGHT,
-        )
+        cursor_visual_overlap_bg(theme)
     } else {
         theme.visual_bg
     };
@@ -639,15 +633,27 @@ fn apply_row_highlight_with_visual_overlay(
         false,
         is_cursor,
         theme.visual_bg,
-        theme.cursor_bg,
+        theme.focused_cursor_bg,
         CursorSelectionPolicy::CursorWins,
     );
     if !in_visual {
         return cursor_line;
     }
 
-    // Keep cursor-line tint while making visual selection visibly sit on top.
+    if is_cursor {
+        return tint_line_background(&cursor_line, cursor_visual_overlap_bg(theme), false);
+    }
+
+    // Keep syntax/diff coloration while applying visual selection tint.
     tint_line_background(&cursor_line, theme.visual_bg, true)
+}
+
+fn cursor_visual_overlap_bg(theme: &UiTheme) -> ratatui::style::Color {
+    blend_colors(
+        theme.focused_cursor_bg,
+        theme.visual_bg,
+        theme.cursor_visual_overlap_weight,
+    )
 }
 
 fn apply_search_highlights(
@@ -823,10 +829,7 @@ fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        SelectionRenderContext, VISUAL_OVER_CURSOR_BLEND_WEIGHT, display_line_with_selection,
-        patch_line_byte_range,
-    };
+    use super::{SelectionRenderContext, display_line_with_selection, patch_line_byte_range};
     use crate::app::{RenderedDiffLine, ThemeMode, UiTheme, blend_colors};
     use crate::model::CommentAnchor;
     use ratatui::{
@@ -902,9 +905,9 @@ mod tests {
 
         let highlighted = display_line_with_selection(&rendered, None, 0, 120, selection);
         let layered_bg = blend_colors(
-            theme.cursor_bg,
+            theme.focused_cursor_bg,
             theme.visual_bg,
-            VISUAL_OVER_CURSOR_BLEND_WEIGHT,
+            theme.cursor_visual_overlap_weight,
         );
         assert!(
             highlighted
@@ -918,8 +921,8 @@ mod tests {
             highlighted
                 .spans
                 .iter()
-                .any(|span| span.style.bg == Some(theme.cursor_bg)),
-            "cursor tint should remain visible outside code payload",
+                .any(|span| span.style.bg == Some(theme.focused_cursor_bg)),
+            "cursor row should include focused cursor tint",
         );
     }
 
@@ -959,7 +962,7 @@ mod tests {
                 .spans
                 .iter()
                 .skip(1)
-                .any(|span| span.style.bg == Some(theme.cursor_bg)),
+                .any(|span| span.style.bg == Some(theme.focused_cursor_bg)),
             "cursor row should keep cursor tint when visual mode is disabled",
         );
         assert!(
