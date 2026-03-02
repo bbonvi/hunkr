@@ -427,10 +427,16 @@ struct DiffUiState {
     block_cursor_col: usize,
     block_cursor_goal: usize,
     mouse_anchor: Option<usize>,
-    visible_row_to_line: Vec<usize>,
+    visible_rows: Vec<DiffVisibleRow>,
     last_list_wheel_event: Option<(FocusPane, isize, Instant)>,
     pane_rects: PaneRects,
     pending_op: Option<DiffPendingOp>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DiffVisibleRow {
+    line_index: usize,
+    wrapped_row_offset: usize,
 }
 
 /// Cached diff rendering state and per-file viewport persistence.

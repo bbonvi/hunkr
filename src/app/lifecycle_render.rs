@@ -110,7 +110,7 @@ impl App {
                     block_cursor_col: 0,
                     block_cursor_goal: 0,
                     mouse_anchor: None,
-                    visible_row_to_line: Vec::new(),
+                    visible_rows: Vec::new(),
                     last_list_wheel_event: None,
                     pane_rects: PaneRects::default(),
                     pending_op: None,

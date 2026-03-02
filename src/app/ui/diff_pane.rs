@@ -4,8 +4,9 @@ use ratatui::{
     Frame,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph},
 };
+use unicode_width::UnicodeWidthChar;
 
 use super::super::{
     CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme, blend_colors,
@@ -165,18 +166,25 @@ impl<'a> DiffPaneRenderer<'a> {
         let body_height = inner.height.saturating_sub(sticky_rows as u16);
         if body_height > 0 {
             let mut body_lines = Vec::with_capacity(body_height as usize);
-            for row in 0..body_height as usize {
-                let line_idx = body.diff_position.scroll.saturating_add(row);
+            let mut line_idx = body.diff_position.scroll;
+            while body_lines.len() < body_height as usize {
                 let Some(line) = body.rendered_diff.get(line_idx) else {
                     break;
                 };
-                body_lines.push(display_line_with_selection(
+                let display_line = display_line_with_selection(
                     line,
                     body.line_overrides.get(&line_idx),
                     line_idx,
                     inner.width,
                     selection,
-                ));
+                );
+                for wrapped in hard_wrap_line(&display_line, inner.width as usize) {
+                    body_lines.push(wrapped);
+                    if body_lines.len() >= body_height as usize {
+                        break;
+                    }
+                }
+                line_idx += 1;
             }
 
             if body_lines.is_empty() {
@@ -190,7 +198,7 @@ impl<'a> DiffPaneRenderer<'a> {
             }
 
             frame.render_widget(
-                Paragraph::new(body_lines).wrap(Wrap { trim: false }),
+                Paragraph::new(body_lines),
                 ratatui::layout::Rect {
                     x: inner.x,
                     y: inner.y + sticky_rows as u16,
@@ -817,6 +825,48 @@ fn patch_line_byte_range(
         }
     }
     Line::from(out)
+}
+
+fn hard_wrap_line(line: &Line<'static>, max_width: usize) -> Vec<Line<'static>> {
+    if max_width == 0 {
+        return vec![line.clone()];
+    }
+
+    let mut rows = Vec::new();
+    let mut current = Vec::new();
+    let mut current_width = 0usize;
+
+    for span in &line.spans {
+        for ch in span.content.chars() {
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if current_width > 0 && current_width + ch_width > max_width {
+                rows.push(Line::from(std::mem::take(&mut current)));
+                current_width = 0;
+            }
+
+            push_char_styled(&mut current, ch, span.style);
+            current_width = current_width.saturating_add(ch_width);
+        }
+    }
+
+    if !current.is_empty() {
+        rows.push(Line::from(current));
+    }
+    if rows.is_empty() {
+        rows.push(Line::from(""));
+    }
+    rows
+}
+
+fn push_char_styled(spans: &mut Vec<Span<'static>>, ch: char, style: Style) {
+    if let Some(last) = spans.last_mut()
+        && last.style == style
+    {
+        last.content.to_mut().push(ch);
+        return;
+    }
+
+    spans.push(Span::styled(ch.to_string(), style));
 }
 
 fn floor_char_boundary(text: &str, mut idx: usize) -> usize {

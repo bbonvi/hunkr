@@ -137,17 +137,19 @@ impl App {
         let body_rows = viewport_rows.saturating_sub(sticky_rows);
         let inner_width = rect.width.saturating_sub(2).max(1) as usize;
         let mut line_overrides = HashMap::new();
-        let mut visible_row_to_line = Vec::with_capacity(viewport_rows);
+        let mut visible_rows = Vec::with_capacity(viewport_rows);
         for idx in sticky_banner_indexes.iter().take(sticky_rows) {
-            visible_row_to_line.push(*idx);
+            visible_rows.push(DiffVisibleRow {
+                line_index: *idx,
+                wrapped_row_offset: 0,
+            });
             if let Some(line) = self.highlight_visible_diff_line(*idx, theme) {
                 line_overrides.insert(*idx, line);
             }
         }
         let target_rows = sticky_rows.saturating_add(body_rows);
         let mut line_idx = self.domain.diff_position.scroll;
-        while visible_row_to_line.len() < target_rows && line_idx < self.domain.rendered_diff.len()
-        {
+        while visible_rows.len() < target_rows && line_idx < self.domain.rendered_diff.len() {
             if let Some(line) = self.highlight_visible_diff_line(line_idx, theme) {
                 line_overrides.insert(line_idx, line);
             }
@@ -156,15 +158,18 @@ impl App {
                 .get(&line_idx)
                 .unwrap_or(&self.domain.rendered_diff[line_idx].line);
             let wrapped_rows = wrapped_line_rows(display_line, inner_width).max(1);
-            for _ in 0..wrapped_rows {
-                if visible_row_to_line.len() >= target_rows {
+            for wrapped_row_offset in 0..wrapped_rows {
+                if visible_rows.len() >= target_rows {
                     break;
                 }
-                visible_row_to_line.push(line_idx);
+                visible_rows.push(DiffVisibleRow {
+                    line_index: line_idx,
+                    wrapped_row_offset,
+                });
             }
             line_idx += 1;
         }
-        self.ui.diff_ui.visible_row_to_line = visible_row_to_line;
+        self.ui.diff_ui.visible_rows = visible_rows;
         let empty_state_message = diff_empty_state_message(
             !self.domain.rendered_diff.is_empty(),
             self.domain.aggregate.files.len(),

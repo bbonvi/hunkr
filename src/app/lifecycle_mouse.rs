@@ -23,14 +23,14 @@ impl App {
         let in_files = contains(self.ui.diff_ui.pane_rects.files, x, y);
         let in_commits = contains(self.ui.diff_ui.pane_rects.commits, x, y);
         let in_diff = contains(self.ui.diff_ui.pane_rects.diff, x, y);
-        let resolve_diff_row = |app: &Self, mouse_y: u16| -> Option<usize> {
+        let resolve_diff_row = |app: &Self, mouse_y: u16| -> Option<DiffVisibleRow> {
             let rect = app.ui.diff_ui.pane_rects.diff;
             if rect.height < 3 || mouse_y <= rect.y || mouse_y >= rect.y + rect.height - 1 {
                 return None;
             }
             let row = mouse_y.saturating_sub(rect.y + 1) as usize;
-            if let Some(idx) = app.ui.diff_ui.visible_row_to_line.get(row).copied() {
-                return Some(idx);
+            if let Some(entry) = app.ui.diff_ui.visible_rows.get(row).copied() {
+                return Some(entry);
             }
 
             let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
@@ -42,6 +42,10 @@ impl App {
                 app.domain.diff_position.scroll,
                 &sticky_banner_indexes,
             )
+            .map(|line_index| DiffVisibleRow {
+                line_index,
+                wrapped_row_offset: 0,
+            })
         };
         let resolve_commit_visible_idx = |app: &Self, mouse_y: u16| -> Option<usize> {
             list_index_at(
@@ -115,7 +119,11 @@ impl App {
                     self.set_focus(FocusPane::Diff);
                     self.ui.diff_ui.visual_selection = None;
                     if let Some(row) = resolve_diff_row(self, y) {
-                        self.sync_diff_cursor_to_mouse_position(row, x);
+                        self.sync_diff_cursor_to_mouse_position(
+                            row.line_index,
+                            row.wrapped_row_offset,
+                            x,
+                        );
                         self.ui.diff_ui.mouse_anchor = Some(self.domain.diff_position.cursor);
                     } else {
                         self.ui.diff_ui.mouse_anchor = None;
@@ -173,7 +181,11 @@ impl App {
             }
             MouseEventKind::Drag(MouseButton::Left) if in_diff => {
                 if let Some(row) = resolve_diff_row(self, y) {
-                    self.sync_diff_cursor_to_mouse_position(row, x);
+                    self.sync_diff_cursor_to_mouse_position(
+                        row.line_index,
+                        row.wrapped_row_offset,
+                        x,
+                    );
                     self.ui.diff_ui.visual_selection = diff_visual_from_drag_anchor(
                         self.ui.diff_ui.mouse_anchor,
                         self.domain.diff_position.cursor,
@@ -189,7 +201,11 @@ impl App {
 
                 if in_diff {
                     if let Some(row) = resolve_diff_row(self, y) {
-                        self.sync_diff_cursor_to_mouse_position(row, x);
+                        self.sync_diff_cursor_to_mouse_position(
+                            row.line_index,
+                            row.wrapped_row_offset,
+                            x,
+                        );
                     }
                     self.ui.diff_ui.visual_selection = diff_visual_from_drag_anchor(
                         self.ui.diff_ui.mouse_anchor,
@@ -206,11 +222,17 @@ impl App {
         }
     }
 
-    fn sync_diff_cursor_to_mouse_position(&mut self, row: usize, mouse_x: u16) {
-        self.set_diff_cursor(row);
+    fn sync_diff_cursor_to_mouse_position(
+        &mut self,
+        line_index: usize,
+        wrapped_row_offset: usize,
+        mouse_x: u16,
+    ) {
+        self.set_diff_cursor(line_index);
         let col = diff_column_at_for_rendered_line(
             mouse_x,
             self.ui.diff_ui.pane_rects.diff,
+            wrapped_row_offset,
             self.domain
                 .rendered_diff
                 .get(self.domain.diff_position.cursor),

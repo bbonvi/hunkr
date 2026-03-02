@@ -124,9 +124,12 @@ pub(super) fn wrapped_line_rows(line: &Line<'_>, max_width: usize) -> usize {
 pub(super) fn diff_column_at_for_rendered_line(
     mouse_x: u16,
     rect: ratatui::layout::Rect,
+    wrapped_row_offset: usize,
     rendered_line: Option<&RenderedDiffLine>,
 ) -> usize {
-    let display_col = diff_column_at(mouse_x, rect);
+    let content_width = rect.width.saturating_sub(2).max(1) as usize;
+    let display_col = diff_column_at(mouse_x, rect)
+        .saturating_add(wrapped_row_offset.saturating_mul(content_width));
     let Some(prefix_cells) = code_line_number_prefix_cells(rendered_line) else {
         return display_col;
     };

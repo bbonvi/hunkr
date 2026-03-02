@@ -786,12 +786,12 @@ fn diff_column_for_rendered_code_line_skips_line_number_gutter() {
     let content_left = rect.x + 1;
 
     assert_eq!(
-        diff_column_at_for_rendered_line(content_left + 10, rect, Some(&line)),
+        diff_column_at_for_rendered_line(content_left + 10, rect, 0, Some(&line)),
         0,
         "line-number gutter and marker region should clamp to raw prefix",
     );
     assert_eq!(
-        diff_column_at_for_rendered_line(content_left + 13, rect, Some(&line)),
+        diff_column_at_for_rendered_line(content_left + 13, rect, 0, Some(&line)),
         1,
         "first payload cell should map to the first raw payload char",
     );
@@ -808,8 +808,37 @@ fn diff_column_for_rendered_non_code_line_uses_display_column() {
     };
 
     assert_eq!(
-        diff_column_at_for_rendered_line(23, rect, Some(&line)),
+        diff_column_at_for_rendered_line(23, rect, 0, Some(&line)),
         diff_column_at(23, rect)
+    );
+}
+
+#[test]
+fn diff_column_for_wrapped_row_applies_row_offset_before_raw_mapping() {
+    let rect = ratatui::layout::Rect::new(10, 5, 60, 6);
+    let line = RenderedDiffLine {
+        line: Line::from(vec![
+            Span::raw("  12 12345 "),
+            Span::raw("+"),
+            Span::raw(" "),
+            Span::raw("target"),
+        ]),
+        raw_text: "+target".to_owned(),
+        anchor: Some(CommentAnchor {
+            commit_id: "abc".to_owned(),
+            commit_summary: "summary".to_owned(),
+            file_path: "src/main.rs".to_owned(),
+            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            old_lineno: Some(12),
+            new_lineno: Some(12345),
+        }),
+        comment_id: None,
+    };
+
+    let wrapped_row_offset = 1;
+    assert_eq!(
+        diff_column_at_for_rendered_line(rect.x + 1, rect, wrapped_row_offset, Some(&line)),
+        46,
     );
 }
 
