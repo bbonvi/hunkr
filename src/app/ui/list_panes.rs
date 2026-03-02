@@ -142,7 +142,7 @@ impl<'a> ListPaneRenderer<'a> {
             .map(|(idx, row)| {
                 let is_cursor = cursor_idx == Some(idx);
                 let cursor_bg = if self.focused == FocusPane::Files {
-                    self.theme.visual_bg
+                    self.theme.focused_cursor_bg
                 } else {
                     self.theme.cursor_bg
                 };
@@ -275,7 +275,7 @@ impl<'a> ListPaneRenderer<'a> {
                 let push_chain_kind = push_chain_kinds.get(idx).copied().flatten();
                 let has_comments = commented_commit_ids.contains(&row.info.id);
                 let cursor_bg = if self.focused == FocusPane::Commits {
-                    self.theme.visual_bg
+                    self.theme.focused_cursor_bg
                 } else {
                     self.theme.cursor_bg
                 };
