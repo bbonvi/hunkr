@@ -6,19 +6,8 @@ pub(in crate::app) fn switch_repository_context(
     app: &mut App,
     target: &Path,
 ) -> anyhow::Result<()> {
-    let reopened = app
-        .deps
-        .runtime_ports
-        .open_git_at(target)
-        .with_context(|| format!("failed to reopen repository at {}", target.display()))?;
-    let branch = reopened.branch_name().to_owned();
-    app.deps.git = reopened;
-    app.deps.comments = app
-        .deps
-        .runtime_ports
-        .open_comment_store(app.deps.store.root_dir(), &branch)
-        .with_context(|| format!("failed to reload comments for branch {branch}"))?;
-    reload_commits(app, true).context("failed to refresh commit and diff state")?;
+    reconcile_repository_context(app, target, true)?;
+    reload_commits_inner(app, true).context("failed to refresh commit and diff state")?;
 
     let now = app.now_instant();
     app.runtime.last_refresh = now;
@@ -32,6 +21,41 @@ pub(in crate::app) fn reload_commits(
     app: &mut App,
     preserve_manual_selection: bool,
 ) -> anyhow::Result<()> {
+    let target = app.deps.git.root().to_path_buf();
+    reconcile_repository_context(app, &target, false)?;
+    reload_commits_inner(app, preserve_manual_selection)
+}
+
+/// Reopens the git context and refreshes branch-scoped comment storage when needed.
+fn reconcile_repository_context(
+    app: &mut App,
+    target: &Path,
+    force_comment_store_reload: bool,
+) -> anyhow::Result<()> {
+    let previous_root = app.deps.git.root().to_path_buf();
+    let previous_branch = app.deps.git.branch_name().to_owned();
+    let reopened = app
+        .deps
+        .runtime_ports
+        .open_git_at(target)
+        .with_context(|| format!("failed to reopen repository at {}", target.display()))?;
+    let branch = reopened.branch_name().to_owned();
+    let root_changed = previous_root != reopened.root();
+    let branch_changed = previous_branch != branch;
+    app.deps.git = reopened;
+
+    if force_comment_store_reload || root_changed || branch_changed {
+        app.deps.comments = app
+            .deps
+            .runtime_ports
+            .open_comment_store(app.deps.store.root_dir(), &branch)
+            .with_context(|| format!("failed to reload comments for branch {branch}"))?;
+    }
+
+    Ok(())
+}
+
+fn reload_commits_inner(app: &mut App, preserve_manual_selection: bool) -> anyhow::Result<()> {
     let history = app.deps.git.load_first_parent_history(HISTORY_LIMIT)?;
     let prior_cursor_idx = app.ui.commit_ui.list_state.selected();
     let prior_cursor_commit_id = app.selected_commit_id();
@@ -314,9 +338,71 @@ mod tests {
         };
         let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
 
-        super::switch_repository_context(&mut app, repo.path())
-            .expect("switch repository context");
-        assert_eq!(calls.open_git_at.load(Ordering::Relaxed), 1);
+        super::switch_repository_context(&mut app, repo.path()).expect("switch repository context");
+        assert_eq!(calls.open_git_at.load(Ordering::Relaxed), 2);
         assert_eq!(calls.open_comment_store.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn reload_commits_refreshes_branch_after_external_checkout() {
+        let repo = init_test_repo();
+        let store = StateStore::for_project(repo.path());
+        store
+            .save(&ReviewState::default())
+            .expect("seed persisted state to bypass onboarding");
+
+        let calls = Arc::new(RuntimePortCalls::default());
+        let runtime_ports = Arc::new(TestRuntimePorts {
+            calls: Arc::clone(&calls),
+        });
+        let ports = TestBootstrapPorts {
+            repo_root: repo.path().to_path_buf(),
+            runtime_ports,
+        };
+        let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
+
+        let before_git = calls.open_git_at.load(Ordering::Relaxed);
+        let before_comments = calls.open_comment_store.load(Ordering::Relaxed);
+        run_git(
+            repo.path(),
+            &["checkout", "-q", "-b", "feature/external-sync"],
+        );
+
+        super::reload_commits(&mut app, true).expect("reload commits after external checkout");
+        assert_eq!(app.deps.git.branch_name(), "feature/external-sync");
+        assert_eq!(calls.open_git_at.load(Ordering::Relaxed), before_git + 1);
+        assert_eq!(
+            calls.open_comment_store.load(Ordering::Relaxed),
+            before_comments + 1
+        );
+    }
+
+    #[test]
+    fn reload_commits_skips_comment_store_reload_when_branch_unchanged() {
+        let repo = init_test_repo();
+        let store = StateStore::for_project(repo.path());
+        store
+            .save(&ReviewState::default())
+            .expect("seed persisted state to bypass onboarding");
+
+        let calls = Arc::new(RuntimePortCalls::default());
+        let runtime_ports = Arc::new(TestRuntimePorts {
+            calls: Arc::clone(&calls),
+        });
+        let ports = TestBootstrapPorts {
+            repo_root: repo.path().to_path_buf(),
+            runtime_ports,
+        };
+        let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
+
+        let before_git = calls.open_git_at.load(Ordering::Relaxed);
+        let before_comments = calls.open_comment_store.load(Ordering::Relaxed);
+        super::reload_commits(&mut app, true).expect("reload commits");
+
+        assert_eq!(calls.open_git_at.load(Ordering::Relaxed), before_git + 1);
+        assert_eq!(
+            calls.open_comment_store.load(Ordering::Relaxed),
+            before_comments
+        );
     }
 }
