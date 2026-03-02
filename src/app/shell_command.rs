@@ -1,4 +1,5 @@
 //! Shell command modal state, history, reverse search, and process streaming.
+use super::input::shell_controller;
 use crate::app::*;
 use std::sync::mpsc::TryRecvError;
 
@@ -89,64 +90,7 @@ impl App {
     }
 
     pub(super) fn handle_shell_command_input(&mut self, key: KeyEvent) {
-        if self.ui.shell_command.running.is_some() {
-            self.handle_running_shell_command_input(key);
-            return;
-        }
-
-        if self.ui.shell_command.finished.is_some() {
-            self.handle_finished_shell_command_input(key);
-            return;
-        }
-
-        if self.ui.shell_command.reverse_search.is_some() {
-            self.handle_shell_reverse_search_input(key);
-            return;
-        }
-
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R'))
-        {
-            self.start_or_advance_shell_reverse_search();
-            return;
-        }
-
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('p') | KeyCode::Char('P'))
-        {
-            self.navigate_shell_history_previous();
-            return;
-        }
-
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && matches!(key.code, KeyCode::Char('n') | KeyCode::Char('N'))
-        {
-            self.navigate_shell_history_next();
-            return;
-        }
-
-        match key.code {
-            KeyCode::Esc => self.close_shell_command_modal(),
-            KeyCode::Enter => self.execute_shell_command(),
-            KeyCode::Up => self.navigate_shell_history_previous(),
-            KeyCode::Down => self.navigate_shell_history_next(),
-            KeyCode::PageUp => {
-                self.scroll_shell_output_lines(-(self.ui.shell_command.output_viewport as isize))
-            }
-            KeyCode::PageDown => {
-                self.scroll_shell_output_lines(self.ui.shell_command.output_viewport as isize)
-            }
-            _ => {
-                let edit = apply_single_line_edit_key(
-                    &mut self.ui.shell_command.buffer,
-                    &mut self.ui.shell_command.cursor,
-                    key,
-                );
-                if !matches!(edit, SingleLineEditOutcome::NotHandled) {
-                    self.ui.shell_command.history_nav = None;
-                }
-            }
-        }
+        shell_controller::dispatch_shell_modal_key(self, key);
     }
 
     pub(super) fn poll_shell_command_stream(&mut self) {
@@ -436,7 +380,7 @@ impl App {
         }
     }
 
-    fn handle_running_shell_command_input(&mut self, key: KeyEvent) {
+    pub(in crate::app) fn handle_running_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
                 self.close_shell_command_modal();
@@ -494,7 +438,7 @@ impl App {
         self.sync_shell_output_visual_bounds();
     }
 
-    fn handle_finished_shell_command_input(&mut self, key: KeyEvent) {
+    pub(in crate::app) fn handle_finished_shell_command_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
                 self.close_shell_command_modal();
@@ -553,7 +497,7 @@ impl App {
         self.sync_shell_output_visual_bounds();
     }
 
-    fn handle_shell_reverse_search_input(&mut self, key: KeyEvent) {
+    pub(in crate::app) fn handle_shell_reverse_search_input(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R'))
         {
@@ -582,7 +526,7 @@ impl App {
         }
     }
 
-    fn start_or_advance_shell_reverse_search(&mut self) {
+    pub(in crate::app) fn start_or_advance_shell_reverse_search(&mut self) {
         if self.ui.shell_command.reverse_search.is_none() {
             self.ui.shell_command.reverse_search = Some(ShellReverseSearchState {
                 query: String::new(),
@@ -649,7 +593,7 @@ impl App {
         }
     }
 
-    fn navigate_shell_history_previous(&mut self) {
+    pub(in crate::app) fn navigate_shell_history_previous(&mut self) {
         if self.ui.shell_command.history.is_empty() {
             return;
         }
@@ -671,7 +615,7 @@ impl App {
         }
     }
 
-    fn navigate_shell_history_next(&mut self) {
+    pub(in crate::app) fn navigate_shell_history_next(&mut self) {
         let Some(current) = self.ui.shell_command.history_nav else {
             return;
         };
@@ -691,7 +635,7 @@ impl App {
         }
     }
 
-    fn execute_shell_command(&mut self) {
+    pub(in crate::app) fn execute_shell_command(&mut self) {
         let command = self.ui.shell_command.buffer.trim().to_owned();
         if command.is_empty() {
             return;
