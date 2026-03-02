@@ -4,7 +4,7 @@ use ratatui::{
     Frame,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
 };
 
 use super::super::{
@@ -190,7 +190,7 @@ impl<'a> DiffPaneRenderer<'a> {
             }
 
             frame.render_widget(
-                Paragraph::new(body_lines),
+                Paragraph::new(body_lines).wrap(Wrap { trim: false }),
                 ratatui::layout::Rect {
                     x: inner.x,
                     y: inner.y + sticky_rows as u16,
