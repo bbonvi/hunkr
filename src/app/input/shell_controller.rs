@@ -241,11 +241,10 @@ mod tests {
         let mut app = bootstrap_app(repo.path());
         app.ui.preferences.input_mode = InputMode::ShellCommand;
 
-        let exit_status = Command::new("sh")
-            .arg("-c")
-            .arg("exit 0")
+        let exit_status = Command::new("git")
+            .arg("--version")
             .status()
-            .expect("spawn shell");
+            .expect("spawn git");
         app.ui.shell_command.finished = Some(crate::app::ShellCommandResult { exit_status });
         dispatch_shell_modal_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert_eq!(app.ui.preferences.input_mode, InputMode::Normal);
@@ -258,5 +257,32 @@ mod tests {
         assert!(app.ui.shell_command.running.is_some());
         assert!(app.runtime.status.contains("interrupted"));
         assert_eq!(app.ui.preferences.input_mode, InputMode::ShellCommand);
+    }
+
+    #[test]
+    fn dispatch_shell_modal_key_prioritizes_running_over_finished_and_search() {
+        let repo = init_test_repo();
+        let mut app = bootstrap_app(repo.path());
+        app.ui.preferences.input_mode = InputMode::ShellCommand;
+        app.ui.shell_command.buffer = "sleep 1".to_owned();
+        app.execute_shell_command();
+        assert!(app.ui.shell_command.running.is_some());
+
+        let exit_status = Command::new("git")
+            .arg("--version")
+            .status()
+            .expect("spawn git");
+        app.ui.shell_command.finished = Some(crate::app::ShellCommandResult { exit_status });
+        app.ui.shell_command.reverse_search = Some(crate::app::ShellReverseSearchState {
+            query: "fix".to_owned(),
+            match_indexes: vec![0],
+            match_cursor: 0,
+            draft_buffer: "draft".to_owned(),
+        });
+
+        dispatch_shell_modal_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert_eq!(app.ui.preferences.input_mode, InputMode::ShellCommand);
+        assert!(app.runtime.status.contains("interrupted"));
     }
 }
