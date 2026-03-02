@@ -427,6 +427,7 @@ struct DiffUiState {
     block_cursor_col: usize,
     block_cursor_goal: usize,
     mouse_anchor: Option<usize>,
+    visible_row_to_line: Vec<usize>,
     last_list_wheel_event: Option<(FocusPane, isize, Instant)>,
     pane_rects: PaneRects,
     pending_op: Option<DiffPendingOp>,

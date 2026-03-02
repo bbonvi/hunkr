@@ -24,19 +24,21 @@ impl App {
         let in_commits = contains(self.ui.diff_ui.pane_rects.commits, x, y);
         let in_diff = contains(self.ui.diff_ui.pane_rects.diff, x, y);
         let resolve_diff_row = |app: &Self, mouse_y: u16| -> Option<usize> {
-            let viewport_rows = app
-                .ui
-                .diff_ui
-                .pane_rects
-                .diff
-                .height
-                .saturating_sub(2)
-                .max(1) as usize;
+            let rect = app.ui.diff_ui.pane_rects.diff;
+            if rect.height < 3 || mouse_y <= rect.y || mouse_y >= rect.y + rect.height - 1 {
+                return None;
+            }
+            let row = mouse_y.saturating_sub(rect.y + 1) as usize;
+            if let Some(idx) = app.ui.diff_ui.visible_row_to_line.get(row).copied() {
+                return Some(idx);
+            }
+
+            let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
             let sticky_banner_indexes = app
                 .sticky_banner_indexes_for_scroll(app.domain.diff_position.scroll, viewport_rows);
             diff_index_at(
                 mouse_y,
-                app.ui.diff_ui.pane_rects.diff,
+                rect,
                 app.domain.diff_position.scroll,
                 &sticky_banner_indexes,
             )

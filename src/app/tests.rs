@@ -747,6 +747,13 @@ fn diff_index_matches_list_behavior_without_sticky_banner() {
 }
 
 #[test]
+fn wrapped_line_rows_counts_soft_wrapped_height() {
+    let line = Line::from(vec![Span::raw("123456789")]);
+    assert_eq!(wrapped_line_rows(&line, 4), 3);
+    assert_eq!(wrapped_line_rows(&line, 9), 1);
+}
+
+#[test]
 fn diff_column_maps_mouse_to_inner_content_column() {
     let rect = ratatui::layout::Rect::new(10, 5, 30, 6);
     assert_eq!(diff_column_at(10, rect), 0);

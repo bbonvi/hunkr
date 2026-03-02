@@ -1,5 +1,4 @@
 //! Render pipeline and modal/footer presentation for the lifecycle flow.
-use std::collections::BTreeSet;
 
 use super::ui::contracts::PaneViewModelBuilder;
 use super::ui::snapshot::{AppRenderSnapshot, FooterShellSnapshot, FooterWorktreeSnapshot};
@@ -136,23 +135,36 @@ impl App {
             .len()
             .min(viewport_rows.saturating_sub(1));
         let body_rows = viewport_rows.saturating_sub(sticky_rows);
-        let mut visible_indexes = BTreeSet::new();
-        for idx in sticky_banner_indexes.iter().take(sticky_rows) {
-            visible_indexes.insert(*idx);
-        }
-        for row in 0..body_rows {
-            let idx = self.domain.diff_position.scroll.saturating_add(row);
-            if idx >= self.domain.rendered_diff.len() {
-                break;
-            }
-            visible_indexes.insert(idx);
-        }
+        let inner_width = rect.width.saturating_sub(2).max(1) as usize;
         let mut line_overrides = HashMap::new();
-        for idx in visible_indexes {
-            if let Some(line) = self.highlight_visible_diff_line(idx, theme) {
-                line_overrides.insert(idx, line);
+        let mut visible_row_to_line = Vec::with_capacity(viewport_rows);
+        for idx in sticky_banner_indexes.iter().take(sticky_rows) {
+            visible_row_to_line.push(*idx);
+            if let Some(line) = self.highlight_visible_diff_line(*idx, theme) {
+                line_overrides.insert(*idx, line);
             }
         }
+        let target_rows = sticky_rows.saturating_add(body_rows);
+        let mut line_idx = self.domain.diff_position.scroll;
+        while visible_row_to_line.len() < target_rows && line_idx < self.domain.rendered_diff.len()
+        {
+            if let Some(line) = self.highlight_visible_diff_line(line_idx, theme) {
+                line_overrides.insert(line_idx, line);
+            }
+
+            let display_line = line_overrides
+                .get(&line_idx)
+                .unwrap_or(&self.domain.rendered_diff[line_idx].line);
+            let wrapped_rows = wrapped_line_rows(display_line, inner_width).max(1);
+            for _ in 0..wrapped_rows {
+                if visible_row_to_line.len() >= target_rows {
+                    break;
+                }
+                visible_row_to_line.push(line_idx);
+            }
+            line_idx += 1;
+        }
+        self.ui.diff_ui.visible_row_to_line = visible_row_to_line;
         let empty_state_message = diff_empty_state_message(
             !self.domain.rendered_diff.is_empty(),
             self.domain.aggregate.files.len(),

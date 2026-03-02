@@ -102,6 +102,24 @@ pub(super) fn diff_column_at(mouse_x: u16, rect: ratatui::layout::Rect) -> usize
     mouse_x.saturating_sub(content_left).min(max_col as u16) as usize
 }
 
+/// Returns how many terminal rows a styled line occupies when soft-wrapped at `max_width`.
+pub(super) fn wrapped_line_rows(line: &Line<'_>, max_width: usize) -> usize {
+    if max_width == 0 {
+        return 1;
+    }
+
+    let width = line
+        .spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum::<usize>();
+    if width == 0 {
+        1
+    } else {
+        (width.saturating_sub(1) / max_width) + 1
+    }
+}
+
 /// Maps mouse x-position in the diff pane to the raw diff-text char column for the target row.
 pub(super) fn diff_column_at_for_rendered_line(
     mouse_x: u16,
