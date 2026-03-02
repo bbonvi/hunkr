@@ -1,6 +1,8 @@
 /// Base behavior for pane-specific view-model builders.
 pub(in crate::app) trait PaneViewModelBuilder<Input> {
-    type Output;
+    type Output<'a>
+    where
+        Input: 'a;
 
-    fn build(&self, input: &Input) -> Self::Output;
+    fn build<'a>(&self, input: &'a Input) -> Self::Output<'a>;
 }

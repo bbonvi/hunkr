@@ -2,11 +2,11 @@ use std::collections::BTreeSet;
 
 use super::contracts::PaneViewModelBuilder;
 use super::snapshot::{CommitPaneSnapshot, FilePaneSnapshot};
-use crate::app::{CommitRow, CommitStatusFilter};
+use crate::app::{CommitRow, CommitStatusFilter, TreeRow};
 
 /// Owned view data for the files pane renderer.
-pub(in crate::app) struct FilePaneViewModel {
-    pub file_rows: Vec<crate::app::TreeRow>,
+pub(in crate::app) struct FilePaneViewModel<'a> {
+    pub file_rows: &'a [TreeRow],
     pub changed_files: usize,
     pub shown_files: usize,
     pub search_display: String,
@@ -14,15 +14,15 @@ pub(in crate::app) struct FilePaneViewModel {
 }
 
 /// Inputs required to build a file pane view-model.
-pub(in crate::app) struct FilePaneVmInput {
+pub(in crate::app) struct FilePaneVmInput<'a> {
     pub files_search_mode: bool,
-    pub file_query: String,
-    pub visible_rows: Vec<crate::app::TreeRow>,
+    pub file_query: &'a str,
+    pub visible_rows: &'a [TreeRow],
     pub changed_files: usize,
 }
 
 /// Builds file pane model from a pure input contract.
-pub(in crate::app) fn build_file_pane_view_model(input: FilePaneVmInput) -> FilePaneViewModel {
+pub(in crate::app) fn build_file_pane_view_model(input: FilePaneVmInput<'_>) -> FilePaneViewModel<'_> {
     let query = input.file_query.trim();
     let search_display = if !query.is_empty() {
         format!("/{query}")
@@ -47,9 +47,9 @@ pub(in crate::app) fn build_file_pane_view_model(input: FilePaneVmInput) -> File
 }
 
 /// Owned view data for the commits pane renderer.
-pub(in crate::app) struct CommitPaneViewModel {
-    pub commits: Vec<CommitRow>,
-    pub commented_commit_ids: BTreeSet<String>,
+pub(in crate::app) struct CommitPaneViewModel<'a> {
+    pub commits: &'a [CommitRow],
+    pub commented_commit_ids: &'a BTreeSet<String>,
     pub selected_total: usize,
     pub shown_commits: usize,
     pub total_commits: usize,
@@ -60,11 +60,11 @@ pub(in crate::app) struct CommitPaneViewModel {
 }
 
 /// Inputs required to build a commit pane view-model.
-pub(in crate::app) struct CommitPaneVmInput {
+pub(in crate::app) struct CommitPaneVmInput<'a> {
     pub commits_search_mode: bool,
-    pub commit_query: String,
-    pub visible_commits: Vec<CommitRow>,
-    pub commented_commit_ids: BTreeSet<String>,
+    pub commit_query: &'a str,
+    pub visible_commits: &'a [CommitRow],
+    pub commented_commit_ids: &'a BTreeSet<String>,
     pub selected_total: usize,
     pub total_commits: usize,
     pub status_counts: (usize, usize, usize, usize),
@@ -73,8 +73,8 @@ pub(in crate::app) struct CommitPaneVmInput {
 
 /// Builds commit pane model from a pure input contract.
 pub(in crate::app) fn build_commit_pane_view_model(
-    input: CommitPaneVmInput,
-) -> CommitPaneViewModel {
+    input: CommitPaneVmInput<'_>,
+) -> CommitPaneViewModel<'_> {
     let query = input.commit_query.trim();
     let search_display = if !query.is_empty() {
         format!("/{query}")
@@ -110,13 +110,16 @@ pub(in crate::app) fn commented_commit_ids_from_comments(
 pub(in crate::app) struct FilePaneVmBuilder;
 
 impl PaneViewModelBuilder<FilePaneSnapshot> for FilePaneVmBuilder {
-    type Output = FilePaneViewModel;
+    type Output<'a>
+        = FilePaneViewModel<'a>
+    where
+        FilePaneSnapshot: 'a;
 
-    fn build(&self, snapshot: &FilePaneSnapshot) -> Self::Output {
+    fn build<'a>(&self, snapshot: &'a FilePaneSnapshot) -> Self::Output<'a> {
         build_file_pane_view_model(FilePaneVmInput {
             files_search_mode: snapshot.files_search_mode,
-            file_query: snapshot.file_query.clone(),
-            visible_rows: snapshot.visible_rows.clone(),
+            file_query: &snapshot.file_query,
+            visible_rows: &snapshot.visible_rows,
             changed_files: snapshot.changed_files,
         })
     }
@@ -125,14 +128,17 @@ impl PaneViewModelBuilder<FilePaneSnapshot> for FilePaneVmBuilder {
 pub(in crate::app) struct CommitPaneVmBuilder;
 
 impl PaneViewModelBuilder<CommitPaneSnapshot> for CommitPaneVmBuilder {
-    type Output = CommitPaneViewModel;
+    type Output<'a>
+        = CommitPaneViewModel<'a>
+    where
+        CommitPaneSnapshot: 'a;
 
-    fn build(&self, snapshot: &CommitPaneSnapshot) -> Self::Output {
+    fn build<'a>(&self, snapshot: &'a CommitPaneSnapshot) -> Self::Output<'a> {
         build_commit_pane_view_model(CommitPaneVmInput {
             commits_search_mode: snapshot.commits_search_mode,
-            commit_query: snapshot.commit_query.clone(),
-            visible_commits: snapshot.visible_commits.clone(),
-            commented_commit_ids: snapshot.commented_commit_ids.clone(),
+            commit_query: &snapshot.commit_query,
+            visible_commits: &snapshot.visible_commits,
+            commented_commit_ids: &snapshot.commented_commit_ids,
             selected_total: snapshot.selected_total,
             total_commits: snapshot.total_commits,
             status_counts: snapshot.status_counts,
@@ -210,28 +216,31 @@ mod tests {
 
     #[test]
     fn file_vm_search_display_contract() {
+        let rows = vec![tree_row("a", true)];
         let off = build_file_pane_view_model(FilePaneVmInput {
             files_search_mode: false,
-            file_query: String::new(),
-            visible_rows: vec![tree_row("a", true)],
+            file_query: "",
+            visible_rows: &rows,
             changed_files: 1,
         });
         assert_eq!(off.search_display, "off");
         assert!(!off.search_enabled);
 
+        let rows = vec![tree_row("a", true)];
         let active_empty = build_file_pane_view_model(FilePaneVmInput {
             files_search_mode: true,
-            file_query: "   ".to_owned(),
-            visible_rows: vec![tree_row("a", true)],
+            file_query: "   ",
+            visible_rows: &rows,
             changed_files: 1,
         });
         assert_eq!(active_empty.search_display, "/");
         assert!(active_empty.search_enabled);
 
+        let rows = vec![tree_row("a", true)];
         let with_query = build_file_pane_view_model(FilePaneVmInput {
             files_search_mode: false,
-            file_query: " config ".to_owned(),
-            visible_rows: vec![tree_row("a", true)],
+            file_query: " config ",
+            visible_rows: &rows,
             changed_files: 1,
         });
         assert_eq!(with_query.search_display, "/config");
@@ -240,14 +249,15 @@ mod tests {
 
     #[test]
     fn file_vm_counts_only_selectable_rows() {
+        let rows = vec![
+            tree_row("src", false),
+            tree_row("src/main.rs", true),
+            tree_row("src/lib.rs", true),
+        ];
         let vm = build_file_pane_view_model(FilePaneVmInput {
             files_search_mode: false,
-            file_query: String::new(),
-            visible_rows: vec![
-                tree_row("src", false),
-                tree_row("src/main.rs", true),
-                tree_row("src/lib.rs", true),
-            ],
+            file_query: "",
+            visible_rows: &rows,
             changed_files: 3,
         });
 
@@ -257,11 +267,13 @@ mod tests {
 
     #[test]
     fn commit_vm_selected_total_uses_all_commits() {
+        let commits = vec![commit_row("a", true)];
+        let commented = BTreeSet::new();
         let vm = build_commit_pane_view_model(CommitPaneVmInput {
             commits_search_mode: false,
-            commit_query: String::new(),
-            visible_commits: vec![commit_row("a", true)],
-            commented_commit_ids: BTreeSet::new(),
+            commit_query: "",
+            visible_commits: &commits,
+            commented_commit_ids: &commented,
             selected_total: 2,
             total_commits: 3,
             status_counts: (1, 0, 0, 0),
@@ -278,11 +290,12 @@ mod tests {
     fn commit_vm_aggregates_commented_commit_ids() {
         let ids =
             commented_commit_ids_from_comments(&[comment(1, &["a", "b"]), comment(2, &["b", "c"])]);
+        let commits = vec![commit_row("a", false)];
         let vm = build_commit_pane_view_model(CommitPaneVmInput {
             commits_search_mode: true,
-            commit_query: " bug ".to_owned(),
-            visible_commits: vec![commit_row("a", false)],
-            commented_commit_ids: ids,
+            commit_query: " bug ",
+            visible_commits: &commits,
+            commented_commit_ids: &ids,
             selected_total: 0,
             total_commits: 1,
             status_counts: (1, 0, 0, 0),

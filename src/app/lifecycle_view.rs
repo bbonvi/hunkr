@@ -72,7 +72,7 @@ impl App {
             frame,
             rect,
             FilePaneModel {
-                file_rows: &vm.file_rows,
+                file_rows: vm.file_rows,
                 changed_files: vm.changed_files,
                 shown_files: vm.shown_files,
                 search_display: &vm.search_display,
@@ -100,8 +100,8 @@ impl App {
             frame,
             rect,
             CommitPaneModel {
-                commits: &vm.commits,
-                commented_commit_ids: &vm.commented_commit_ids,
+                commits: vm.commits,
+                commented_commit_ids: vm.commented_commit_ids,
                 status_counts: vm.status_counts,
                 selected_total: vm.selected_total,
                 shown_commits: vm.shown_commits,
