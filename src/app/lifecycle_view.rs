@@ -101,7 +101,7 @@ impl App {
             rect,
             CommitPaneModel {
                 commits: vm.commits,
-                commented_commit_ids: vm.commented_commit_ids,
+                comment_badge_commit_ids: vm.comment_badge_commit_ids,
                 status_counts: vm.status_counts,
                 selected_total: vm.selected_total,
                 shown_commits: vm.shown_commits,

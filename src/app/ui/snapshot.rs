@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
-use super::view_models::commented_commit_ids_from_comments;
+use super::view_models::comment_badge_commit_ids_from_comments;
 use crate::app::{App, CommitRow, CommitStatusFilter, FocusPane, InputMode, TreeRow};
 
 /// Immutable snapshot consumed by render/view-model builders.
@@ -33,7 +33,7 @@ pub(in crate::app) struct CommitPaneSnapshot {
     pub commits_search_mode: bool,
     pub commit_query: String,
     pub visible_commits: Vec<CommitRow>,
-    pub commented_commit_ids: BTreeSet<String>,
+    pub comment_badge_commit_ids: BTreeSet<String>,
     pub selected_total: usize,
     pub total_commits: usize,
     pub status_counts: (usize, usize, usize, usize),
@@ -113,7 +113,9 @@ impl App {
             ),
             commit_query: self.ui.search.commit_query.clone(),
             visible_commits,
-            commented_commit_ids: commented_commit_ids_from_comments(self.deps.comments.comments()),
+            comment_badge_commit_ids: comment_badge_commit_ids_from_comments(
+                self.deps.comments.comments(),
+            ),
             selected_total: self
                 .domain
                 .commits

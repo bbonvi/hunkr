@@ -42,7 +42,7 @@ pub(in crate::app) struct FilePaneModel<'a> {
 /// Render payload for the commits pane.
 pub(in crate::app) struct CommitPaneModel<'a> {
     pub commits: &'a [CommitRow],
-    pub commented_commit_ids: &'a BTreeSet<String>,
+    pub comment_badge_commit_ids: &'a BTreeSet<String>,
     pub status_counts: (usize, usize, usize, usize),
     pub selected_total: usize,
     pub shown_commits: usize,
@@ -184,7 +184,7 @@ impl<'a> ListPaneRenderer<'a> {
     ) {
         let CommitPaneModel {
             commits,
-            commented_commit_ids,
+            comment_badge_commit_ids,
             status_counts,
             selected_total,
             shown_commits,
@@ -277,7 +277,7 @@ impl<'a> ListPaneRenderer<'a> {
             .map(|(idx, row)| {
                 let is_cursor = cursor_idx == Some(idx);
                 let push_chain_kind = push_chain_kinds.get(idx).copied().flatten();
-                let has_comments = commented_commit_ids.contains(&row.info.id);
+                let has_comments = comment_badge_commit_ids.contains(&row.info.id);
                 let cursor_bg = if self.focused == FocusPane::Commits {
                     self.theme.focused_cursor_bg
                 } else {

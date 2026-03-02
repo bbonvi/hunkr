@@ -51,7 +51,7 @@ pub(in crate::app) fn build_file_pane_view_model(
 /// Owned view data for the commits pane renderer.
 pub(in crate::app) struct CommitPaneViewModel<'a> {
     pub commits: &'a [CommitRow],
-    pub commented_commit_ids: &'a BTreeSet<String>,
+    pub comment_badge_commit_ids: &'a BTreeSet<String>,
     pub selected_total: usize,
     pub shown_commits: usize,
     pub total_commits: usize,
@@ -66,7 +66,7 @@ pub(in crate::app) struct CommitPaneVmInput<'a> {
     pub commits_search_mode: bool,
     pub commit_query: &'a str,
     pub visible_commits: &'a [CommitRow],
-    pub commented_commit_ids: &'a BTreeSet<String>,
+    pub comment_badge_commit_ids: &'a BTreeSet<String>,
     pub selected_total: usize,
     pub total_commits: usize,
     pub status_counts: (usize, usize, usize, usize),
@@ -95,17 +95,18 @@ pub(in crate::app) fn build_commit_pane_view_model(
         search_enabled: input.commits_search_mode || !query.is_empty(),
         search_display,
         commits: input.visible_commits,
-        commented_commit_ids: input.commented_commit_ids,
+        comment_badge_commit_ids: input.comment_badge_commit_ids,
         selected_total: input.selected_total,
     }
 }
 
-pub(in crate::app) fn commented_commit_ids_from_comments(
+/// Commit ids that can render inline comment rows in a per-commit diff view.
+pub(in crate::app) fn comment_badge_commit_ids_from_comments(
     comments: &[crate::model::ReviewComment],
 ) -> BTreeSet<String> {
     comments
         .iter()
-        .flat_map(|comment| comment.target.commits.iter().cloned())
+        .map(|comment| comment.target.end.commit_id.clone())
         .collect()
 }
 
@@ -140,7 +141,7 @@ impl PaneViewModelBuilder<CommitPaneSnapshot> for CommitPaneVmBuilder {
             commits_search_mode: snapshot.commits_search_mode,
             commit_query: &snapshot.commit_query,
             visible_commits: &snapshot.visible_commits,
-            commented_commit_ids: &snapshot.commented_commit_ids,
+            comment_badge_commit_ids: &snapshot.comment_badge_commit_ids,
             selected_total: snapshot.selected_total,
             total_commits: snapshot.total_commits,
             status_counts: snapshot.status_counts,
@@ -275,7 +276,7 @@ mod tests {
             commits_search_mode: false,
             commit_query: "",
             visible_commits: &commits,
-            commented_commit_ids: &commented,
+            comment_badge_commit_ids: &commented,
             selected_total: 2,
             total_commits: 3,
             status_counts: (1, 0, 0, 0),
@@ -289,15 +290,17 @@ mod tests {
     }
 
     #[test]
-    fn commit_vm_aggregates_commented_commit_ids() {
-        let ids =
-            commented_commit_ids_from_comments(&[comment(1, &["a", "b"]), comment(2, &["b", "c"])]);
+    fn commit_vm_aggregates_comment_badge_commit_ids_from_end_anchor() {
+        let ids = comment_badge_commit_ids_from_comments(&[
+            comment(1, &["a", "b"]),
+            comment(2, &["b", "c"]),
+        ]);
         let commits = vec![commit_row("a", false)];
         let vm = build_commit_pane_view_model(CommitPaneVmInput {
             commits_search_mode: true,
             commit_query: " bug ",
             visible_commits: &commits,
-            commented_commit_ids: &ids,
+            comment_badge_commit_ids: &ids,
             selected_total: 0,
             total_commits: 1,
             status_counts: (1, 0, 0, 0),
@@ -306,9 +309,9 @@ mod tests {
 
         assert_eq!(vm.search_display, "/bug");
         assert!(vm.search_enabled);
-        assert_eq!(vm.commented_commit_ids.len(), 3);
-        assert!(vm.commented_commit_ids.contains("a"));
-        assert!(vm.commented_commit_ids.contains("b"));
-        assert!(vm.commented_commit_ids.contains("c"));
+        assert_eq!(vm.comment_badge_commit_ids.len(), 2);
+        assert!(vm.comment_badge_commit_ids.contains("a"));
+        assert!(vm.comment_badge_commit_ids.contains("b"));
+        assert!(!vm.comment_badge_commit_ids.contains("c"));
     }
 }
