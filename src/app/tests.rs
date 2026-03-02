@@ -193,12 +193,12 @@ fn compose_commit_line_sanitizes_untrusted_summary_text() {
 }
 
 #[test]
-fn compose_commit_line_renders_git_decorations() {
+fn compose_commit_line_keeps_concise_git_decorations() {
     let mut row = commit_row("abc1234", false, ReviewStatus::Unreviewed);
     row.info.decorations = vec![
         CommitDecoration {
             kind: CommitDecorationKind::Head,
-            label: "HEAD -> main".to_owned(),
+            label: "main*".to_owned(),
         },
         CommitDecoration {
             kind: CommitDecorationKind::RemoteBranch,
@@ -214,7 +214,8 @@ fn compose_commit_line_renders_git_decorations() {
         .map(|span| span.content.to_string())
         .collect::<String>();
 
-    assert!(flattened.contains("refs:HEAD -> main"));
+    assert!(flattened.contains("refs:main*,@origin/main"));
+    assert!(!flattened.contains("HEAD ->"));
 }
 
 #[test]

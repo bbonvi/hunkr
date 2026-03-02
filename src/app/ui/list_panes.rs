@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
 
-use crate::model::{FileChangeKind, ReviewStatus};
+use crate::model::{CommitDecoration, CommitDecorationKind, FileChangeKind, ReviewStatus};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 
 use super::super::{
@@ -18,7 +18,8 @@ use super::super::{
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
-const MAX_COMMIT_DECORATION_WIDTH: usize = 40;
+const COMMIT_METADATA_MAX_LINES: usize = 2;
+const MAX_COMMIT_LINE_DECORATION_WIDTH: usize = 30;
 
 /// Renders commit/file list panes so App keeps high-level orchestration only.
 pub(in crate::app) struct ListPaneRenderer<'a> {
@@ -250,12 +251,43 @@ impl<'a> ListPaneRenderer<'a> {
         } else {
             Style::default().fg(self.theme.border)
         };
+        let panel = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style);
+        let inner = panel.inner(rect);
+        frame.render_widget(panel, rect);
+
+        if inner.height == 0 || inner.width == 0 {
+            return;
+        }
+
+        let metadata_line_capacity = inner
+            .height
+            .saturating_sub(1)
+            .min(COMMIT_METADATA_MAX_LINES as u16);
+        let (list_rect, metadata_rect) = if metadata_line_capacity == 0 {
+            (inner, None)
+        } else {
+            let parts = ratatui::layout::Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    ratatui::layout::Constraint::Min(1),
+                    ratatui::layout::Constraint::Length(metadata_line_capacity),
+                ])
+                .split(inner);
+            (parts[0], Some(parts[1]))
+        };
 
         let highlight_symbol = list_highlight_symbol(self.nerd_fonts);
-        let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
+        let width = list_rect
+            .width
+            .saturating_sub(list_highlight_symbol_width(self.nerd_fonts))
+            .max(1) as usize;
         let line_width = width as u16;
         let cursor_idx = commit_list_state.selected();
-        let visible_rows = rect.height.saturating_sub(2) as usize;
+        let visible_rows = list_rect.height as usize;
         let commit_top = effective_list_top_for_selection(
             cursor_idx,
             commit_list_state.offset(),
@@ -298,17 +330,22 @@ impl<'a> ListPaneRenderer<'a> {
             .collect();
 
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .title(title)
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(border_style),
-            )
             .highlight_style(Style::default())
             .highlight_symbol(highlight_symbol);
 
-        frame.render_stateful_widget(list, rect, commit_list_state);
+        frame.render_stateful_widget(list, list_rect, commit_list_state);
+
+        if let Some(metadata_rect) = metadata_rect {
+            let focused_row = cursor_idx.and_then(|idx| commits.get(idx));
+            let metadata = focused_commit_metadata_lines(
+                focused_row,
+                self.nerd_fonts,
+                self.theme,
+                width,
+                metadata_rect.height as usize,
+            );
+            frame.render_widget(Paragraph::new(metadata), metadata_rect);
+        }
     }
 }
 
@@ -500,13 +537,7 @@ impl<'a> ListLinePresenter<'a> {
         } else {
             Style::default().fg(self.theme.text)
         };
-        let decoration_style = if row.selected {
-            Style::default()
-                .fg(self.theme.accent)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(self.theme.accent)
-        };
+        let decoration_style = commit_decoration_style(row.selected, self.theme);
         let age_style = if row.selected {
             Style::default()
                 .fg(self.theme.dimmed)
@@ -550,12 +581,13 @@ impl<'a> ListLinePresenter<'a> {
         let max_right_width = self.width.saturating_sub(1);
         let mut right_spans: Vec<Span<'static>> = Vec::new();
         let mut right_width = 0;
-        let decorations = commit_decoration_label(row, self.nerd_fonts);
+        let decorations =
+            compact_commit_line_decoration_label(&row.info.decorations, self.nerd_fonts);
         if !decorations.is_empty() {
             let remaining =
                 max_right_width.saturating_sub(right_width + usize::from(right_width > 0));
             if remaining > 0 {
-                let max_decorations = remaining.min(MAX_COMMIT_DECORATION_WIDTH);
+                let max_decorations = remaining.min(MAX_COMMIT_LINE_DECORATION_WIDTH);
                 let rendered = truncate(&decorations, max_decorations);
                 if right_width > 0 {
                     right_spans.push(Span::raw(" "));
@@ -578,6 +610,21 @@ impl<'a> ListLinePresenter<'a> {
                         .add_modifier(Modifier::BOLD),
                 ));
                 right_width += comment_needed;
+            }
+        }
+        if commit_has_tag(row) {
+            let tag_badge = if self.nerd_fonts {
+                "".to_owned()
+            } else {
+                "tag".to_owned()
+            };
+            let tag_needed = display_width(&tag_badge) + usize::from(right_width > 0);
+            if right_width + tag_needed <= max_right_width {
+                if right_width > 0 {
+                    right_spans.push(Span::raw(" "));
+                }
+                right_spans.push(Span::styled(tag_badge, decoration_style));
+                right_width += tag_needed;
             }
         }
         let status_badge = commit_status_badge(row.status, self.nerd_fonts).to_owned();
@@ -665,21 +712,156 @@ pub(in crate::app) fn commit_push_chain_kinds(
     markers
 }
 
-fn commit_decoration_label(row: &CommitRow, nerd_fonts: bool) -> String {
-    if row.info.decorations.is_empty() {
+fn compact_ref_metadata_tokens(decorations: &[CommitDecoration], nerd_fonts: bool) -> Vec<String> {
+    let mut head_refs = Vec::<String>::new();
+    let mut local_refs = Vec::<String>::new();
+    let mut remote_refs = Vec::<String>::new();
+    let mut tag_refs = Vec::<String>::new();
+    for item in decorations {
+        let label = sanitize_terminal_text(&item.label);
+        match item.kind {
+            CommitDecorationKind::Head => head_refs.push(label),
+            CommitDecorationKind::LocalBranch => local_refs.push(label),
+            CommitDecorationKind::RemoteBranch => {
+                if !label.ends_with("/HEAD") {
+                    remote_refs.push(label);
+                }
+            }
+            CommitDecorationKind::Tag => {
+                tag_refs.push(label.trim_start_matches("tag: ").to_owned());
+            }
+        }
+    }
+
+    let head_bases = head_refs
+        .iter()
+        .filter_map(|label| label.strip_suffix('*').map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    local_refs.retain(|label| !head_bases.contains(label));
+
+    let local_head_refs = dedupe_in_order(head_refs.into_iter().chain(local_refs).collect());
+    let remote_refs = dedupe_in_order(remote_refs);
+    let tag_refs = dedupe_in_order(tag_refs);
+
+    let mut tokens = Vec::new();
+    if let Some(token) = summarize_ref_group("refs:", &local_head_refs, 2) {
+        tokens.push(token);
+    }
+    if let Some(token) = summarize_ref_group("remote:", &remote_refs, 1) {
+        tokens.push(token);
+    }
+    if let Some(token) = summarize_ref_group(if nerd_fonts { "" } else { "tag:" }, &tag_refs, 2)
+    {
+        tokens.push(token);
+    }
+    tokens
+}
+
+fn compact_commit_line_decoration_label(
+    decorations: &[CommitDecoration],
+    nerd_fonts: bool,
+) -> String {
+    let mut head_refs = Vec::<String>::new();
+    let mut local_refs = Vec::<String>::new();
+    let mut remote_refs = Vec::<String>::new();
+    for item in decorations {
+        let label = sanitize_terminal_text(&item.label);
+        match item.kind {
+            CommitDecorationKind::Head => head_refs.push(label),
+            CommitDecorationKind::LocalBranch => local_refs.push(label),
+            CommitDecorationKind::RemoteBranch => {
+                if !label.ends_with("/HEAD") {
+                    remote_refs.push(label);
+                }
+            }
+            CommitDecorationKind::Tag => {}
+        }
+    }
+
+    let head_bases = head_refs
+        .iter()
+        .filter_map(|label| label.strip_suffix('*').map(str::to_owned))
+        .collect::<BTreeSet<_>>();
+    local_refs.retain(|label| !head_bases.contains(label));
+
+    let local_head_refs = dedupe_in_order(head_refs.into_iter().chain(local_refs).collect());
+    let remote_refs = dedupe_in_order(remote_refs);
+
+    let mut labels = Vec::<String>::new();
+    let shown_locals = local_head_refs.iter().take(2).cloned().collect::<Vec<_>>();
+    let local_overflow = local_head_refs.len().saturating_sub(shown_locals.len());
+    labels.extend(shown_locals);
+    if local_overflow > 0 {
+        labels.push(format!("+{local_overflow}"));
+    }
+
+    if let Some(remote) = remote_refs.first() {
+        labels.push(format!("@{remote}"));
+        if remote_refs.len() > 1 {
+            labels.push(format!("+{}", remote_refs.len() - 1));
+        }
+    }
+
+    if labels.is_empty() {
         return String::new();
     }
-    let labels = row
-        .info
+
+    if nerd_fonts {
+        format!(" {}", labels.join(","))
+    } else {
+        format!("refs:{}", labels.join(","))
+    }
+}
+
+fn summarize_ref_group(prefix: &str, refs: &[String], max_items: usize) -> Option<String> {
+    if refs.is_empty() {
+        return None;
+    }
+
+    let shown = refs.iter().take(max_items).cloned().collect::<Vec<_>>();
+    let overflow = refs.len().saturating_sub(shown.len());
+    let value = if overflow == 0 {
+        shown.join(",")
+    } else {
+        format!("{},+{overflow}", shown.join(","))
+    };
+    Some(format!("{prefix}{value}"))
+}
+
+fn dedupe_in_order(labels: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::<String>::new();
+    let mut deduped = Vec::new();
+    for label in labels {
+        if seen.insert(label.clone()) {
+            deduped.push(label);
+        }
+    }
+    deduped
+}
+
+fn commit_has_tag(row: &CommitRow) -> bool {
+    row.info
         .decorations
         .iter()
-        .map(|item| sanitize_terminal_text(&item.label))
-        .collect::<Vec<_>>()
-        .join(", ");
-    if nerd_fonts {
-        format!(" {labels}")
+        .any(|item| item.kind == CommitDecorationKind::Tag)
+}
+
+fn review_status_label(status: ReviewStatus) -> &'static str {
+    match status {
+        ReviewStatus::Unreviewed => "unreviewed",
+        ReviewStatus::Reviewed => "reviewed",
+        ReviewStatus::IssueFound => "issue_found",
+        ReviewStatus::Resolved => "resolved",
+    }
+}
+
+fn commit_decoration_style(selected: bool, theme: &UiTheme) -> Style {
+    if selected {
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD)
     } else {
-        format!("refs:{labels}")
+        Style::default().fg(theme.accent)
     }
 }
 
@@ -690,6 +872,130 @@ fn pad_min_width(value: String, min_width: usize) -> String {
     }
 
     format!("{}{}", " ".repeat(min_width - width), value)
+}
+
+fn wrap_text_to_width(text: &str, max_width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for token in text.split_whitespace() {
+        let candidate = if current.is_empty() {
+            token.to_owned()
+        } else {
+            format!("{current} {token}")
+        };
+        if display_width(&candidate) <= max_width {
+            current = candidate;
+            continue;
+        }
+        if !current.is_empty() {
+            lines.push(current);
+            current = String::new();
+        }
+        if display_width(token) <= max_width {
+            current = token.to_owned();
+        } else {
+            lines.push(truncate(token, max_width));
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
+
+fn focused_commit_metadata_lines(
+    row: Option<&CommitRow>,
+    nerd_fonts: bool,
+    theme: &UiTheme,
+    width: usize,
+    max_lines: usize,
+) -> Vec<Line<'static>> {
+    if max_lines == 0 {
+        return Vec::new();
+    }
+
+    let (label, metadata, label_style, metadata_style) = match row {
+        Some(row) if row.is_uncommitted => (
+            "meta",
+            "worktree/index draft snapshot".to_owned(),
+            Style::default()
+                .fg(theme.dimmed)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.dimmed),
+        ),
+        Some(row) => {
+            let mut meta_parts = vec![
+                format!("id:{}", sanitize_terminal_text(&row.info.short_id)),
+                format!("author:{}", sanitize_terminal_text(row.info.author.trim())),
+                format!(
+                    "state:{}",
+                    if row.info.unpushed {
+                        "unpushed"
+                    } else {
+                        "pushed"
+                    }
+                ),
+                format!("review:{}", review_status_label(row.status)),
+            ];
+            let refs = compact_ref_metadata_tokens(&row.info.decorations, nerd_fonts);
+            if refs.is_empty() {
+                meta_parts.push("refs:-".to_owned());
+            } else {
+                meta_parts.extend(refs);
+            }
+            let meta = meta_parts.join(" | ");
+            (
+                if nerd_fonts { "󰧨" } else { "meta" },
+                meta,
+                Style::default()
+                    .fg(theme.dimmed)
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.muted),
+            )
+        }
+        None => (
+            "meta",
+            "no commit selected".to_owned(),
+            Style::default()
+                .fg(theme.dimmed)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.muted),
+        ),
+    };
+
+    let prefix = format!("{label}: ");
+    let content_width = width.saturating_sub(display_width(&prefix)).max(1);
+    let wrapped = wrap_text_to_width(&metadata, content_width);
+    let mut lines = Vec::new();
+    for (idx, chunk) in wrapped.into_iter().enumerate() {
+        if lines.len() >= max_lines {
+            break;
+        }
+        let leader = if idx == 0 {
+            Span::styled(prefix.clone(), label_style)
+        } else {
+            Span::styled(" ".repeat(display_width(&prefix)), label_style)
+        };
+        lines.push(Line::from(vec![
+            leader,
+            Span::styled(chunk, metadata_style),
+        ]));
+    }
+
+    if lines.len() < max_lines {
+        while lines.len() < max_lines {
+            lines.push(Line::default());
+        }
+    }
+
+    lines
 }
 
 fn max_visible_age_width<T, F>(
@@ -852,7 +1158,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_commit_row_decorations_and_age_are_bold() {
+    fn selected_commit_row_tag_marker_and_age_are_bold() {
         let theme = UiTheme::from_mode(ThemeMode::Light);
         let presenter = super::ListLinePresenter::new(120, 1_710_000_000, &theme, false);
         let row = CommitRow {
@@ -864,8 +1170,8 @@ mod tests {
                 timestamp: 1_709_999_000,
                 unpushed: false,
                 decorations: vec![crate::model::CommitDecoration {
-                    kind: crate::model::CommitDecorationKind::LocalBranch,
-                    label: "main".to_owned(),
+                    kind: crate::model::CommitDecorationKind::Tag,
+                    label: "v1.0.0".to_owned(),
                 }],
             },
             selected: true,
@@ -875,14 +1181,130 @@ mod tests {
 
         let line = presenter.commit_row_line_with_push_chain(&row, None, false);
         assert!(line.spans.iter().any(|span| {
-            span.content.contains("refs:main")
+            span.content.contains("tag")
                 && span.style.add_modifier.contains(Modifier::BOLD)
                 && span.style.fg == Some(theme.accent)
         }));
+        assert!(
+            !line
+                .spans
+                .iter()
+                .any(|span| span.content.contains("refs:") || span.content.contains("v1.0.0"))
+        );
         assert!(line.spans.iter().any(|span| {
             span.style.fg == Some(theme.dimmed)
                 && !span.content.trim().is_empty()
                 && span.style.add_modifier.contains(Modifier::BOLD)
         }));
+    }
+
+    #[test]
+    fn focused_commit_metadata_uses_selected_commit_context() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let row = CommitRow {
+            info: crate::model::CommitInfo {
+                id: "abc123".to_owned(),
+                short_id: "abc1234".to_owned(),
+                summary: "Render focused metadata".to_owned(),
+                author: "dev".to_owned(),
+                timestamp: 1_709_999_000,
+                unpushed: true,
+                decorations: vec![crate::model::CommitDecoration {
+                    kind: crate::model::CommitDecorationKind::LocalBranch,
+                    label: "main".to_owned(),
+                }],
+            },
+            selected: false,
+            status: ReviewStatus::Unreviewed,
+            is_uncommitted: false,
+        };
+
+        let lines = super::focused_commit_metadata_lines(Some(&row), false, &theme, 120, 2);
+        assert!(lines.len() >= 2);
+        let metadata = lines[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(metadata.contains("meta: "));
+        assert!(metadata.contains("author:dev"));
+        assert!(metadata.contains("refs:main"));
+    }
+
+    #[test]
+    fn metadata_tokens_compress_multiple_refs() {
+        let decorations = vec![
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::Head,
+                label: "main*".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::LocalBranch,
+                label: "main".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::LocalBranch,
+                label: "release".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::LocalBranch,
+                label: "hotfix".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::RemoteBranch,
+                label: "origin/main".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::RemoteBranch,
+                label: "origin/release".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::Tag,
+                label: "v1.0.0".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::Tag,
+                label: "v1.1.0".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::Tag,
+                label: "v1.2.0".to_owned(),
+            },
+        ];
+
+        let tokens = super::compact_ref_metadata_tokens(&decorations, false);
+        assert!(tokens.contains(&"refs:main*,release,+1".to_owned()));
+        assert!(tokens.contains(&"remote:origin/main,+1".to_owned()));
+        assert!(tokens.contains(&"tag:v1.0.0,v1.1.0,+1".to_owned()));
+    }
+
+    #[test]
+    fn commit_line_decorations_stay_concise_and_skip_tags() {
+        let decorations = vec![
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::Head,
+                label: "main*".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::LocalBranch,
+                label: "main".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::LocalBranch,
+                label: "release".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::RemoteBranch,
+                label: "origin/main".to_owned(),
+            },
+            crate::model::CommitDecoration {
+                kind: crate::model::CommitDecorationKind::Tag,
+                label: "v1.0.0".to_owned(),
+            },
+        ];
+
+        let label = super::compact_commit_line_decoration_label(&decorations, false);
+        assert_eq!(label, "refs:main*,release,@origin/main");
+        assert!(!label.contains("v1.0.0"));
     }
 }
