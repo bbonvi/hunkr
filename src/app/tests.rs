@@ -379,7 +379,7 @@ fn comment_cursor_line_and_col_track_multiline_positions() {
 #[test]
 fn comment_modal_lines_includes_cursor_marker() {
     let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let rendered = comment_modal_lines("abc", 1, None, 4, &theme);
+    let rendered = comment_modal_lines("abc", 1, None, 4, 24, &theme);
     let flattened = rendered.lines[0]
         .spans
         .iter()
@@ -396,6 +396,24 @@ fn comment_modal_lines_includes_cursor_marker() {
     assert!(flattened.contains("ab"));
     assert!(flattened.contains("c"));
     assert!(rendered.text_offset > 0);
+}
+
+#[test]
+fn comment_modal_lines_wraps_long_input_and_keeps_cursor_visible() {
+    let theme = UiTheme::from_mode(ThemeMode::Dark);
+    let text = "abcdefghij0123456789";
+    let cursor = text.find('7').expect("cursor char");
+    let rendered = comment_modal_lines(text, cursor, None, 3, 10, &theme);
+
+    assert_eq!(rendered.lines.len(), 3);
+    assert_eq!(rendered.line_ranges.len(), 3);
+    assert!(
+        rendered.lines.iter().any(|line| line
+            .spans
+            .iter()
+            .any(|span| span.content == "7" && span.style.bg == Some(theme.modal_cursor_bg))),
+        "wrapped viewport should still include the cursor cell",
+    );
 }
 
 #[test]

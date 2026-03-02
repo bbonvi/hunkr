@@ -750,6 +750,7 @@ impl App {
             self.ui.comment_editor.cursor,
             self.ui.comment_editor.selection,
             editor_inner.height.saturating_sub(1) as usize,
+            editor_inner.width as usize,
             theme,
         );
         let CommentModalView {

@@ -247,8 +247,7 @@ impl App {
         let inside_editor = contains(editor_rect, mouse.column, mouse.row);
         let resolve_cursor = |app: &Self, x: u16, y: u16| -> usize {
             let row = y.saturating_sub(editor_rect.y) as usize;
-            let line_idx = (app.ui.comment_editor.view_start + row)
-                .min(app.ui.comment_editor.line_ranges.len() - 1);
+            let line_idx = row.min(app.ui.comment_editor.line_ranges.len() - 1);
             let (line_start, line_end) = app.ui.comment_editor.line_ranges[line_idx];
             let col = x
                 .saturating_sub(editor_rect.x)
