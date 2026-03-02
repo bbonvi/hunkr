@@ -707,13 +707,13 @@ fn compact_ref_metadata_tokens(decorations: &[CommitDecoration], nerd_fonts: boo
     let tag_refs = dedupe_in_order(tag_refs);
 
     let mut tokens = Vec::new();
-    if let Some(token) = summarize_ref_group("refs:", &local_head_refs, 2) {
+    if let Some(token) = summarize_ref_group("refs ", &local_head_refs, 2) {
         tokens.push(token);
     }
-    if let Some(token) = summarize_ref_group("remote:", &remote_refs, 1) {
+    if let Some(token) = summarize_ref_group("", &remote_refs, 1) {
         tokens.push(token);
     }
-    if let Some(token) = summarize_ref_group(if nerd_fonts { "" } else { "tag:" }, &tag_refs, 2)
+    if let Some(token) = summarize_ref_group(if nerd_fonts { " " } else { "tag " }, &tag_refs, 2)
     {
         tokens.push(token);
     }
@@ -809,15 +809,6 @@ fn commit_has_tag(row: &CommitRow) -> bool {
         .any(|item| item.kind == CommitDecorationKind::Tag)
 }
 
-fn review_status_label(status: ReviewStatus) -> &'static str {
-    match status {
-        ReviewStatus::Unreviewed => "unreviewed",
-        ReviewStatus::Reviewed => "reviewed",
-        ReviewStatus::IssueFound => "issue_found",
-        ReviewStatus::Resolved => "resolved",
-    }
-}
-
 fn commit_decoration_style(selected: bool, theme: &UiTheme) -> Style {
     if selected {
         Style::default()
@@ -844,27 +835,15 @@ pub(in crate::app) fn focused_commit_metadata_summary(
     match row {
         Some(row) if row.is_uncommitted => "meta worktree/index draft snapshot".to_owned(),
         Some(row) => {
-            let mut meta_parts = vec![
-                format!("id:{}", sanitize_terminal_text(&row.info.short_id)),
-                format!("author:{}", sanitize_terminal_text(row.info.author.trim())),
-                format!(
-                    "state:{}",
-                    if row.info.unpushed {
-                        "unpushed"
-                    } else {
-                        "pushed"
-                    }
-                ),
-                format!("review:{}", review_status_label(row.status)),
-            ];
+            let mut meta_parts = Vec::new();
             let refs = compact_ref_metadata_tokens(&row.info.decorations, nerd_fonts);
             if refs.is_empty() {
-                meta_parts.push("refs:-".to_owned());
+                meta_parts.push("refs -".to_owned());
             } else {
                 meta_parts.extend(refs);
             }
             let prefix = if nerd_fonts { "󰧨" } else { "meta" };
-            format!("{prefix} {}", meta_parts.join(" | "))
+            format!("{prefix} {}", meta_parts.join("  "))
         }
         None => {
             if nerd_fonts {
@@ -1098,8 +1077,11 @@ mod tests {
 
         let metadata = super::focused_commit_metadata_summary(Some(&row), false);
         assert!(metadata.contains("meta "));
-        assert!(metadata.contains("author:dev"));
-        assert!(metadata.contains("refs:main"));
+        assert!(metadata.contains("refs main"));
+        assert!(!metadata.contains("author"));
+        assert!(!metadata.contains("review"));
+        assert!(!metadata.contains("state"));
+        assert!(!metadata.contains("id:"));
     }
 
     #[test]
@@ -1144,9 +1126,20 @@ mod tests {
         ];
 
         let tokens = super::compact_ref_metadata_tokens(&decorations, false);
-        assert!(tokens.contains(&"refs:main*,release,+1".to_owned()));
-        assert!(tokens.contains(&"remote:origin/main,+1".to_owned()));
-        assert!(tokens.contains(&"tag:v1.0.0,v1.1.0,+1".to_owned()));
+        assert!(tokens.contains(&"refs main*,release,+1".to_owned()));
+        assert!(tokens.contains(&"origin/main,+1".to_owned()));
+        assert!(tokens.contains(&"tag v1.0.0,v1.1.0,+1".to_owned()));
+    }
+
+    #[test]
+    fn metadata_tokens_use_spaced_nerd_tag_prefix() {
+        let decorations = vec![crate::model::CommitDecoration {
+            kind: crate::model::CommitDecorationKind::Tag,
+            label: "v1.2.3".to_owned(),
+        }];
+
+        let tokens = super::compact_ref_metadata_tokens(&decorations, true);
+        assert_eq!(tokens, vec![" v1.2.3".to_owned()]);
     }
 
     #[test]
