@@ -2,7 +2,7 @@
 use std::collections::BTreeSet;
 
 use super::ui::contracts::PaneViewModelBuilder;
-use super::ui::snapshot::AppRenderSnapshot;
+use super::ui::snapshot::{AppRenderSnapshot, FooterShellSnapshot, FooterWorktreeSnapshot};
 use super::ui::view_models::{CommitPaneVmBuilder, FilePaneVmBuilder};
 use crate::app::*;
 use ratatui::widgets::{List, ListItem};
@@ -484,15 +484,7 @@ impl App {
             }
             InputMode::ShellCommand => {
                 status.push(footer_separator(theme));
-                let label = if snapshot.footer.shell.running {
-                    "running"
-                } else if snapshot.footer.shell.finished {
-                    "done"
-                } else if snapshot.footer.shell.reverse_search {
-                    "search"
-                } else {
-                    "input"
-                };
+                let label = footer_shell_mode_label(&snapshot.footer.shell);
                 status.push(footer_chip(
                     &format!("{label}: {}", truncate(&snapshot.footer.shell.command_label, 42)),
                     Style::default().fg(theme.accent).bg(blend_colors(
@@ -504,13 +496,7 @@ impl App {
                 ));
             }
             InputMode::WorktreeSwitch => {
-                if snapshot.footer.worktree.search_active || !snapshot.footer.worktree.query.is_empty()
-                {
-                    let query = if snapshot.footer.worktree.query.is_empty() {
-                        "/".to_owned()
-                    } else {
-                        format!("/{}", snapshot.footer.worktree.query)
-                    };
+                if let Some(query) = footer_worktree_query_label(&snapshot.footer.worktree) {
                     status.push(footer_separator(theme));
                     status.push(footer_chip(
                         &format!(
@@ -1552,6 +1538,96 @@ impl App {
             ]))
         };
         frame.render_widget(footer, sections[2]);
+    }
+}
+
+fn footer_shell_mode_label(shell: &FooterShellSnapshot) -> &'static str {
+    if shell.running {
+        "running"
+    } else if shell.finished {
+        "done"
+    } else if shell.reverse_search {
+        "search"
+    } else {
+        "input"
+    }
+}
+
+fn footer_worktree_query_label(worktree: &FooterWorktreeSnapshot) -> Option<String> {
+    if !worktree.search_active && worktree.query.is_empty() {
+        return None;
+    }
+    if worktree.query.is_empty() {
+        return Some("/".to_owned());
+    }
+    Some(format!("/{}", worktree.query))
+}
+
+#[cfg(test)]
+mod footer_contract_tests {
+    use super::*;
+
+    #[test]
+    fn footer_shell_mode_label_contract() {
+        let base = FooterShellSnapshot {
+            running: false,
+            finished: false,
+            reverse_search: false,
+            command_label: "cmd".to_owned(),
+        };
+        assert_eq!(footer_shell_mode_label(&base), "input");
+
+        let running = FooterShellSnapshot {
+            running: true,
+            ..base
+        };
+        assert_eq!(footer_shell_mode_label(&running), "running");
+
+        let finished = FooterShellSnapshot {
+            running: false,
+            finished: true,
+            reverse_search: true,
+            command_label: "cmd".to_owned(),
+        };
+        assert_eq!(footer_shell_mode_label(&finished), "done");
+
+        let searching = FooterShellSnapshot {
+            running: false,
+            finished: false,
+            reverse_search: true,
+            command_label: "cmd".to_owned(),
+        };
+        assert_eq!(footer_shell_mode_label(&searching), "search");
+    }
+
+    #[test]
+    fn footer_worktree_query_label_contract() {
+        let idle = FooterWorktreeSnapshot {
+            search_active: false,
+            query: String::new(),
+            visible_count: 0,
+            total_count: 0,
+        };
+        assert_eq!(footer_worktree_query_label(&idle), None);
+
+        let active_empty = FooterWorktreeSnapshot {
+            search_active: true,
+            query: String::new(),
+            visible_count: 1,
+            total_count: 2,
+        };
+        assert_eq!(footer_worktree_query_label(&active_empty).as_deref(), Some("/"));
+
+        let with_query = FooterWorktreeSnapshot {
+            search_active: false,
+            query: "feat".to_owned(),
+            visible_count: 1,
+            total_count: 2,
+        };
+        assert_eq!(
+            footer_worktree_query_label(&with_query).as_deref(),
+            Some("/feat")
+        );
     }
 }
 pub(super) fn footer_mode_label(
