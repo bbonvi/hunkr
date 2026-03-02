@@ -5,7 +5,7 @@ use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
 
 use super::super::{
@@ -18,7 +18,6 @@ use super::super::{
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
-const COMMIT_METADATA_MAX_LINES: usize = 2;
 const MAX_COMMIT_LINE_DECORATION_WIDTH: usize = 30;
 
 /// Renders commit/file list panes so App keeps high-level orchestration only.
@@ -251,43 +250,12 @@ impl<'a> ListPaneRenderer<'a> {
         } else {
             Style::default().fg(self.theme.border)
         };
-        let panel = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(border_style);
-        let inner = panel.inner(rect);
-        frame.render_widget(panel, rect);
-
-        if inner.height == 0 || inner.width == 0 {
-            return;
-        }
-
-        let metadata_line_capacity = inner
-            .height
-            .saturating_sub(1)
-            .min(COMMIT_METADATA_MAX_LINES as u16);
-        let (list_rect, metadata_rect) = if metadata_line_capacity == 0 {
-            (inner, None)
-        } else {
-            let parts = ratatui::layout::Layout::default()
-                .direction(ratatui::layout::Direction::Vertical)
-                .constraints([
-                    ratatui::layout::Constraint::Min(1),
-                    ratatui::layout::Constraint::Length(metadata_line_capacity),
-                ])
-                .split(inner);
-            (parts[0], Some(parts[1]))
-        };
 
         let highlight_symbol = list_highlight_symbol(self.nerd_fonts);
-        let width = list_rect
-            .width
-            .saturating_sub(list_highlight_symbol_width(self.nerd_fonts))
-            .max(1) as usize;
+        let width = list_content_width(rect.width, list_highlight_symbol_width(self.nerd_fonts));
         let line_width = width as u16;
         let cursor_idx = commit_list_state.selected();
-        let visible_rows = list_rect.height as usize;
+        let visible_rows = rect.height.saturating_sub(2) as usize;
         let commit_top = effective_list_top_for_selection(
             cursor_idx,
             commit_list_state.offset(),
@@ -330,22 +298,17 @@ impl<'a> ListPaneRenderer<'a> {
             .collect();
 
         let list = List::new(items)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(border_style),
+            )
             .highlight_style(Style::default())
             .highlight_symbol(highlight_symbol);
 
-        frame.render_stateful_widget(list, list_rect, commit_list_state);
-
-        if let Some(metadata_rect) = metadata_rect {
-            let focused_row = cursor_idx.and_then(|idx| commits.get(idx));
-            let metadata = focused_commit_metadata_lines(
-                focused_row,
-                self.nerd_fonts,
-                self.theme,
-                width,
-                metadata_rect.height as usize,
-            );
-            frame.render_widget(Paragraph::new(metadata), metadata_rect);
-        }
+        frame.render_stateful_widget(list, rect, commit_list_state);
     }
 }
 
@@ -874,62 +837,12 @@ fn pad_min_width(value: String, min_width: usize) -> String {
     format!("{}{}", " ".repeat(min_width - width), value)
 }
 
-fn wrap_text_to_width(text: &str, max_width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut current = String::new();
-
-    for token in text.split_whitespace() {
-        let candidate = if current.is_empty() {
-            token.to_owned()
-        } else {
-            format!("{current} {token}")
-        };
-        if display_width(&candidate) <= max_width {
-            current = candidate;
-            continue;
-        }
-        if !current.is_empty() {
-            lines.push(current);
-            current = String::new();
-        }
-        if display_width(token) <= max_width {
-            current = token.to_owned();
-        } else {
-            lines.push(truncate(token, max_width));
-        }
-    }
-
-    if !current.is_empty() {
-        lines.push(current);
-    }
-
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-
-    lines
-}
-
-fn focused_commit_metadata_lines(
+pub(in crate::app) fn focused_commit_metadata_summary(
     row: Option<&CommitRow>,
     nerd_fonts: bool,
-    theme: &UiTheme,
-    width: usize,
-    max_lines: usize,
-) -> Vec<Line<'static>> {
-    if max_lines == 0 {
-        return Vec::new();
-    }
-
-    let (label, metadata, label_style, metadata_style) = match row {
-        Some(row) if row.is_uncommitted => (
-            "meta",
-            "worktree/index draft snapshot".to_owned(),
-            Style::default()
-                .fg(theme.dimmed)
-                .add_modifier(Modifier::BOLD),
-            Style::default().fg(theme.dimmed),
-        ),
+) -> String {
+    match row {
+        Some(row) if row.is_uncommitted => "meta worktree/index draft snapshot".to_owned(),
         Some(row) => {
             let mut meta_parts = vec![
                 format!("id:{}", sanitize_terminal_text(&row.info.short_id)),
@@ -950,52 +863,17 @@ fn focused_commit_metadata_lines(
             } else {
                 meta_parts.extend(refs);
             }
-            let meta = meta_parts.join(" | ");
-            (
-                if nerd_fonts { "󰧨" } else { "meta" },
-                meta,
-                Style::default()
-                    .fg(theme.dimmed)
-                    .add_modifier(Modifier::BOLD),
-                Style::default().fg(theme.muted),
-            )
+            let prefix = if nerd_fonts { "󰧨" } else { "meta" };
+            format!("{prefix} {}", meta_parts.join(" | "))
         }
-        None => (
-            "meta",
-            "no commit selected".to_owned(),
-            Style::default()
-                .fg(theme.dimmed)
-                .add_modifier(Modifier::BOLD),
-            Style::default().fg(theme.muted),
-        ),
-    };
-
-    let prefix = format!("{label}: ");
-    let content_width = width.saturating_sub(display_width(&prefix)).max(1);
-    let wrapped = wrap_text_to_width(&metadata, content_width);
-    let mut lines = Vec::new();
-    for (idx, chunk) in wrapped.into_iter().enumerate() {
-        if lines.len() >= max_lines {
-            break;
-        }
-        let leader = if idx == 0 {
-            Span::styled(prefix.clone(), label_style)
-        } else {
-            Span::styled(" ".repeat(display_width(&prefix)), label_style)
-        };
-        lines.push(Line::from(vec![
-            leader,
-            Span::styled(chunk, metadata_style),
-        ]));
-    }
-
-    if lines.len() < max_lines {
-        while lines.len() < max_lines {
-            lines.push(Line::default());
+        None => {
+            if nerd_fonts {
+                "󰧨 no commit selected".to_owned()
+            } else {
+                "meta no commit selected".to_owned()
+            }
         }
     }
-
-    lines
 }
 
 fn max_visible_age_width<T, F>(
@@ -1200,7 +1078,6 @@ mod tests {
 
     #[test]
     fn focused_commit_metadata_uses_selected_commit_context() {
-        let theme = UiTheme::from_mode(ThemeMode::Dark);
         let row = CommitRow {
             info: crate::model::CommitInfo {
                 id: "abc123".to_owned(),
@@ -1219,14 +1096,8 @@ mod tests {
             is_uncommitted: false,
         };
 
-        let lines = super::focused_commit_metadata_lines(Some(&row), false, &theme, 120, 2);
-        assert!(lines.len() >= 2);
-        let metadata = lines[0]
-            .spans
-            .iter()
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
-        assert!(metadata.contains("meta: "));
+        let metadata = super::focused_commit_metadata_summary(Some(&row), false);
+        assert!(metadata.contains("meta "));
         assert!(metadata.contains("author:dev"));
         assert!(metadata.contains("refs:main"));
     }

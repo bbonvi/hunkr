@@ -55,6 +55,7 @@ pub(in crate::app) struct FooterSnapshot {
     pub commit_cursor: usize,
     pub file_query: String,
     pub file_cursor: usize,
+    pub focused_commit: Option<CommitRow>,
     pub shell: FooterShellSnapshot,
     pub worktree: FooterWorktreeSnapshot,
 }
@@ -92,17 +93,26 @@ impl App {
             changed_files: self.domain.aggregate.files.len(),
         };
 
+        let visible_commit_indices = self.visible_commit_indices();
+        let visible_commits = visible_commit_indices
+            .iter()
+            .filter_map(|idx| self.domain.commits.get(*idx).cloned())
+            .collect::<Vec<_>>();
+        let focused_commit = self
+            .ui
+            .commit_ui
+            .list_state
+            .selected()
+            .and_then(|visible_idx| visible_commit_indices.get(visible_idx).copied())
+            .and_then(|full_idx| self.domain.commits.get(full_idx).cloned());
+
         let commits = CommitPaneSnapshot {
             commits_search_mode: matches!(
                 self.ui.preferences.input_mode,
                 InputMode::ListSearch(FocusPane::Commits)
             ),
             commit_query: self.ui.search.commit_query.clone(),
-            visible_commits: self
-                .visible_commit_indices()
-                .into_iter()
-                .filter_map(|idx| self.domain.commits.get(idx).cloned())
-                .collect::<Vec<_>>(),
+            visible_commits,
             commented_commit_ids: commented_commit_ids_from_comments(self.deps.comments.comments()),
             selected_total: self
                 .domain
@@ -128,6 +138,7 @@ impl App {
             commit_cursor: self.ui.search.commit_cursor,
             file_query: self.ui.search.file_query.clone(),
             file_cursor: self.ui.search.file_cursor,
+            focused_commit,
             shell: FooterShellSnapshot {
                 running: self.ui.shell_command.running.is_some(),
                 finished: self.ui.shell_command.finished.is_some(),

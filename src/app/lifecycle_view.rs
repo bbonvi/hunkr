@@ -429,6 +429,19 @@ impl App {
                 footer_status_style(&snapshot.footer.status, theme),
             ));
         }
+        if matches!(snapshot.footer.input_mode, InputMode::Normal) {
+            status.push(footer_separator(theme));
+            status.push(footer_detail_chip(
+                truncate(
+                    &super::ui::list_panes::focused_commit_metadata_summary(
+                        snapshot.footer.focused_commit.as_ref(),
+                        snapshot.nerd_fonts,
+                    ),
+                    84,
+                ),
+                theme,
+            ));
+        }
 
         if let Some(scope) = footer_visual_scope_label(commit_visual_active, diff_visual_active) {
             status.push(footer_separator(theme));
