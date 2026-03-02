@@ -275,7 +275,7 @@ impl UiTheme {
                 text: Color::Rgb(40, 40, 40),
                 muted: Color::Rgb(90, 90, 90),
                 dimmed: Color::Rgb(140, 140, 140),
-                cursor_bg: Color::Rgb(226, 226, 226),
+                cursor_bg: Color::Rgb(210, 210, 210),
                 block_cursor_fg: Color::Rgb(255, 255, 255),
                 block_cursor_bg: Color::Rgb(41, 94, 214),
                 visual_bg: Color::Rgb(215, 225, 241),
