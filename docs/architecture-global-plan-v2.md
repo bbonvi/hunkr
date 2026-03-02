@@ -74,8 +74,10 @@ Completed:
 - Draw latency guardrails are recorded and contract-tested.
 - Repository switching uses injected runtime DI ports and has a seam contract test.
 - Clock usage in list/worktree render paths now uses injected app clock.
+- Shell modal state machine is routed through explicit mode controllers (`src/app/input/shell_controller.rs`).
+- Immutable render snapshot contract now drives header/files/commits/footer render seams.
+- Pane view-model builders now borrow snapshot collections instead of cloning them per build.
+- Snapshot and shell-mode routing contracts are covered by dedicated seam tests.
 
 Remaining high-value next slices:
-- Extract shell modal state machine into explicit mode subcontrollers.
-- Introduce immutable frame snapshot contract for render/view-model builders.
 - Remove ratatui primitives (`Line/Span`) from domain diff projections.
