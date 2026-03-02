@@ -429,18 +429,15 @@ impl App {
                 footer_status_style(&snapshot.footer.status, theme),
             ));
         }
-        if matches!(snapshot.footer.input_mode, InputMode::Normal) {
+        if should_show_footer_commit_metadata(snapshot.footer.input_mode, snapshot.footer.focused) {
+            let metadata = super::ui::list_panes::focused_commit_metadata_summary(
+                snapshot.footer.focused_commit.as_ref(),
+                snapshot.nerd_fonts,
+            );
+            let available = footer_available_width_for_next_chip(&status, rect.width as usize);
+            let metadata = truncate(&metadata, available.saturating_sub(2).max(8));
             status.push(footer_separator(theme));
-            status.push(footer_detail_chip(
-                truncate(
-                    &super::ui::list_panes::focused_commit_metadata_summary(
-                        snapshot.footer.focused_commit.as_ref(),
-                        snapshot.nerd_fonts,
-                    ),
-                    84,
-                ),
-                theme,
-            ));
+            status.push(footer_detail_chip(metadata, theme));
         }
 
         if let Some(scope) = footer_visual_scope_label(commit_visual_active, diff_visual_active) {
@@ -1710,13 +1707,37 @@ fn footer_detail_chip(label: String, theme: &UiTheme) -> Span<'static> {
         &label,
         Style::default()
             .fg(theme.muted)
-            .bg(blend_colors(theme.panel_title_bg, theme.border, 176)),
+            .bg(resolve_footer_chip_bg(theme)),
         Modifier::empty(),
     )
 }
 
 fn footer_separator(theme: &UiTheme) -> Span<'static> {
     Span::styled(" | ", Style::default().fg(theme.dimmed))
+}
+
+fn should_show_footer_commit_metadata(input_mode: InputMode, focused: FocusPane) -> bool {
+    matches!(input_mode, InputMode::Normal) && focused == FocusPane::Commits
+}
+
+fn footer_available_width_for_next_chip(
+    current_spans: &[Span<'static>],
+    total_width: usize,
+) -> usize {
+    let used = current_spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum::<usize>()
+        + display_width(" | ");
+    total_width.saturating_sub(used).max(1)
+}
+
+fn resolve_footer_chip_bg(theme: &UiTheme) -> Color {
+    if theme.footer_chip_bg == Color::Reset {
+        blend_colors(theme.panel_title_bg, theme.border, 176)
+    } else {
+        theme.footer_chip_bg
+    }
 }
 
 #[cfg(test)]
@@ -1787,5 +1808,35 @@ mod footer_contract_tests {
             footer_worktree_query_label(&with_query).as_deref(),
             Some("/feat")
         );
+    }
+
+    #[test]
+    fn resolve_footer_chip_bg_uses_blend_when_reset() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let expected = blend_colors(theme.panel_title_bg, theme.border, 176);
+        assert_eq!(resolve_footer_chip_bg(&theme), expected);
+    }
+
+    #[test]
+    fn resolve_footer_chip_bg_uses_explicit_override() {
+        let mut theme = UiTheme::from_mode(ThemeMode::Dark);
+        theme.footer_chip_bg = Color::Rgb(1, 2, 3);
+        assert_eq!(resolve_footer_chip_bg(&theme), Color::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn should_show_footer_commit_metadata_only_for_normal_commit_focus() {
+        assert!(should_show_footer_commit_metadata(
+            InputMode::Normal,
+            FocusPane::Commits
+        ));
+        assert!(!should_show_footer_commit_metadata(
+            InputMode::Normal,
+            FocusPane::Files
+        ));
+        assert!(!should_show_footer_commit_metadata(
+            InputMode::DiffSearch,
+            FocusPane::Commits
+        ));
     }
 }
