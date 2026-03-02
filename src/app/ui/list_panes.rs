@@ -580,7 +580,10 @@ impl<'a> ListLinePresenter<'a> {
                 if right_width > 0 {
                     right_spans.push(Span::raw(" "));
                 }
-                right_spans.push(Span::styled(tag_badge, decoration_style));
+                right_spans.push(Span::styled(
+                    tag_badge,
+                    commit_tag_marker_style(row.selected, self.theme),
+                ));
                 right_width += tag_needed;
             }
         }
@@ -813,6 +816,14 @@ fn commit_decoration_style(selected: bool, theme: &UiTheme) -> Style {
     }
 }
 
+fn commit_tag_marker_style(selected: bool, theme: &UiTheme) -> Style {
+    if selected {
+        Style::default().fg(theme.muted)
+    } else {
+        Style::default().fg(theme.dimmed)
+    }
+}
+
 fn pad_min_width(value: String, min_width: usize) -> String {
     let width = display_width(&value);
     if width >= min_width {
@@ -1016,7 +1027,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_commit_row_tag_marker_and_age_are_bold() {
+    fn selected_commit_row_tag_marker_is_subtle_while_age_is_bold() {
         let theme = UiTheme::from_mode(ThemeMode::Light);
         let presenter = super::ListLinePresenter::new(120, 1_710_000_000, &theme, false);
         let row = CommitRow {
@@ -1040,8 +1051,8 @@ mod tests {
         let line = presenter.commit_row_line_with_push_chain(&row, None, false);
         assert!(line.spans.iter().any(|span| {
             span.content.contains("tag")
-                && span.style.add_modifier.contains(Modifier::BOLD)
-                && span.style.fg == Some(theme.accent)
+                && !span.style.add_modifier.contains(Modifier::BOLD)
+                && span.style.fg == Some(theme.muted)
         }));
         assert!(
             !line
