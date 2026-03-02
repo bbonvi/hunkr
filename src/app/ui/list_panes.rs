@@ -833,7 +833,7 @@ pub(in crate::app) fn focused_commit_metadata_summary(
     nerd_fonts: bool,
 ) -> String {
     match row {
-        Some(row) if row.is_uncommitted => "meta worktree/index draft snapshot".to_owned(),
+        Some(row) if row.is_uncommitted => "worktree/index draft snapshot".to_owned(),
         Some(row) => {
             let mut meta_parts = Vec::new();
             let refs = compact_ref_metadata_tokens(&row.info.decorations, nerd_fonts);
@@ -842,16 +842,9 @@ pub(in crate::app) fn focused_commit_metadata_summary(
             } else {
                 meta_parts.extend(refs);
             }
-            let prefix = if nerd_fonts { "󰧨" } else { "meta" };
-            format!("{prefix} {}", meta_parts.join("  "))
+            meta_parts.join("  ")
         }
-        None => {
-            if nerd_fonts {
-                "󰧨 no commit selected".to_owned()
-            } else {
-                "meta no commit selected".to_owned()
-            }
-        }
+        None => "no commit selected".to_owned(),
     }
 }
 
@@ -1076,7 +1069,7 @@ mod tests {
         };
 
         let metadata = super::focused_commit_metadata_summary(Some(&row), false);
-        assert!(metadata.contains("meta "));
+        assert!(!metadata.contains("meta "));
         assert!(metadata.contains("refs main"));
         assert!(!metadata.contains("author"));
         assert!(!metadata.contains("review"));
