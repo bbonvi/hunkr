@@ -512,7 +512,7 @@ impl<'a> ListLinePresenter<'a> {
         let summary = sanitize_terminal_text(&row.info.summary);
         if row.is_uncommitted {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
-            let left = format!("{marker} {} {summary}", row.info.short_id);
+            let left = format!("{marker} {summary}");
             let badge = uncommitted_badge(self.nerd_fonts);
             let right = "draft";
             let reserved = 1 + display_width(badge) + 1 + display_width(right);
@@ -541,7 +541,7 @@ impl<'a> ListLinePresenter<'a> {
         }
 
         let marker = commit_selection_marker(row.selected, self.nerd_fonts);
-        let left = format!("{marker} {} {summary}", row.info.short_id);
+        let left = format!("{marker} {summary}");
         let max_right_width = self.width.saturating_sub(1);
         let mut right_spans: Vec<Span<'static>> = Vec::new();
         let mut right_width = 0;
