@@ -962,9 +962,7 @@ fn commit_status_filter_to_session(
         CommitStatusFilter::UnreviewedOrIssueFound => {
             crate::model::UiSessionCommitStatusFilter::UnreviewedOrIssueFound
         }
-        CommitStatusFilter::ReviewedOrResolved => {
-            crate::model::UiSessionCommitStatusFilter::ReviewedOrResolved
-        }
+        CommitStatusFilter::Reviewed => crate::model::UiSessionCommitStatusFilter::Reviewed,
     }
 }
 
@@ -976,9 +974,7 @@ fn commit_status_filter_from_session(
         crate::model::UiSessionCommitStatusFilter::UnreviewedOrIssueFound => {
             CommitStatusFilter::UnreviewedOrIssueFound
         }
-        crate::model::UiSessionCommitStatusFilter::ReviewedOrResolved => {
-            CommitStatusFilter::ReviewedOrResolved
-        }
+        crate::model::UiSessionCommitStatusFilter::Reviewed => CommitStatusFilter::Reviewed,
     }
 }
 

@@ -48,14 +48,14 @@ fn set_many_status_writes_each_commit() {
     store.set_many_status(
         &mut state,
         ["a1".to_string(), "b2".to_string()],
-        ReviewStatus::Resolved,
+        ReviewStatus::Reviewed,
         "feature/x",
     );
 
     assert_eq!(state.statuses.len(), 2);
     assert_eq!(
         state.statuses.get("a1").expect("a1").status,
-        ReviewStatus::Resolved
+        ReviewStatus::Reviewed
     );
 }
 
@@ -88,6 +88,42 @@ fn legacy_state_upgrades_to_reviewed() {
         loaded.statuses.get("abc").expect("abc").status,
         ReviewStatus::Reviewed
     );
+}
+
+#[test]
+fn load_migrates_resolved_tokens_to_reviewed() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+    let legacy_raw = r#"{
+  "version": 2,
+  "statuses": {
+    "abc": {
+      "status": "RESOLVED",
+      "branch": "main",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "ui_session": {
+    "commit_status_filter": "REVIEWED_OR_RESOLVED"
+  }
+}"#;
+
+    fs::create_dir_all(store.root_dir()).expect("mkdir");
+    fs::write(store.state_path.clone(), legacy_raw).expect("write");
+
+    let loaded = store.load().expect("load");
+    assert_eq!(
+        loaded.statuses.get("abc").expect("abc").status,
+        ReviewStatus::Reviewed
+    );
+    assert_eq!(
+        loaded.ui_session.commit_status_filter,
+        Some(UiSessionCommitStatusFilter::Reviewed)
+    );
+
+    let persisted = fs::read_to_string(store.state_path.clone()).expect("read migrated state");
+    assert!(!persisted.contains("RESOLVED"));
+    assert!(!persisted.contains("REVIEWED_OR_RESOLVED"));
 }
 
 #[test]
@@ -145,7 +181,7 @@ fn state_roundtrip_preserves_ui_session_snapshot() {
         ui_session: UiSessionState {
             selected_commit_ids: BTreeSet::from(["a1".to_owned(), "b2".to_owned()]),
             commit_cursor_id: Some("b2".to_owned()),
-            commit_status_filter: Some(UiSessionCommitStatusFilter::ReviewedOrResolved),
+            commit_status_filter: Some(UiSessionCommitStatusFilter::Reviewed),
             focused_pane: Some(UiSessionFocusPane::Diff),
             theme_mode: Some(UiSessionThemeMode::Light),
             selected_file: Some("src/lib.rs".to_owned()),

@@ -354,7 +354,6 @@ pub(super) fn status_short_label(status: ReviewStatus) -> &'static str {
         ReviewStatus::Unreviewed => "UNREVIEWED",
         ReviewStatus::Reviewed => "REVIEWED",
         ReviewStatus::IssueFound => "ISSUE_FOUND",
-        ReviewStatus::Resolved => "RESOLVED",
     }
 }
 

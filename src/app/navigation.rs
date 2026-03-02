@@ -923,11 +923,10 @@ impl App {
         }))
     }
 
-    pub(super) fn status_counts(&self) -> (usize, usize, usize, usize) {
+    pub(super) fn status_counts(&self) -> (usize, usize, usize) {
         let mut unreviewed = 0;
         let mut reviewed = 0;
         let mut issue_found = 0;
-        let mut resolved = 0;
         for row in &self.domain.commits {
             if row.is_uncommitted {
                 continue;
@@ -936,10 +935,9 @@ impl App {
                 ReviewStatus::Unreviewed => unreviewed += 1,
                 ReviewStatus::Reviewed => reviewed += 1,
                 ReviewStatus::IssueFound => issue_found += 1,
-                ReviewStatus::Resolved => resolved += 1,
             }
         }
-        (unreviewed, reviewed, issue_found, resolved)
+        (unreviewed, reviewed, issue_found)
     }
 
     pub(super) fn uncommitted_selected(&self) -> bool {

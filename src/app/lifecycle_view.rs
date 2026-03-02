@@ -361,7 +361,7 @@ impl App {
                 FocusPane::Commits => Line::from(vec![
                     key_chip("space", theme),
                     Span::styled(" select ", Style::default().fg(theme.muted)),
-                    key_chip("u/r/i/s", theme),
+                    key_chip("u/r/i", theme),
                     Span::styled(" set status ", Style::default().fg(theme.muted)),
                     key_chip("e", theme),
                     Span::styled(" status filter ", Style::default().fg(theme.muted)),
@@ -1280,7 +1280,7 @@ impl App {
                 Span::raw(" visual select (commits or diff)"),
             ]),
             Line::from(vec![
-                key_chip("u/r/i/s", theme),
+                key_chip("u/r/i", theme),
                 Span::raw(" set status for selected/current commits"),
             ]),
             Line::from(vec![
@@ -1375,8 +1375,6 @@ impl App {
                 Span::styled("REVIEWED", Style::default().fg(theme.reviewed)),
                 Span::raw("  "),
                 Span::styled("ISSUE_FOUND", Style::default().fg(theme.issue)),
-                Span::raw("  "),
-                Span::styled("RESOLVED", Style::default().fg(theme.resolved)),
             ]),
             Line::from(""),
             Line::from(vec![

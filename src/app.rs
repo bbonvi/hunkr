@@ -156,15 +156,15 @@ impl ThemeMode {
 enum CommitStatusFilter {
     All,
     UnreviewedOrIssueFound,
-    ReviewedOrResolved,
+    Reviewed,
 }
 
 impl CommitStatusFilter {
     fn next(self) -> Self {
         match self {
             Self::All => Self::UnreviewedOrIssueFound,
-            Self::UnreviewedOrIssueFound => Self::ReviewedOrResolved,
-            Self::ReviewedOrResolved => Self::All,
+            Self::UnreviewedOrIssueFound => Self::Reviewed,
+            Self::Reviewed => Self::All,
         }
     }
 
@@ -172,7 +172,7 @@ impl CommitStatusFilter {
         match self {
             Self::All => "all",
             Self::UnreviewedOrIssueFound => "unreviewed|issue_found",
-            Self::ReviewedOrResolved => "reviewed|resolved",
+            Self::Reviewed => "reviewed",
         }
     }
 
@@ -189,9 +189,7 @@ impl CommitStatusFilter {
                     ReviewStatus::Unreviewed | ReviewStatus::IssueFound
                 )
             }
-            Self::ReviewedOrResolved => {
-                matches!(row.status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
-            }
+            Self::Reviewed => matches!(row.status, ReviewStatus::Reviewed),
         }
     }
 }
@@ -221,7 +219,6 @@ struct UiTheme {
     reviewed: Color,
     unreviewed: Color,
     issue: Color,
-    resolved: Color,
     unpushed: Color,
     diff_add: Color,
     diff_add_bg: Color,
@@ -263,7 +260,6 @@ impl UiTheme {
                 reviewed: Color::Rgb(85, 190, 120),
                 unreviewed: Color::Rgb(236, 92, 92),
                 issue: Color::Rgb(238, 184, 64),
-                resolved: Color::Rgb(84, 178, 209),
                 unpushed: Color::Rgb(87, 181, 227),
                 diff_add: Color::Rgb(123, 214, 144),
                 diff_add_bg: Color::Rgb(19, 51, 30),
@@ -301,7 +297,6 @@ impl UiTheme {
                 reviewed: Color::Rgb(36, 141, 74),
                 unreviewed: Color::Rgb(194, 48, 48),
                 issue: Color::Rgb(170, 113, 0),
-                resolved: Color::Rgb(0, 122, 151),
                 unpushed: Color::Rgb(10, 131, 163),
                 diff_add: Color::Rgb(16, 127, 33),
                 diff_add_bg: Color::Rgb(230, 248, 233),

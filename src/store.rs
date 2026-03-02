@@ -116,6 +116,16 @@ impl StateStore {
         let raw = fs::read_to_string(&self.state_path)
             .with_context(|| format!("failed to read {}", self.state_path.display()))?;
 
+        if let Ok(mut parsed_json) = serde_json::from_str::<serde_json::Value>(&raw) {
+            let migrated = migrate_resolved_status_tokens(&mut parsed_json);
+            if let Ok(parsed) = serde_json::from_value::<ReviewState>(parsed_json) {
+                if migrated {
+                    self.save(&parsed)?;
+                }
+                return Ok(parsed);
+            }
+        }
+
         if let Ok(parsed) = serde_json::from_str::<ReviewState>(&raw) {
             return Ok(parsed);
         }
@@ -219,6 +229,44 @@ impl StateStore {
             );
         }
     }
+}
+
+/// Migrates legacy resolved status/filter values to reviewed in-place.
+fn migrate_resolved_status_tokens(value: &mut serde_json::Value) -> bool {
+    let mut migrated = false;
+
+    if let Some(statuses) = value
+        .get_mut("statuses")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        for entry in statuses.values_mut() {
+            let Some(status_obj) = entry.as_object_mut() else {
+                continue;
+            };
+            let Some(status) = status_obj.get_mut("status") else {
+                continue;
+            };
+            if matches!(status, serde_json::Value::String(current) if current == "RESOLVED") {
+                *status = serde_json::Value::String("REVIEWED".to_owned());
+                migrated = true;
+            }
+        }
+    }
+
+    if let Some(ui_session) = value
+        .get_mut("ui_session")
+        .and_then(serde_json::Value::as_object_mut)
+        && let Some(filter) = ui_session.get_mut("commit_status_filter")
+        && matches!(
+            filter,
+            serde_json::Value::String(current) if current == "REVIEWED_OR_RESOLVED"
+        )
+    {
+        *filter = serde_json::Value::String("REVIEWED".to_owned());
+        migrated = true;
+    }
+
+    migrated
 }
 
 #[derive(Debug, Deserialize)]

@@ -89,7 +89,6 @@ pub(in crate::app) fn status_style(status: ReviewStatus, theme: &UiTheme) -> Sty
         ReviewStatus::IssueFound => Style::default()
             .fg(theme.issue)
             .add_modifier(Modifier::BOLD),
-        ReviewStatus::Resolved => Style::default().fg(theme.resolved),
     }
 }
 

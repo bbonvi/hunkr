@@ -179,14 +179,12 @@ pub(super) fn commit_status_badge(status: ReviewStatus, nerd_fonts: bool) -> &'s
             ReviewStatus::Unreviewed => "",
             ReviewStatus::Reviewed => "",
             ReviewStatus::IssueFound => "",
-            ReviewStatus::Resolved => "",
         };
     }
     match status {
         ReviewStatus::Unreviewed => "U",
         ReviewStatus::Reviewed => "R",
         ReviewStatus::IssueFound => "I",
-        ReviewStatus::Resolved => "S",
     }
 }
 

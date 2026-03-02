@@ -55,7 +55,7 @@ pub(in crate::app) struct CommitPaneViewModel<'a> {
     pub selected_total: usize,
     pub shown_commits: usize,
     pub total_commits: usize,
-    pub status_counts: (usize, usize, usize, usize),
+    pub status_counts: (usize, usize, usize),
     pub status_filter: CommitStatusFilter,
     pub search_display: String,
     pub search_enabled: bool,
@@ -69,7 +69,7 @@ pub(in crate::app) struct CommitPaneVmInput<'a> {
     pub comment_badge_commit_ids: &'a BTreeSet<String>,
     pub selected_total: usize,
     pub total_commits: usize,
-    pub status_counts: (usize, usize, usize, usize),
+    pub status_counts: (usize, usize, usize),
     pub status_filter: CommitStatusFilter,
 }
 
@@ -279,7 +279,7 @@ mod tests {
             comment_badge_commit_ids: &commented,
             selected_total: 2,
             total_commits: 3,
-            status_counts: (1, 0, 0, 0),
+            status_counts: (1, 0, 0),
             status_filter: CommitStatusFilter::All,
         });
 
@@ -303,7 +303,7 @@ mod tests {
             comment_badge_commit_ids: &ids,
             selected_total: 0,
             total_commits: 1,
-            status_counts: (1, 0, 0, 0),
+            status_counts: (1, 0, 0),
             status_filter: CommitStatusFilter::All,
         });
 

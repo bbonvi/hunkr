@@ -1570,7 +1570,7 @@ fn resolve_row_background_blend_policy_combines_selection_and_cursor() {
         cursor_bg,
         CursorSelectionPolicy::BlendCursorOverSelection { weight: 170 },
     );
-    assert!(bg.is_some_and(|resolved| resolved != selection_bg && resolved != cursor_bg));
+    assert!(bg.is_some_and(|blended| blended != selection_bg && blended != cursor_bg));
 }
 
 #[test]
@@ -1630,12 +1630,9 @@ fn commit_status_filter_cycles_in_expected_order() {
     );
     assert_eq!(
         CommitStatusFilter::UnreviewedOrIssueFound.next(),
-        CommitStatusFilter::ReviewedOrResolved
+        CommitStatusFilter::Reviewed
     );
-    assert_eq!(
-        CommitStatusFilter::ReviewedOrResolved.next(),
-        CommitStatusFilter::All
-    );
+    assert_eq!(CommitStatusFilter::Reviewed.next(), CommitStatusFilter::All);
 }
 
 #[test]
@@ -1643,7 +1640,7 @@ fn commit_status_filter_groups_rows_correctly() {
     let unreviewed = commit_row("a", false, ReviewStatus::Unreviewed);
     let issue = commit_row("b", false, ReviewStatus::IssueFound);
     let reviewed = commit_row("c", false, ReviewStatus::Reviewed);
-    let resolved = commit_row("d", false, ReviewStatus::Resolved);
+    let reviewed_peer = commit_row("d", false, ReviewStatus::Reviewed);
     let mut draft = commit_row("wip", false, ReviewStatus::Unreviewed);
     draft.is_uncommitted = true;
 
@@ -1651,13 +1648,13 @@ fn commit_status_filter_groups_rows_correctly() {
     assert!(CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&issue));
     assert!(CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&draft));
     assert!(!CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&reviewed));
-    assert!(!CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&resolved));
+    assert!(!CommitStatusFilter::UnreviewedOrIssueFound.matches_row(&reviewed_peer));
 
-    assert!(CommitStatusFilter::ReviewedOrResolved.matches_row(&reviewed));
-    assert!(CommitStatusFilter::ReviewedOrResolved.matches_row(&resolved));
-    assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&unreviewed));
-    assert!(!CommitStatusFilter::ReviewedOrResolved.matches_row(&issue));
-    assert!(CommitStatusFilter::ReviewedOrResolved.matches_row(&draft));
+    assert!(CommitStatusFilter::Reviewed.matches_row(&reviewed));
+    assert!(CommitStatusFilter::Reviewed.matches_row(&reviewed_peer));
+    assert!(!CommitStatusFilter::Reviewed.matches_row(&unreviewed));
+    assert!(!CommitStatusFilter::Reviewed.matches_row(&issue));
+    assert!(CommitStatusFilter::Reviewed.matches_row(&draft));
 }
 
 #[test]
@@ -1708,8 +1705,7 @@ fn switching_status_filter_deselects_hidden_commits() {
     assert!(!rows[1].selected);
     assert!(rows[2].selected);
 
-    let deselected =
-        deselect_rows_outside_status_filter(&mut rows, CommitStatusFilter::ReviewedOrResolved);
+    let deselected = deselect_rows_outside_status_filter(&mut rows, CommitStatusFilter::Reviewed);
     assert_eq!(deselected, 1);
     assert!(!rows[0].selected);
     assert!(!rows[1].selected);
@@ -1721,7 +1717,7 @@ fn selected_rows_hidden_count_tracks_active_filter() {
     let mut rows = vec![
         commit_row("a", true, ReviewStatus::Unreviewed),
         commit_row("b", true, ReviewStatus::Reviewed),
-        commit_row("c", false, ReviewStatus::Resolved),
+        commit_row("c", false, ReviewStatus::Reviewed),
         commit_row("wip", true, ReviewStatus::Unreviewed),
     ];
     rows[3].is_uncommitted = true;
@@ -1736,7 +1732,7 @@ fn selected_rows_hidden_count_tracks_active_filter() {
         2
     );
     assert_eq!(
-        selected_rows_hidden_by_status_filter(&rows, CommitStatusFilter::ReviewedOrResolved),
+        selected_rows_hidden_by_status_filter(&rows, CommitStatusFilter::Reviewed),
         1
     );
 }

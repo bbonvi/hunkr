@@ -71,7 +71,6 @@ impl App {
             KeyCode::Char('u') => self.set_contextual_commit_status(ReviewStatus::Unreviewed),
             KeyCode::Char('r') => self.set_contextual_commit_status(ReviewStatus::Reviewed),
             KeyCode::Char('i') => self.set_contextual_commit_status(ReviewStatus::IssueFound),
-            KeyCode::Char('s') => self.set_contextual_commit_status(ReviewStatus::Resolved),
             _ => {}
         }
     }

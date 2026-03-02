@@ -16,7 +16,6 @@ pub enum ReviewStatus {
     Unreviewed,
     Reviewed,
     IssueFound,
-    Resolved,
 }
 
 impl ReviewStatus {
@@ -25,7 +24,6 @@ impl ReviewStatus {
             Self::Unreviewed => "UNREVIEWED",
             Self::Reviewed => "REVIEWED",
             Self::IssueFound => "ISSUE_FOUND",
-            Self::Resolved => "RESOLVED",
         }
     }
 }
@@ -91,7 +89,7 @@ pub enum UiSessionFocusPane {
 pub enum UiSessionCommitStatusFilter {
     All,
     UnreviewedOrIssueFound,
-    ReviewedOrResolved,
+    Reviewed,
 }
 
 /// Serializable UI theme-mode variant for restart persistence.

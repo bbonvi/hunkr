@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use chrono::{DateTime, Utc};
 use crate::model::{CommitDecoration, CommitDecorationKind, FileChangeKind, ReviewStatus};
+use chrono::{DateTime, Utc};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -43,7 +43,7 @@ pub(in crate::app) struct FilePaneModel<'a> {
 pub(in crate::app) struct CommitPaneModel<'a> {
     pub commits: &'a [CommitRow],
     pub comment_badge_commit_ids: &'a BTreeSet<String>,
-    pub status_counts: (usize, usize, usize, usize),
+    pub status_counts: (usize, usize, usize),
     pub selected_total: usize,
     pub shown_commits: usize,
     pub total_commits: usize,
@@ -194,7 +194,7 @@ impl<'a> ListPaneRenderer<'a> {
             search_enabled,
             commit_list_state,
         } = model;
-        let (unreviewed, reviewed, issue_found, resolved) = status_counts;
+        let (unreviewed, reviewed, issue_found) = status_counts;
         let filter_style = if search_enabled {
             Style::default()
                 .fg(self.theme.accent)
@@ -213,7 +213,7 @@ impl<'a> ListPaneRenderer<'a> {
             Span::raw(" "),
         ];
         title_spans.extend(commit_status_count_spans(
-            (unreviewed, reviewed, issue_found, resolved),
+            (unreviewed, reviewed, issue_found),
             self.theme,
             self.nerd_fonts,
         ));
@@ -331,30 +331,23 @@ pub(in crate::app) fn commit_status_filter_spans(
                 status_style(ReviewStatus::IssueFound, theme),
             ),
         ],
-        CommitStatusFilter::ReviewedOrResolved => vec![
-            Span::styled(
-                commit_status_badge(ReviewStatus::Reviewed, nerd_fonts).to_owned(),
-                status_style(ReviewStatus::Reviewed, theme),
-            ),
-            Span::styled(
-                commit_status_badge(ReviewStatus::Resolved, nerd_fonts).to_owned(),
-                status_style(ReviewStatus::Resolved, theme),
-            ),
-        ],
+        CommitStatusFilter::Reviewed => vec![Span::styled(
+            commit_status_badge(ReviewStatus::Reviewed, nerd_fonts).to_owned(),
+            status_style(ReviewStatus::Reviewed, theme),
+        )],
     }
 }
 
 fn commit_status_count_spans(
-    status_counts: (usize, usize, usize, usize),
+    status_counts: (usize, usize, usize),
     theme: &UiTheme,
     nerd_fonts: bool,
 ) -> Vec<Span<'static>> {
-    let (unreviewed, reviewed, issue_found, resolved) = status_counts;
+    let (unreviewed, reviewed, issue_found) = status_counts;
     let chips = [
         (ReviewStatus::Unreviewed, unreviewed),
         (ReviewStatus::Reviewed, reviewed),
         (ReviewStatus::IssueFound, issue_found),
-        (ReviewStatus::Resolved, resolved),
     ];
     let last_idx = chips.len().saturating_sub(1);
     let mut spans = Vec::new();
@@ -969,13 +962,12 @@ mod tests {
             (ReviewStatus::Unreviewed, 9),
             (ReviewStatus::Reviewed, 8),
             (ReviewStatus::IssueFound, 7),
-            (ReviewStatus::Resolved, 6),
         ];
-        let nerd_text = super::commit_status_count_spans((9, 8, 7, 6), &theme, true)
+        let nerd_text = super::commit_status_count_spans((9, 8, 7), &theme, true)
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
-        let ascii_text = super::commit_status_count_spans((9, 8, 7, 6), &theme, false)
+        let ascii_text = super::commit_status_count_spans((9, 8, 7), &theme, false)
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();

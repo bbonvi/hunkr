@@ -98,7 +98,7 @@ fn legacy_comment_index_without_kind_defaults_to_hunk() {
 }
 
 #[test]
-fn sync_report_hides_reviewed_and_resolved_comments() {
+fn sync_report_hides_reviewed_comments() {
     let tmp = tempdir().expect("tempdir");
     let mut store = CommentStore::new(tmp.path(), "feature/test").expect("new store");
     let first = store

@@ -257,7 +257,7 @@ where
 }
 
 fn hidden_from_task_file(status: ReviewStatus) -> bool {
-    matches!(status, ReviewStatus::Reviewed | ReviewStatus::Resolved)
+    matches!(status, ReviewStatus::Reviewed)
 }
 
 /// Formats source identifiers for agent-facing task context.

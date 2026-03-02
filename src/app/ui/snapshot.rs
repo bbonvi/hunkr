@@ -36,7 +36,7 @@ pub(in crate::app) struct CommitPaneSnapshot {
     pub comment_badge_commit_ids: BTreeSet<String>,
     pub selected_total: usize,
     pub total_commits: usize,
-    pub status_counts: (usize, usize, usize, usize),
+    pub status_counts: (usize, usize, usize),
     pub status_filter: CommitStatusFilter,
 }
 
