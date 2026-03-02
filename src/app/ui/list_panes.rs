@@ -500,6 +500,20 @@ impl<'a> ListLinePresenter<'a> {
         } else {
             Style::default().fg(self.theme.text)
         };
+        let decoration_style = if row.selected {
+            Style::default()
+                .fg(self.theme.accent)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.theme.accent)
+        };
+        let age_style = if row.selected {
+            Style::default()
+                .fg(self.theme.dimmed)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(self.theme.dimmed)
+        };
         let summary = sanitize_terminal_text(&row.info.summary);
         if row.is_uncommitted {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
@@ -546,10 +560,7 @@ impl<'a> ListLinePresenter<'a> {
                 if right_width > 0 {
                     right_spans.push(Span::raw(" "));
                 }
-                right_spans.push(Span::styled(
-                    rendered.clone(),
-                    Style::default().fg(self.theme.accent),
-                ));
+                right_spans.push(Span::styled(rendered.clone(), decoration_style));
                 right_width += display_width(&rendered) + usize::from(right_width > 0);
             }
         }
@@ -600,10 +611,7 @@ impl<'a> ListLinePresenter<'a> {
         let age_width = display_width(&age);
         if right_width + 1 + age_width <= max_right_width {
             right_spans.push(Span::raw(" "));
-            right_spans.push(Span::styled(
-                age.clone(),
-                Style::default().fg(self.theme.dimmed),
-            ));
+            right_spans.push(Span::styled(age.clone(), age_style));
             right_width += 1 + age_width;
         }
         let max_left = self.width.saturating_sub(right_width + 1).max(1);
@@ -841,5 +849,40 @@ mod tests {
                 .first()
                 .is_some_and(|span| span.style.add_modifier.contains(Modifier::BOLD))
         );
+    }
+
+    #[test]
+    fn selected_commit_row_decorations_and_age_are_bold() {
+        let theme = UiTheme::from_mode(ThemeMode::Light);
+        let presenter = super::ListLinePresenter::new(120, 1_710_000_000, &theme, false);
+        let row = CommitRow {
+            info: crate::model::CommitInfo {
+                id: "def456".to_owned(),
+                short_id: "def456".to_owned(),
+                summary: "Style selected metadata".to_owned(),
+                author: "dev".to_owned(),
+                timestamp: 1_709_999_000,
+                unpushed: false,
+                decorations: vec![crate::model::CommitDecoration {
+                    kind: crate::model::CommitDecorationKind::LocalBranch,
+                    label: "main".to_owned(),
+                }],
+            },
+            selected: true,
+            status: ReviewStatus::Reviewed,
+            is_uncommitted: false,
+        };
+
+        let line = presenter.commit_row_line_with_push_chain(&row, None, false);
+        assert!(line.spans.iter().any(|span| {
+            span.content.contains("refs:main")
+                && span.style.add_modifier.contains(Modifier::BOLD)
+                && span.style.fg == Some(theme.accent)
+        }));
+        assert!(line.spans.iter().any(|span| {
+            span.style.fg == Some(theme.dimmed)
+                && !span.content.trim().is_empty()
+                && span.style.add_modifier.contains(Modifier::BOLD)
+        }));
     }
 }
