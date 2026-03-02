@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use chrono::{DateTime, Utc};
 use crate::model::{CommitDecoration, CommitDecorationKind, FileChangeKind, ReviewStatus};
 use ratatui::{
     Frame,
@@ -837,6 +838,7 @@ pub(in crate::app) fn focused_commit_metadata_summary(
         Some(row) => {
             let mut meta_parts = vec![
                 sanitize_terminal_text(&row.info.short_id),
+                format_commit_date(row.info.timestamp),
                 sanitize_terminal_text(row.info.author.trim()),
                 if row.info.unpushed {
                     "unpushed".to_owned()
@@ -854,6 +856,12 @@ pub(in crate::app) fn focused_commit_metadata_summary(
         }
         None => "no commit selected".to_owned(),
     }
+}
+
+fn format_commit_date(timestamp: i64) -> String {
+    DateTime::<Utc>::from_timestamp(timestamp, 0)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "?".to_owned())
 }
 
 fn max_visible_age_width<T, F>(
@@ -1079,6 +1087,7 @@ mod tests {
         let metadata = super::focused_commit_metadata_summary(Some(&row), false);
         assert!(!metadata.contains("meta "));
         assert!(metadata.contains("abc1234"));
+        assert!(metadata.contains("2024-03-09"));
         assert!(metadata.contains("dev"));
         assert!(metadata.contains("unpushed"));
         assert!(metadata.contains("refs main"));
@@ -1086,6 +1095,7 @@ mod tests {
         assert!(!metadata.contains("id:"));
         assert!(!metadata.contains("author:"));
         assert!(!metadata.contains("state:"));
+        assert!(metadata.find("2024-03-09") < metadata.find("dev"));
     }
 
     #[test]
