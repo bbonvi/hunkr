@@ -45,13 +45,6 @@ pub(in crate::app) fn dispatch_normal_mode_key(app: &mut App, key: KeyEvent) -> 
         {
             app.open_shell_command_modal();
         }
-        KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
-            if app.ui.preferences.focused == FocusPane::Diff {
-                app.dispatch_focus_key(key);
-            } else {
-                app.open_worktree_switcher();
-            }
-        }
         KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.open_worktree_switcher();
         }
