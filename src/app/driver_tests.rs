@@ -497,6 +497,43 @@ fn help_overlay_question_helper_click_closes_overlay() {
 }
 
 #[test]
+fn help_overlay_non_close_helper_click_keeps_overlay_open() {
+    let repo = init_test_repo();
+    let mut app = bootstrap_driver(repo.path()).into_app();
+    app.handle_event(Event::Key(press(KeyCode::Char('?'), KeyModifiers::NONE)));
+    assert!(app.runtime.show_help);
+    let baseline_focus = app.ui.preferences.focused;
+    draw_app(&mut app, 140, 40);
+
+    let help_nav = app
+        .ui
+        .helper_click_hitboxes
+        .iter()
+        .find(|hitbox| {
+            hitbox.rect.y < 36
+                && matches!(
+                    hitbox.action,
+                    HelperClickAction::Key {
+                        code: KeyCode::Char('1'),
+                        modifiers: KeyModifiers::NONE,
+                    }
+                )
+        })
+        .copied()
+        .expect("help nav helper hitbox");
+
+    app.handle_event(Event::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: help_nav.rect.x,
+        row: help_nav.rect.y,
+        modifiers: KeyModifiers::NONE,
+    }));
+
+    assert!(app.runtime.show_help);
+    assert_eq!(app.ui.preferences.focused, baseline_focus);
+}
+
+#[test]
 fn draw_perf_guardrail_counts_over_budget_frames() {
     let repo = init_test_repo();
     let driver = bootstrap_driver(repo.path());

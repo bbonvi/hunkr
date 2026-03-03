@@ -1,6 +1,5 @@
 //! Mouse interaction handlers for list panes, diff, and comment editor modal.
 use super::input::modal_controller;
-use super::lifecycle_render::help_overlay_close_key;
 use crate::app::*;
 
 impl App {
@@ -356,9 +355,6 @@ impl App {
         match action {
             HelperClickAction::Key { code, modifiers } => {
                 let key = KeyEvent::new(code, modifiers);
-                if self.runtime.show_help && !help_overlay_close_key(key) {
-                    self.runtime.show_help = false;
-                }
                 self.handle_key(key);
             }
         }
