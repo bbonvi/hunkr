@@ -121,11 +121,10 @@ impl App {
                         let drag_mode = commit_mouse_selection_mode(mouse.modifiers);
                         let clicked_full_idx =
                             self.select_commit_row_with_mouse(idx, mouse.modifiers);
-                        if drag_mode == CommitMouseSelectionMode::Replace {
-                            self.ui.commit_ui.mouse_anchor = clicked_full_idx;
-                        } else {
-                            self.ui.commit_ui.mouse_anchor = None;
-                        }
+                        self.ui.commit_ui.mouse_anchor = match drag_mode {
+                            CommitMouseSelectionMode::Replace => clicked_full_idx,
+                            CommitMouseSelectionMode::Range => self.ui.commit_ui.selection_anchor,
+                        };
                     }
                 } else if in_diff {
                     self.set_focus(FocusPane::Diff);
