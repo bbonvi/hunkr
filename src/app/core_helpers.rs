@@ -272,6 +272,7 @@ pub(super) fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
 
 pub(super) fn commit_row_matches_query(row: &CommitRow, query: &str) -> bool {
     let status = status_short_label(row.status);
+    let status_machine = row.status.as_str();
     contains_case_insensitive(&row.info.short_id, query)
         || contains_case_insensitive(&row.info.id, query)
         || contains_case_insensitive(&row.info.summary, query)
@@ -282,6 +283,7 @@ pub(super) fn commit_row_matches_query(row: &CommitRow, query: &str) -> bool {
             .iter()
             .any(|item| contains_case_insensitive(&item.label, query))
         || contains_case_insensitive(status, query)
+        || contains_case_insensitive(status_machine, query)
 }
 
 pub(super) fn commit_row_matches_filter_query(row: &CommitRow, query: &str) -> bool {
@@ -398,20 +400,29 @@ pub(super) fn matching_file_indices_with_parent_dirs(rows: &[TreeRow], query: &s
 }
 
 pub(super) fn key_chip(label: &'static str, theme: &UiTheme) -> Span<'static> {
-    Span::styled(
-        format!(" {} ", label),
-        Style::default()
-            .fg(theme.panel_title_fg)
-            .bg(theme.panel_title_bg)
-            .add_modifier(Modifier::BOLD),
-    )
+    Span::styled(format!(" {} ", label), key_chip_style(theme))
+}
+
+pub(super) fn key_chip_style(theme: &UiTheme) -> Style {
+    Style::default()
+        .fg(theme.panel_title_fg)
+        .bg(theme.panel_title_bg)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub(super) fn status_short_label(status: ReviewStatus) -> &'static str {
     match status {
-        ReviewStatus::Unreviewed => "UNREVIEWED",
-        ReviewStatus::Reviewed => "REVIEWED",
-        ReviewStatus::IssueFound => "ISSUE_FOUND",
+        ReviewStatus::Unreviewed => "unreviewed",
+        ReviewStatus::Reviewed => "reviewed",
+        ReviewStatus::IssueFound => "issue found",
+    }
+}
+
+pub(super) fn status_display_label(status: ReviewStatus) -> &'static str {
+    match status {
+        ReviewStatus::Unreviewed => "Unreviewed",
+        ReviewStatus::Reviewed => "Reviewed",
+        ReviewStatus::IssueFound => "Issue Found",
     }
 }
 

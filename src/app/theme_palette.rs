@@ -323,7 +323,7 @@ mod tests {
         );
         assert_eq!(
             state.for_mode(ThemeMode::Light).commit_selected_text,
-            Color::Rgb(0, 123, 184),
+            Color::Rgb(18, 63, 94),
         );
     }
 
@@ -367,8 +367,8 @@ mod tests {
         fs::create_dir_all(&config_dir).expect("create config dir");
         let theme_path = config_dir.join(THEME_FILE_NAME);
         let legacy_theme = include_str!("../../theme.example.yaml")
-            .replace("  commit_selected_text: \"#78c4ff\"\n", "")
-            .replace("  commit_selected_text: \"#007bb8\"\n", "");
+            .replace("  commit_selected_text: \"#d3e9ff\"\n", "")
+            .replace("  commit_selected_text: \"#123f5e\"\n", "");
         fs::write(&theme_path, legacy_theme).expect("write theme");
 
         let mut state = ThemeRuntimeState::new(theme_path);

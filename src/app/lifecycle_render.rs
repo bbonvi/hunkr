@@ -185,6 +185,7 @@ impl App {
                     file_query: String::new(),
                     file_cursor: 0,
                 },
+                helper_click_hitboxes: Vec::new(),
             },
             theme: ThemeRuntimeState::new(theme_path),
             runtime: RuntimeState {
@@ -390,6 +391,7 @@ impl App {
         self.ui.comment_editor.text_offset = 0;
         self.ui.shell_command.output_rect = None;
         self.ui.shell_command.output_viewport = 0;
+        self.ui.helper_click_hitboxes.clear();
 
         let root_chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)

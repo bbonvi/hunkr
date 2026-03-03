@@ -252,13 +252,10 @@ impl App {
             *self.ui.commit_ui.list_state.offset_mut() = next_top;
         }
         self.runtime.status = if deselected == 0 {
-            format!(
-                "Commit status filter: {}",
-                self.ui.commit_ui.status_filter.label()
-            )
+            format!("Status Filter: {}", self.ui.commit_ui.status_filter.label())
         } else {
             format!(
-                "Commit status filter: {} (deselected {} hidden commit(s))",
+                "Status Filter: {} (deselected {} hidden commit(s))",
                 self.ui.commit_ui.status_filter.label(),
                 deselected
             )
@@ -771,10 +768,9 @@ impl App {
         self.ui.commit_ui.mouse_drag_baseline = None;
         self.clear_diff_visual_selection();
         self.ui.diff_ui.pending_op = None;
-        if let Some(cleared) = focus_change_cleared_selection_note(
-            cleared_commit_visual,
-            cleared_diff_visual,
-        ) {
+        if let Some(cleared) =
+            focus_change_cleared_selection_note(cleared_commit_visual, cleared_diff_visual)
+        {
             self.runtime.status = format!("Focus -> {} ({cleared})", focus_pane_label(next));
         }
     }

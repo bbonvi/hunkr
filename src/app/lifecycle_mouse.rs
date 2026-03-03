@@ -1,10 +1,15 @@
 //! Mouse interaction handlers for list panes, diff, and comment editor modal.
 use super::input::modal_controller;
+use super::lifecycle_render::help_overlay_close_key;
 use crate::app::*;
 
 impl App {
     pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
         if self.onboarding_active() {
+            return;
+        }
+
+        if self.dispatch_helper_click(mouse) {
             return;
         }
 
@@ -326,6 +331,36 @@ impl App {
                 self.ui.comment_editor.mouse_anchor = None;
             }
             _ => {}
+        }
+    }
+
+    fn dispatch_helper_click(&mut self, mouse: crossterm::event::MouseEvent) -> bool {
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return false;
+        }
+        let Some(hitbox) = self
+            .ui
+            .helper_click_hitboxes
+            .iter()
+            .rev()
+            .find(|hitbox| contains(hitbox.rect, mouse.column, mouse.row))
+            .copied()
+        else {
+            return false;
+        };
+        self.trigger_helper_click_action(hitbox.action);
+        true
+    }
+
+    fn trigger_helper_click_action(&mut self, action: HelperClickAction) {
+        match action {
+            HelperClickAction::Key { code, modifiers } => {
+                let key = KeyEvent::new(code, modifiers);
+                if self.runtime.show_help && !help_overlay_close_key(key) {
+                    self.runtime.show_help = false;
+                }
+                self.handle_key(key);
+            }
         }
     }
 }

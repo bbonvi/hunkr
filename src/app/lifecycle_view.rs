@@ -6,6 +6,19 @@ use super::ui::view_models::{CommitPaneVmBuilder, FilePaneVmBuilder};
 use crate::app::*;
 use ratatui::widgets::{List, ListItem};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HelperChipBinding {
+    label: &'static str,
+    action: HelperClickAction,
+}
+
+fn helper_key(label: &'static str, code: KeyCode, modifiers: KeyModifiers) -> HelperChipBinding {
+    HelperChipBinding {
+        label,
+        action: HelperClickAction::Key { code, modifiers },
+    }
+}
+
 impl App {
     pub(super) fn render_header(
         &self,
@@ -252,7 +265,7 @@ impl App {
     }
 
     pub(super) fn render_footer(
-        &self,
+        &mut self,
         frame: &mut Frame<'_>,
         rect: ratatui::layout::Rect,
         theme: &UiTheme,
@@ -266,168 +279,255 @@ impl App {
             diff_visual_active,
         );
 
-        let pane_line = match snapshot.footer.input_mode {
-            InputMode::CommentCreate | InputMode::CommentEdit(_) => Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" save ", Style::default().fg(theme.muted)),
-                key_chip("Alt+Enter", theme),
-                Span::styled(" newline ", Style::default().fg(theme.muted)),
-                key_chip("mouse", theme),
-                Span::styled(" cursor/select ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" cancel comment", Style::default().fg(theme.muted)),
-            ]),
+        let (pane_line, pane_bindings) = match snapshot.footer.input_mode {
+            InputMode::CommentCreate | InputMode::CommentEdit(_) => (
+                Line::from(vec![
+                    key_chip("Enter", theme),
+                    Span::styled(" save ", Style::default().fg(theme.muted)),
+                    key_chip("Alt+Enter", theme),
+                    Span::styled(" newline ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" cancel", Style::default().fg(theme.muted)),
+                ]),
+                vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    helper_key("Alt+Enter", KeyCode::Enter, KeyModifiers::ALT),
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                ],
+            ),
             InputMode::ShellCommand => {
                 if snapshot.footer.shell.running {
-                    Line::from(vec![
-                        key_chip("j/k", theme),
-                        Span::styled(" move ", Style::default().fg(theme.muted)),
-                        key_chip("Ctrl-d/u", theme),
-                        Span::styled(" jump ", Style::default().fg(theme.muted)),
-                        key_chip("v", theme),
-                        Span::styled(" range ", Style::default().fg(theme.muted)),
-                        key_chip("y", theme),
-                        Span::styled(" copy output ", Style::default().fg(theme.muted)),
-                        key_chip("Esc", theme),
-                        Span::styled(" interrupt ", Style::default().fg(theme.muted)),
-                        key_chip("Backspace", theme),
-                        Span::styled(" reset", Style::default().fg(theme.muted)),
-                    ])
+                    (
+                        Line::from(vec![
+                            key_chip("j", theme),
+                            Span::styled(" move ", Style::default().fg(theme.muted)),
+                            key_chip("y", theme),
+                            Span::styled(" copy output ", Style::default().fg(theme.muted)),
+                            key_chip("Esc", theme),
+                            Span::styled(" interrupt ", Style::default().fg(theme.muted)),
+                            key_chip("Backspace", theme),
+                            Span::styled(" reset", Style::default().fg(theme.muted)),
+                        ]),
+                        vec![
+                            helper_key("j", KeyCode::Char('j'), KeyModifiers::NONE),
+                            helper_key("y", KeyCode::Char('y'), KeyModifiers::NONE),
+                            helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                            helper_key("Backspace", KeyCode::Backspace, KeyModifiers::NONE),
+                        ],
+                    )
                 } else if snapshot.footer.shell.finished {
-                    Line::from(vec![
-                        key_chip("j/k", theme),
-                        Span::styled(" move ", Style::default().fg(theme.muted)),
-                        key_chip("Ctrl-d/u", theme),
-                        Span::styled(" jump ", Style::default().fg(theme.muted)),
-                        key_chip("v", theme),
-                        Span::styled(" range ", Style::default().fg(theme.muted)),
-                        key_chip("y", theme),
-                        Span::styled(" copy output ", Style::default().fg(theme.muted)),
-                        key_chip("Esc", theme),
-                        Span::styled(" close ", Style::default().fg(theme.muted)),
-                        key_chip("Backspace", theme),
-                        Span::styled(" reset", Style::default().fg(theme.muted)),
-                    ])
+                    (
+                        Line::from(vec![
+                            key_chip("Enter", theme),
+                            Span::styled(" continue ", Style::default().fg(theme.muted)),
+                            key_chip("y", theme),
+                            Span::styled(" copy output ", Style::default().fg(theme.muted)),
+                            key_chip("Esc", theme),
+                            Span::styled(" close ", Style::default().fg(theme.muted)),
+                            key_chip("Backspace", theme),
+                            Span::styled(" reset", Style::default().fg(theme.muted)),
+                        ]),
+                        vec![
+                            helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                            helper_key("y", KeyCode::Char('y'), KeyModifiers::NONE),
+                            helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                            helper_key("Backspace", KeyCode::Backspace, KeyModifiers::NONE),
+                        ],
+                    )
                 } else {
-                    Line::from(vec![
-                        key_chip("Enter", theme),
-                        Span::styled(" run ", Style::default().fg(theme.muted)),
-                        key_chip("Ctrl-r", theme),
-                        Span::styled(" history search ", Style::default().fg(theme.muted)),
-                        key_chip("Up/Down", theme),
-                        Span::styled(" history ", Style::default().fg(theme.muted)),
-                        key_chip("Esc", theme),
-                        Span::styled(" close shell", Style::default().fg(theme.muted)),
-                    ])
+                    (
+                        Line::from(vec![
+                            key_chip("Enter", theme),
+                            Span::styled(" run ", Style::default().fg(theme.muted)),
+                            key_chip("Ctrl-r", theme),
+                            Span::styled(" history search ", Style::default().fg(theme.muted)),
+                            key_chip("Esc", theme),
+                            Span::styled(" close", Style::default().fg(theme.muted)),
+                        ]),
+                        vec![
+                            helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                            helper_key("Ctrl-r", KeyCode::Char('r'), KeyModifiers::CONTROL),
+                            helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                        ],
+                    )
                 }
             }
             InputMode::WorktreeSwitch => {
                 if snapshot.footer.worktree.search_active {
-                    Line::from(vec![
-                        key_chip("Enter", theme),
-                        Span::styled(" defocus ", Style::default().fg(theme.muted)),
-                        key_chip("Esc", theme),
-                        Span::styled(" clear ", Style::default().fg(theme.muted)),
-                        key_chip("Backspace", theme),
-                        Span::styled(" edit ", Style::default().fg(theme.muted)),
-                        key_chip("q", theme),
-                        Span::styled(" close ", Style::default().fg(theme.muted)),
-                    ])
+                    (
+                        Line::from(vec![
+                            key_chip("Enter", theme),
+                            Span::styled(" apply ", Style::default().fg(theme.muted)),
+                            key_chip("Esc", theme),
+                            Span::styled(" clear ", Style::default().fg(theme.muted)),
+                            key_chip("Backspace", theme),
+                            Span::styled(" edit ", Style::default().fg(theme.muted)),
+                            key_chip("q", theme),
+                            Span::styled(" close", Style::default().fg(theme.muted)),
+                        ]),
+                        vec![
+                            helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                            helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                            helper_key("Backspace", KeyCode::Backspace, KeyModifiers::NONE),
+                            helper_key("q", KeyCode::Char('q'), KeyModifiers::NONE),
+                        ],
+                    )
                 } else {
-                    Line::from(vec![
-                        key_chip("Enter", theme),
-                        Span::styled(" switch ", Style::default().fg(theme.muted)),
-                        key_chip("j/k", theme),
-                        Span::styled(" move ", Style::default().fg(theme.muted)),
-                        key_chip("Ctrl-d/u", theme),
-                        Span::styled(" jump ", Style::default().fg(theme.muted)),
-                        key_chip("/", theme),
-                        Span::styled(" search ", Style::default().fg(theme.muted)),
-                        key_chip("r", theme),
-                        Span::styled(" refresh ", Style::default().fg(theme.muted)),
-                        key_chip("Esc/q", theme),
-                        Span::styled(" close", Style::default().fg(theme.muted)),
-                    ])
+                    (
+                        Line::from(vec![
+                            key_chip("Enter", theme),
+                            Span::styled(" switch ", Style::default().fg(theme.muted)),
+                            key_chip("/", theme),
+                            Span::styled(" filter ", Style::default().fg(theme.muted)),
+                            key_chip("r", theme),
+                            Span::styled(" refresh ", Style::default().fg(theme.muted)),
+                            key_chip("Esc", theme),
+                            Span::styled(" close", Style::default().fg(theme.muted)),
+                        ]),
+                        vec![
+                            helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                            helper_key("/", KeyCode::Char('/'), KeyModifiers::NONE),
+                            helper_key("r", KeyCode::Char('r'), KeyModifiers::NONE),
+                            helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                        ],
+                    )
                 }
             }
-            InputMode::DiffSearch => Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" search ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" cancel search", Style::default().fg(theme.muted)),
-            ]),
-            InputMode::ListSearch(_) => Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" defocus ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" clear ", Style::default().fg(theme.muted)),
-                key_chip("Backspace", theme),
-                Span::styled(" edit", Style::default().fg(theme.muted)),
-            ]),
-            InputMode::Normal => match snapshot.footer.focused {
-                FocusPane::Files => Line::from(vec![
-                    key_chip("j/k", theme),
-                    Span::styled(" move ", Style::default().fg(theme.muted)),
-                    key_chip("Ctrl-d/u", theme),
-                    Span::styled(" jump ", Style::default().fg(theme.muted)),
-                    key_chip("/", theme),
-                    Span::styled(" filter ", Style::default().fg(theme.muted)),
+            InputMode::DiffSearch => (
+                Line::from(vec![
                     key_chip("Enter", theme),
-                    Span::styled(" focus diff", Style::default().fg(theme.muted)),
+                    Span::styled(" apply ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" clear", Style::default().fg(theme.muted)),
                 ]),
-                FocusPane::Commits => Line::from(vec![
-                    key_chip("space", theme),
-                    Span::styled(" select ", Style::default().fg(theme.muted)),
-                    key_chip("u/r/i", theme),
-                    Span::styled(" set status ", Style::default().fg(theme.muted)),
-                    key_chip("e", theme),
-                    Span::styled(" status filter ", Style::default().fg(theme.muted)),
-                    key_chip("/", theme),
-                    Span::styled(" search ", Style::default().fg(theme.muted)),
+                vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                ],
+            ),
+            InputMode::ListSearch(_) => (
+                Line::from(vec![
+                    key_chip("Enter", theme),
+                    Span::styled(" apply ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" clear ", Style::default().fg(theme.muted)),
+                    key_chip("Backspace", theme),
+                    Span::styled(" edit", Style::default().fg(theme.muted)),
                 ]),
-                FocusPane::Diff => Line::from(vec![
-                    key_chip("v", theme),
-                    Span::styled(" range ", Style::default().fg(theme.muted)),
-                    key_chip("m/C-e", theme),
-                    Span::styled(" add/edit comment ", Style::default().fg(theme.muted)),
-                    key_chip("/", theme),
-                    Span::styled(" search ", Style::default().fg(theme.muted)),
-                    key_chip("n/N", theme),
-                    Span::styled(" search next/prev ", Style::default().fg(theme.muted)),
-                    key_chip("p/P", theme),
-                    Span::styled(" comment next/prev ", Style::default().fg(theme.muted)),
-                    key_chip("w/e/b", theme),
-                    Span::styled(" word ", Style::default().fg(theme.muted)),
-                    key_chip("0/^/$/H/L", theme),
-                    Span::styled(" line ", Style::default().fg(theme.muted)),
-                    key_chip("[/]", theme),
-                    Span::styled(" hunks ", Style::default().fg(theme.muted)),
-                    key_chip("Ctrl-d/u", theme),
-                    Span::styled(" jump ", Style::default().fg(theme.muted)),
-                ]),
+                vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                    helper_key("Backspace", KeyCode::Backspace, KeyModifiers::NONE),
+                ],
+            ),
+            InputMode::Normal => match snapshot.footer.focused {
+                FocusPane::Files => (
+                    Line::from(vec![
+                        key_chip("j", theme),
+                        Span::styled(" move ", Style::default().fg(theme.muted)),
+                        key_chip("/", theme),
+                        Span::styled(" filter ", Style::default().fg(theme.muted)),
+                        key_chip("Enter", theme),
+                        Span::styled(" focus diff", Style::default().fg(theme.muted)),
+                    ]),
+                    vec![
+                        helper_key("j", KeyCode::Char('j'), KeyModifiers::NONE),
+                        helper_key("/", KeyCode::Char('/'), KeyModifiers::NONE),
+                        helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    ],
+                ),
+                FocusPane::Commits => (
+                    Line::from(vec![
+                        key_chip("Space", theme),
+                        Span::styled(" select ", Style::default().fg(theme.muted)),
+                        key_chip("u", theme),
+                        Span::styled(" Unreviewed ", Style::default().fg(theme.muted)),
+                        key_chip("r", theme),
+                        Span::styled(" Reviewed ", Style::default().fg(theme.muted)),
+                        key_chip("i", theme),
+                        Span::styled(" Issue Found ", Style::default().fg(theme.muted)),
+                        key_chip("e", theme),
+                        Span::styled(" Status Filter ", Style::default().fg(theme.muted)),
+                        key_chip("/", theme),
+                        Span::styled(" filter", Style::default().fg(theme.muted)),
+                    ]),
+                    vec![
+                        helper_key("Space", KeyCode::Char(' '), KeyModifiers::NONE),
+                        helper_key("u", KeyCode::Char('u'), KeyModifiers::NONE),
+                        helper_key("r", KeyCode::Char('r'), KeyModifiers::NONE),
+                        helper_key("i", KeyCode::Char('i'), KeyModifiers::NONE),
+                        helper_key("e", KeyCode::Char('e'), KeyModifiers::NONE),
+                        helper_key("/", KeyCode::Char('/'), KeyModifiers::NONE),
+                    ],
+                ),
+                FocusPane::Diff => (
+                    Line::from(vec![
+                        key_chip("v", theme),
+                        Span::styled(" range ", Style::default().fg(theme.muted)),
+                        key_chip("m", theme),
+                        Span::styled(" comment ", Style::default().fg(theme.muted)),
+                        key_chip("/", theme),
+                        Span::styled(" search ", Style::default().fg(theme.muted)),
+                        key_chip("n", theme),
+                        Span::styled(" next ", Style::default().fg(theme.muted)),
+                        key_chip("N", theme),
+                        Span::styled(" prev ", Style::default().fg(theme.muted)),
+                        key_chip("[", theme),
+                        Span::styled(" prev hunk ", Style::default().fg(theme.muted)),
+                        key_chip("]", theme),
+                        Span::styled(" next hunk", Style::default().fg(theme.muted)),
+                    ]),
+                    vec![
+                        helper_key("v", KeyCode::Char('v'), KeyModifiers::NONE),
+                        helper_key("m", KeyCode::Char('m'), KeyModifiers::NONE),
+                        helper_key("/", KeyCode::Char('/'), KeyModifiers::NONE),
+                        helper_key("n", KeyCode::Char('n'), KeyModifiers::NONE),
+                        helper_key("N", KeyCode::Char('N'), KeyModifiers::SHIFT),
+                        helper_key("[", KeyCode::Char('['), KeyModifiers::NONE),
+                        helper_key("]", KeyCode::Char(']'), KeyModifiers::NONE),
+                    ],
+                ),
             },
         };
 
-        let global_line = Line::from(vec![
-            key_chip("1/2/3", theme),
-            Span::styled(" panes ", Style::default().fg(theme.dimmed)),
-            key_chip("Tab/S-Tab", theme),
-            Span::styled(" cycle ", Style::default().fg(theme.dimmed)),
-            key_chip("Left/Right", theme),
-            Span::styled(" prev/next pane ", Style::default().fg(theme.dimmed)),
-            key_chip("!", theme),
-            Span::styled(" shell ", Style::default().fg(theme.dimmed)),
-            key_chip("Ctrl-w", theme),
-            Span::styled(" worktrees ", Style::default().fg(theme.dimmed)),
-            key_chip("Ctrl-r/F5", theme),
-            Span::styled(" refresh ", Style::default().fg(theme.dimmed)),
-            key_chip("t", theme),
-            Span::styled(" theme ", Style::default().fg(theme.dimmed)),
-            key_chip("?", theme),
-            Span::styled(" help ", Style::default().fg(theme.dimmed)),
-            key_chip("q", theme),
-            Span::styled(" quit", Style::default().fg(theme.dimmed)),
-        ]);
+        let show_global_hints = rect.width >= 96;
+        let (global_line, global_bindings) = if show_global_hints {
+            (
+                Line::from(vec![
+                    key_chip("1", theme),
+                    Span::styled(" commits ", Style::default().fg(theme.dimmed)),
+                    key_chip("2", theme),
+                    Span::styled(" files ", Style::default().fg(theme.dimmed)),
+                    key_chip("3", theme),
+                    Span::styled(" diff ", Style::default().fg(theme.dimmed)),
+                    key_chip("Tab", theme),
+                    Span::styled(" cycle ", Style::default().fg(theme.dimmed)),
+                    key_chip("!", theme),
+                    Span::styled(" shell ", Style::default().fg(theme.dimmed)),
+                    key_chip("Ctrl-w", theme),
+                    Span::styled(" worktrees ", Style::default().fg(theme.dimmed)),
+                    key_chip("Ctrl-r", theme),
+                    Span::styled(" refresh ", Style::default().fg(theme.dimmed)),
+                    key_chip("?", theme),
+                    Span::styled(" help ", Style::default().fg(theme.dimmed)),
+                    key_chip("q", theme),
+                    Span::styled(" quit", Style::default().fg(theme.dimmed)),
+                ]),
+                vec![
+                    helper_key("1", KeyCode::Char('1'), KeyModifiers::NONE),
+                    helper_key("2", KeyCode::Char('2'), KeyModifiers::NONE),
+                    helper_key("3", KeyCode::Char('3'), KeyModifiers::NONE),
+                    helper_key("Tab", KeyCode::Tab, KeyModifiers::NONE),
+                    helper_key("!", KeyCode::Char('!'), KeyModifiers::SHIFT),
+                    helper_key("Ctrl-w", KeyCode::Char('w'), KeyModifiers::CONTROL),
+                    helper_key("Ctrl-r", KeyCode::Char('r'), KeyModifiers::CONTROL),
+                    helper_key("?", KeyCode::Char('?'), KeyModifiers::NONE),
+                    helper_key("q", KeyCode::Char('q'), KeyModifiers::NONE),
+                ],
+            )
+        } else {
+            (Line::from(""), Vec::new())
+        };
 
         let mut status = vec![footer_chip(
             mode,
@@ -558,16 +658,26 @@ impl App {
 
         let status_widget =
             Paragraph::new(Line::from(status)).style(Style::default().fg(theme.text));
-        let hint_widget = Paragraph::new(vec![pane_line, global_line])
+        let hint_block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(theme.border));
+        let hint_lines = if show_global_hints {
+            vec![pane_line.clone(), global_line.clone()]
+        } else {
+            vec![pane_line.clone(), Line::from("")]
+        };
+        let hint_widget = Paragraph::new(hint_lines)
             .style(Style::default().fg(theme.dimmed))
-            .block(
-                Block::default()
-                    .borders(Borders::TOP)
-                    .border_style(Style::default().fg(theme.border)),
-            );
+            .block(hint_block.clone());
 
         frame.render_widget(status_widget, chunks[0]);
         frame.render_widget(hint_widget, chunks[1]);
+
+        let hint_inner = hint_block.inner(chunks[1]);
+        self.register_helper_click_line(&pane_line, hint_inner, 0, &pane_bindings, theme);
+        if show_global_hints {
+            self.register_helper_click_line(&global_line, hint_inner, 1, &global_bindings, theme);
+        }
     }
 
     pub(super) fn render_onboarding(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
@@ -786,18 +896,27 @@ impl App {
             editor_inner,
         );
 
-        let footer = Paragraph::new(Line::from(vec![
+        let footer_line = Line::from(vec![
             key_chip("Enter", theme),
             Span::styled(" save  ", Style::default().fg(theme.muted)),
             key_chip("Esc", theme),
             Span::styled(" cancel  ", Style::default().fg(theme.muted)),
             key_chip("Alt+Enter", theme),
-            Span::styled(" newline  ", Style::default().fg(theme.muted)),
-            key_chip("Mouse", theme),
-            Span::styled(" cursor/select", Style::default().fg(theme.muted)),
-        ]))
-        .style(Style::default().bg(theme.modal_bg));
+            Span::styled(" newline", Style::default().fg(theme.muted)),
+        ]);
+        let footer = Paragraph::new(footer_line.clone()).style(Style::default().bg(theme.modal_bg));
         frame.render_widget(footer, sections[3]);
+        self.register_helper_click_line(
+            &footer_line,
+            sections[3],
+            0,
+            &[
+                helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                helper_key("Alt+Enter", KeyCode::Enter, KeyModifiers::ALT),
+            ],
+            theme,
+        );
     }
 
     pub(super) fn render_shell_command_modal(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {
@@ -1039,46 +1158,63 @@ impl App {
             }
         }
 
-        let footer_text = if self.ui.shell_command.running.is_some() {
-            Line::from(vec![
-                key_chip("Esc", theme),
-                Span::styled(" interrupt  ", Style::default().fg(theme.muted)),
-                key_chip("Up/Down", theme),
-                Span::styled(" move  ", Style::default().fg(theme.muted)),
-                key_chip("v", theme),
-                Span::styled(" range  ", Style::default().fg(theme.muted)),
-                key_chip("y", theme),
-                Span::styled(" copy output  ", Style::default().fg(theme.muted)),
-                key_chip("Backspace", theme),
-                Span::styled(" reset", Style::default().fg(theme.muted)),
-            ])
+        let (footer_text, footer_bindings) = if self.ui.shell_command.running.is_some() {
+            (
+                Line::from(vec![
+                    key_chip("Esc", theme),
+                    Span::styled(" interrupt  ", Style::default().fg(theme.muted)),
+                    key_chip("y", theme),
+                    Span::styled(" copy output  ", Style::default().fg(theme.muted)),
+                    key_chip("Backspace", theme),
+                    Span::styled(" reset", Style::default().fg(theme.muted)),
+                ]),
+                vec![
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                    helper_key("y", KeyCode::Char('y'), KeyModifiers::NONE),
+                    helper_key("Backspace", KeyCode::Backspace, KeyModifiers::NONE),
+                ],
+            )
         } else if self.ui.shell_command.finished.is_some() {
-            Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" continue  ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" close  ", Style::default().fg(theme.muted)),
-                key_chip("v", theme),
-                Span::styled(" range  ", Style::default().fg(theme.muted)),
-                key_chip("y", theme),
-                Span::styled(" copy output  ", Style::default().fg(theme.muted)),
-                key_chip("Backspace", theme),
-                Span::styled(" reset", Style::default().fg(theme.muted)),
-            ])
+            (
+                Line::from(vec![
+                    key_chip("Enter", theme),
+                    Span::styled(" continue  ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" close  ", Style::default().fg(theme.muted)),
+                    key_chip("y", theme),
+                    Span::styled(" copy output  ", Style::default().fg(theme.muted)),
+                    key_chip("Backspace", theme),
+                    Span::styled(" reset", Style::default().fg(theme.muted)),
+                ]),
+                vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                    helper_key("y", KeyCode::Char('y'), KeyModifiers::NONE),
+                    helper_key("Backspace", KeyCode::Backspace, KeyModifiers::NONE),
+                ],
+            )
         } else {
-            Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" run  ", Style::default().fg(theme.muted)),
-                key_chip("Ctrl-r", theme),
-                Span::styled(" history search  ", Style::default().fg(theme.muted)),
-                key_chip("Up/Down", theme),
-                Span::styled(" history", Style::default().fg(theme.muted)),
-            ])
+            (
+                Line::from(vec![
+                    key_chip("Enter", theme),
+                    Span::styled(" run  ", Style::default().fg(theme.muted)),
+                    key_chip("Ctrl-r", theme),
+                    Span::styled(" history search  ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" close", Style::default().fg(theme.muted)),
+                ]),
+                vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    helper_key("Ctrl-r", KeyCode::Char('r'), KeyModifiers::CONTROL),
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                ],
+            )
         };
         frame.render_widget(
-            Paragraph::new(footer_text).style(Style::default().bg(theme.modal_bg)),
+            Paragraph::new(footer_text.clone()).style(Style::default().bg(theme.modal_bg)),
             sections[3],
         );
+        self.register_helper_click_line(&footer_text, sections[3], 0, &footer_bindings, theme);
     }
 
     fn comment_context_preview_lines(
@@ -1267,153 +1403,195 @@ impl App {
         }
     }
 
-    pub(super) fn render_help_overlay(&self, frame: &mut Frame<'_>, theme: &UiTheme) {
+    pub(super) fn render_help_overlay(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {
+        // Help is a modal overlay, so only help-local helper chips should be clickable.
+        self.ui.helper_click_hitboxes.clear();
         let area = centered_rect(70, 62, frame.area());
         frame.render_widget(Clear, area);
 
-        let help_lines = vec![
-            Line::from(vec![Span::styled(
-                "HUNKR QUICK GUIDE",
-                Style::default()
-                    .fg(theme.panel_title_fg)
-                    .bg(theme.panel_title_bg)
-                    .add_modifier(Modifier::BOLD),
-            )]),
-            Line::from(""),
-            Line::from(vec![
-                key_chip("1/2/3", theme),
-                Span::raw(" focus commits/files/diff"),
-            ]),
-            Line::from(vec![
-                key_chip("Left/Right", theme),
-                Span::raw(" cycle panes prev/next"),
-            ]),
-            Line::from(vec![key_chip("space", theme), Span::raw(" select commits")]),
-            Line::from(vec![
-                key_chip("Esc", theme),
-                Span::raw(" clear commit selection"),
-            ]),
-            Line::from(vec![
-                key_chip("v", theme),
-                Span::raw(" visual select (commits or diff)"),
-            ]),
-            Line::from(vec![
-                key_chip("u/r/i", theme),
-                Span::raw(" set status for selected/current commits"),
-            ]),
-            Line::from(vec![
-                key_chip("m", theme),
-                Span::raw(" add comment to commit/hunk/range"),
-            ]),
-            Line::from(vec![
-                key_chip("!", theme),
-                Span::raw(" open shell command modal"),
-            ]),
-            Line::from(vec![
-                key_chip("Ctrl-w", theme),
-                Span::raw(" open worktree switcher modal"),
-            ]),
-            Line::from(vec![
-                key_chip("/", theme),
-                Span::raw(" diff search or live list filter"),
-            ]),
-            Line::from(vec![
-                key_chip("Esc/Enter", theme),
-                Span::raw(" search: clear / defocus"),
-            ]),
-            Line::from(vec![
-                key_chip("n/N", theme),
-                Span::raw(" repeat diff search next/prev"),
-            ]),
-            Line::from(vec![
-                key_chip("p/P", theme),
-                Span::raw(" jump to next/previous comment"),
-            ]),
-            Line::from(vec![
-                key_chip("*/#", theme),
-                Span::raw(" search word under diff block cursor"),
-            ]),
-            Line::from(vec![
-                key_chip("h/l", theme),
-                Span::raw(" move diff block cursor left/right"),
-            ]),
-            Line::from(vec![
-                key_chip("w/e/b", theme),
-                Span::raw(" diff: next-start/end/prev-start word"),
-            ]),
-            Line::from(vec![
-                key_chip("W/E/B", theme),
-                Span::raw(" diff: WORD motions (whitespace-delimited)"),
-            ]),
-            Line::from(vec![
-                key_chip("0/^/$/H/L", theme),
-                Span::raw(" diff: line start / first non-space / line end"),
-            ]),
-            Line::from(vec![
-                key_chip("[/]", theme),
-                Span::raw(" previous/next diff hunk"),
-            ]),
-            Line::from(vec![
-                key_chip("zz/zt/zb", theme),
-                Span::raw(" center/top/bottom cursor"),
-            ]),
-            Line::from(vec![
-                key_chip("e", theme),
-                Span::raw(" commits pane: cycle status filter"),
-            ]),
-            Line::from(vec![
-                key_chip("Ctrl-e", theme),
-                Span::raw(" diff pane: edit comment under cursor"),
-            ]),
-            Line::from(vec![
-                key_chip("D", theme),
-                Span::raw(" delete comment under cursor"),
-            ]),
-            Line::from(vec![
-                key_chip("y", theme),
-                Span::raw(" copy visual selection"),
-            ]),
-            Line::from(vec![
-                key_chip("Y", theme),
-                Span::raw(" copy review-task file path"),
-            ]),
-            Line::from(vec![key_chip("t", theme), Span::raw(" toggle theme")]),
-            Line::from(vec![
-                key_chip("Ctrl-d/u", theme),
-                Span::raw(" big jump in focused pane"),
-            ]),
-            Line::from(vec![
-                key_chip("Ctrl-l", theme),
-                Span::raw(" hard refresh terminal view"),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("UNREVIEWED", Style::default().fg(theme.unreviewed)),
-                Span::raw("  "),
-                Span::styled("REVIEWED", Style::default().fg(theme.reviewed)),
-                Span::raw("  "),
-                Span::styled("ISSUE_FOUND", Style::default().fg(theme.issue)),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Press ", Style::default().fg(theme.muted)),
-                key_chip("?", theme),
-                Span::styled(" / ", Style::default().fg(theme.muted)),
-                key_chip("q", theme),
-                Span::styled(" / ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" to close", Style::default().fg(theme.muted)),
-            ]),
+        let section_style = Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD);
+        let rows: Vec<(Line<'static>, Vec<HelperChipBinding>)> = vec![
+            (
+                Line::from(vec![Span::styled(
+                    "HUNKR QUICK GUIDE",
+                    Style::default()
+                        .fg(theme.panel_title_fg)
+                        .bg(theme.panel_title_bg)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                Vec::new(),
+            ),
+            (Line::from(""), Vec::new()),
+            (
+                Line::from(Span::styled("Navigation", section_style)),
+                Vec::new(),
+            ),
+            (
+                Line::from(vec![
+                    key_chip("1", theme),
+                    Span::raw(" commits  "),
+                    key_chip("2", theme),
+                    Span::raw(" files  "),
+                    key_chip("3", theme),
+                    Span::raw(" diff  "),
+                    key_chip("Tab", theme),
+                    Span::raw(" cycle panes"),
+                ]),
+                vec![
+                    helper_key("1", KeyCode::Char('1'), KeyModifiers::NONE),
+                    helper_key("2", KeyCode::Char('2'), KeyModifiers::NONE),
+                    helper_key("3", KeyCode::Char('3'), KeyModifiers::NONE),
+                    helper_key("Tab", KeyCode::Tab, KeyModifiers::NONE),
+                ],
+            ),
+            (
+                Line::from(vec![
+                    key_chip("j", theme),
+                    Span::raw(" down  "),
+                    key_chip("k", theme),
+                    Span::raw(" up  "),
+                    key_chip("Ctrl-d", theme),
+                    Span::raw(" page down  "),
+                    key_chip("Ctrl-u", theme),
+                    Span::raw(" page up"),
+                ]),
+                vec![
+                    helper_key("j", KeyCode::Char('j'), KeyModifiers::NONE),
+                    helper_key("k", KeyCode::Char('k'), KeyModifiers::NONE),
+                    helper_key("Ctrl-d", KeyCode::Char('d'), KeyModifiers::CONTROL),
+                    helper_key("Ctrl-u", KeyCode::Char('u'), KeyModifiers::CONTROL),
+                ],
+            ),
+            (
+                Line::from(Span::styled("Review Flow", section_style)),
+                Vec::new(),
+            ),
+            (
+                Line::from(vec![
+                    key_chip("Space", theme),
+                    Span::raw(" toggle commit selection  "),
+                    key_chip("e", theme),
+                    Span::raw(" cycle Status Filter"),
+                ]),
+                vec![
+                    helper_key("Space", KeyCode::Char(' '), KeyModifiers::NONE),
+                    helper_key("e", KeyCode::Char('e'), KeyModifiers::NONE),
+                ],
+            ),
+            (
+                Line::from(vec![
+                    key_chip("u", theme),
+                    Span::raw(" mark Unreviewed  "),
+                    key_chip("r", theme),
+                    Span::raw(" mark Reviewed  "),
+                    key_chip("i", theme),
+                    Span::raw(" mark Issue Found"),
+                ]),
+                vec![
+                    helper_key("u", KeyCode::Char('u'), KeyModifiers::NONE),
+                    helper_key("r", KeyCode::Char('r'), KeyModifiers::NONE),
+                    helper_key("i", KeyCode::Char('i'), KeyModifiers::NONE),
+                ],
+            ),
+            (Line::from(Span::styled("Diff", section_style)), Vec::new()),
+            (
+                Line::from(vec![
+                    key_chip("/", theme),
+                    Span::raw(" Search  "),
+                    key_chip("n", theme),
+                    Span::raw(" next  "),
+                    key_chip("N", theme),
+                    Span::raw(" previous"),
+                ]),
+                vec![
+                    helper_key("/", KeyCode::Char('/'), KeyModifiers::NONE),
+                    helper_key("n", KeyCode::Char('n'), KeyModifiers::NONE),
+                    helper_key("N", KeyCode::Char('N'), KeyModifiers::SHIFT),
+                ],
+            ),
+            (
+                Line::from(vec![
+                    key_chip("v", theme),
+                    Span::raw(" visual range  "),
+                    key_chip("m", theme),
+                    Span::raw(" add comment  "),
+                    key_chip("[", theme),
+                    Span::raw(" prev hunk  "),
+                    key_chip("]", theme),
+                    Span::raw(" next hunk"),
+                ]),
+                vec![
+                    helper_key("v", KeyCode::Char('v'), KeyModifiers::NONE),
+                    helper_key("m", KeyCode::Char('m'), KeyModifiers::NONE),
+                    helper_key("[", KeyCode::Char('['), KeyModifiers::NONE),
+                    helper_key("]", KeyCode::Char(']'), KeyModifiers::NONE),
+                ],
+            ),
+            (Line::from(Span::styled("Tools", section_style)), Vec::new()),
+            (
+                Line::from(vec![
+                    key_chip("!", theme),
+                    Span::raw(" shell  "),
+                    key_chip("Ctrl-w", theme),
+                    Span::raw(" worktrees  "),
+                    key_chip("Ctrl-r", theme),
+                    Span::raw(" refresh  "),
+                    key_chip("t", theme),
+                    Span::raw(" toggle theme"),
+                ]),
+                vec![
+                    helper_key("!", KeyCode::Char('!'), KeyModifiers::SHIFT),
+                    helper_key("Ctrl-w", KeyCode::Char('w'), KeyModifiers::CONTROL),
+                    helper_key("Ctrl-r", KeyCode::Char('r'), KeyModifiers::CONTROL),
+                    helper_key("t", KeyCode::Char('t'), KeyModifiers::NONE),
+                ],
+            ),
+            (Line::from(""), Vec::new()),
+            (
+                Line::from(vec![
+                    Span::styled("Unreviewed", Style::default().fg(theme.unreviewed)),
+                    Span::raw("  "),
+                    Span::styled("Reviewed", Style::default().fg(theme.reviewed)),
+                    Span::raw("  "),
+                    Span::styled("Issue Found", Style::default().fg(theme.issue)),
+                ]),
+                Vec::new(),
+            ),
+            (
+                Line::from(vec![
+                    Span::styled("Press ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" / ", Style::default().fg(theme.muted)),
+                    key_chip("q", theme),
+                    Span::styled(" / ", Style::default().fg(theme.muted)),
+                    key_chip("?", theme),
+                    Span::styled(" to close", Style::default().fg(theme.muted)),
+                ]),
+                vec![
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                    helper_key("q", KeyCode::Char('q'), KeyModifiers::NONE),
+                    helper_key("?", KeyCode::Char('?'), KeyModifiers::NONE),
+                ],
+            ),
         ];
 
-        let widget = Paragraph::new(help_lines).block(
-            Block::default()
-                .title(" Help ")
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(theme.focus_border)),
-        );
-        frame.render_widget(widget, area);
+        let help_lines = rows
+            .iter()
+            .map(|(line, _)| line.clone())
+            .collect::<Vec<_>>();
+        let block = Block::default()
+            .title(" Help ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(theme.focus_border));
+        frame.render_widget(Paragraph::new(help_lines).block(block.clone()), area);
+
+        let inner = block.inner(area);
+        for (idx, (line, bindings)) in rows.iter().enumerate() {
+            self.register_helper_click_line(line, inner, idx as u16, bindings, theme);
+        }
     }
 
     pub(super) fn render_worktree_switcher_modal(
@@ -1548,30 +1726,91 @@ impl App {
         self.ui.worktree_switch.viewport_rows = sections[1].height.saturating_sub(2) as usize;
         frame.render_stateful_widget(list, sections[1], &mut self.ui.worktree_switch.list_state);
 
-        let footer = if self.ui.worktree_switch.search_active {
-            Paragraph::new(Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" defocus ", Style::default().fg(theme.muted)),
-                key_chip("Esc", theme),
-                Span::styled(" clear ", Style::default().fg(theme.muted)),
-                key_chip("Backspace", theme),
-                Span::styled(" edit ", Style::default().fg(theme.muted)),
-                key_chip("q", theme),
-                Span::styled(" close ", Style::default().fg(theme.muted)),
-            ]))
+        let (footer_line, footer_bindings) = if self.ui.worktree_switch.search_active {
+            (
+                Line::from(vec![
+                    key_chip("Enter", theme),
+                    Span::styled(" apply ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" clear ", Style::default().fg(theme.muted)),
+                    key_chip("Backspace", theme),
+                    Span::styled(" edit ", Style::default().fg(theme.muted)),
+                    key_chip("q", theme),
+                    Span::styled(" close", Style::default().fg(theme.muted)),
+                ]),
+                vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                    helper_key("Backspace", KeyCode::Backspace, KeyModifiers::NONE),
+                    helper_key("q", KeyCode::Char('q'), KeyModifiers::NONE),
+                ],
+            )
         } else {
-            Paragraph::new(Line::from(vec![
-                key_chip("Enter", theme),
-                Span::styled(" switch ", Style::default().fg(theme.muted)),
-                key_chip("/", theme),
-                Span::styled(" search ", Style::default().fg(theme.muted)),
-                key_chip("r", theme),
-                Span::styled(" refresh ", Style::default().fg(theme.muted)),
-                key_chip("Esc/q", theme),
-                Span::styled(" close ", Style::default().fg(theme.muted)),
-            ]))
+            (
+                Line::from(vec![
+                    key_chip("Enter", theme),
+                    Span::styled(" switch ", Style::default().fg(theme.muted)),
+                    key_chip("/", theme),
+                    Span::styled(" filter ", Style::default().fg(theme.muted)),
+                    key_chip("r", theme),
+                    Span::styled(" refresh ", Style::default().fg(theme.muted)),
+                    key_chip("Esc", theme),
+                    Span::styled(" close", Style::default().fg(theme.muted)),
+                ]),
+                vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
+                    helper_key("/", KeyCode::Char('/'), KeyModifiers::NONE),
+                    helper_key("r", KeyCode::Char('r'), KeyModifiers::NONE),
+                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
+                ],
+            )
         };
-        frame.render_widget(footer, sections[2]);
+        frame.render_widget(Paragraph::new(footer_line.clone()), sections[2]);
+        self.register_helper_click_line(&footer_line, sections[2], 0, &footer_bindings, theme);
+    }
+
+    fn register_helper_click_line(
+        &mut self,
+        line: &Line<'_>,
+        rect: ratatui::layout::Rect,
+        line_offset: u16,
+        bindings: &[HelperChipBinding],
+        theme: &UiTheme,
+    ) {
+        if bindings.is_empty() || rect.width == 0 || rect.height == 0 {
+            return;
+        }
+        let row = rect.y.saturating_add(line_offset);
+        if row >= rect.y.saturating_add(rect.height) {
+            return;
+        }
+
+        let chip_style = key_chip_style(theme);
+        let mut cursor_x = rect.x;
+        let x_limit = rect.x.saturating_add(rect.width);
+        for span in &line.spans {
+            if cursor_x >= x_limit {
+                break;
+            }
+            let content = span.content.as_ref();
+            let width = display_width(content) as u16;
+            if span.style == chip_style {
+                let label = content.trim();
+                if let Some(binding) = bindings.iter().find(|binding| binding.label == label) {
+                    let hitbox_width = width.min(x_limit.saturating_sub(cursor_x)).max(1);
+                    self.ui.helper_click_hitboxes.push(HelperClickHitbox {
+                        rect: ratatui::layout::Rect {
+                            x: cursor_x,
+                            y: row,
+                            width: hitbox_width,
+                            height: 1,
+                        },
+                        action: binding.action,
+                    });
+                }
+            }
+            cursor_x = cursor_x.saturating_add(width);
+        }
     }
 }
 

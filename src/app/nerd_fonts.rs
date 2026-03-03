@@ -44,7 +44,11 @@ pub(super) fn branch_label_prefix(nerd_fonts: bool) -> &'static str {
 
 /// Returns the worktree label prefix for the header.
 pub(super) fn worktree_label_prefix(nerd_fonts: bool) -> &'static str {
-    if nerd_fonts { "󱘎" } else { "wt:" }
+    if nerd_fonts {
+        "󱘎 worktree:"
+    } else {
+        "worktree:"
+    }
 }
 
 /// Returns commit selection marker for list rows.
@@ -107,9 +111,9 @@ pub(super) fn commit_push_chain_marker(
 /// Returns the draft badge used for uncommitted pseudo-commit rows.
 pub(super) fn uncommitted_badge(nerd_fonts: bool) -> &'static str {
     if nerd_fonts {
-        "[ DRAFT]"
+        "[ Uncommitted]"
     } else {
-        "[UNCOMMITTED]"
+        "[Uncommitted]"
     }
 }
 
@@ -195,7 +199,11 @@ pub(super) fn commit_comment_badge(nerd_fonts: bool) -> &'static str {
 
 /// Returns the commit-pane status-filter label prefix.
 pub(super) fn commit_status_filter_label_prefix(nerd_fonts: bool) -> &'static str {
-    if nerd_fonts { "" } else { "sf:" }
+    if nerd_fonts {
+        " Status Filter"
+    } else {
+        "Status Filter"
+    }
 }
 
 pub(super) fn file_change_kind_symbol(kind: FileChangeKind, nerd_fonts: bool) -> &'static str {
@@ -480,5 +488,19 @@ mod tests {
         assert_ne!(rendered, "src/app.rs");
         assert!(rendered.ends_with("src/app.rs"));
         assert!(rendered.contains(' '));
+    }
+
+    #[test]
+    fn ascii_mode_uses_human_readable_labels() {
+        assert_eq!(worktree_label_prefix(false), "worktree:");
+        assert_eq!(commit_status_filter_label_prefix(false), "Status Filter");
+        assert_eq!(uncommitted_badge(false), "[Uncommitted]");
+    }
+
+    #[test]
+    fn nerd_mode_keeps_text_with_icons_for_key_labels() {
+        assert!(worktree_label_prefix(true).contains("worktree"));
+        assert!(commit_status_filter_label_prefix(true).contains("Status Filter"));
+        assert_eq!(uncommitted_badge(true), "[\u{f126} Uncommitted]");
     }
 }

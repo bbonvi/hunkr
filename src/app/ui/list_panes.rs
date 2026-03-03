@@ -497,7 +497,7 @@ impl<'a> ListLinePresenter<'a> {
         let decoration_style = commit_decoration_style(row.selected, self.theme);
         let age_style = if row.selected {
             Style::default()
-                .fg(self.theme.dimmed)
+                .fg(self.theme.muted)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(self.theme.dimmed)
@@ -507,7 +507,7 @@ impl<'a> ListLinePresenter<'a> {
             let marker = commit_selection_marker(row.selected, self.nerd_fonts);
             let left = format!("{marker} {summary}");
             let badge = uncommitted_badge(self.nerd_fonts);
-            let right = "draft";
+            let right = "uncommitted";
             let reserved = 1 + display_width(badge) + 1 + display_width(right);
             let max_left = self.width.saturating_sub(reserved).max(1);
             let left_render = truncate(&left, max_left);
@@ -803,9 +803,7 @@ fn commit_has_tag(row: &CommitRow) -> bool {
 
 fn commit_decoration_style(selected: bool, theme: &UiTheme) -> Style {
     if selected {
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme.accent)
     }
@@ -833,7 +831,7 @@ pub(in crate::app) fn focused_commit_metadata_summary(
     nerd_fonts: bool,
 ) -> String {
     match row {
-        Some(row) if row.is_uncommitted => "worktree/index draft snapshot".to_owned(),
+        Some(row) if row.is_uncommitted => "worktree/index uncommitted changes".to_owned(),
         Some(row) => {
             let mut meta_parts = vec![
                 sanitize_terminal_text(&row.info.short_id),
@@ -1061,7 +1059,7 @@ mod tests {
                 .any(|span| span.content.contains("refs:") || span.content.contains("v1.0.0"))
         );
         assert!(line.spans.iter().any(|span| {
-            span.style.fg == Some(theme.dimmed)
+            span.style.fg == Some(theme.muted)
                 && !span.content.trim().is_empty()
                 && span.style.add_modifier.contains(Modifier::BOLD)
         }));

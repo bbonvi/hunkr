@@ -7,7 +7,7 @@ It lets you review a selected commit range as one net diff across all changed fi
 ## Highlights
 
 - Multi-commit net diff review in a focused 3-pane workflow (commits, changed files, diff)
-- Fast commit range selection with per-commit review states: `UNREVIEWED`, `REVIEWED`, `ISSUE_FOUND`
+- Fast commit range selection with per-commit review states: `Unreviewed`, `Reviewed`, `Issue Found`
 - First-run baseline: visible pushed commits are auto-marked `REVIEWED`; unpushed commits stay `UNREVIEWED`
 - Inline review comments anchored to commit/hunk/line selections
 - Auto-generated review task markdown for agent handoff and follow-up

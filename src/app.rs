@@ -170,9 +170,9 @@ impl CommitStatusFilter {
 
     fn label(self) -> &'static str {
         match self {
-            Self::All => "all",
-            Self::UnreviewedOrIssueFound => "unreviewed|issue_found",
-            Self::Reviewed => "reviewed",
+            Self::All => "All",
+            Self::UnreviewedOrIssueFound => "Unreviewed + Issue Found",
+            Self::Reviewed => "Reviewed",
         }
     }
 
@@ -254,7 +254,7 @@ impl UiTheme {
                 block_cursor_bg: Color::Rgb(95, 128, 255),
                 visual_bg: Color::Rgb(62, 78, 108),
                 commit_selected_bg: Color::Rgb(62, 78, 108),
-                commit_selected_text: Color::Rgb(120, 196, 255),
+                commit_selected_text: Color::Rgb(211, 233, 255),
                 search_match_fg: Color::Rgb(30, 30, 30),
                 search_match_bg: Color::Rgb(219, 196, 96),
                 search_current_fg: Color::Rgb(12, 12, 12),
@@ -292,7 +292,7 @@ impl UiTheme {
                 block_cursor_bg: Color::Rgb(41, 94, 214),
                 visual_bg: Color::Rgb(207, 218, 230),
                 commit_selected_bg: Color::Rgb(207, 218, 230),
-                commit_selected_text: Color::Rgb(0, 123, 184),
+                commit_selected_text: Color::Rgb(18, 63, 94),
                 search_match_fg: Color::Rgb(35, 35, 35),
                 search_match_bg: Color::Rgb(247, 234, 172),
                 search_current_fg: Color::Rgb(28, 22, 0),
@@ -437,6 +437,20 @@ struct DiffUiState {
 struct DiffVisibleRow {
     line_index: usize,
     wrapped_row_offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HelperClickAction {
+    Key {
+        code: KeyCode,
+        modifiers: KeyModifiers,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HelperClickHitbox {
+    rect: ratatui::layout::Rect,
+    action: HelperClickAction,
 }
 
 /// Cached diff rendering state and per-file viewport persistence.
@@ -620,6 +634,7 @@ struct AppUiState {
     shell_command: ShellCommandState,
     worktree_switch: WorktreeSwitchState,
     search: SearchState,
+    helper_click_hitboxes: Vec<HelperClickHitbox>,
 }
 
 /// High-level app state and interaction flow for the hunkr UI.

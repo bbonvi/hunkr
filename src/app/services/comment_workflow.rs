@@ -23,7 +23,7 @@ pub(in crate::app) fn submit_comment_from_editor(app: &mut App) -> bool {
                             close_editor = true;
                         } else {
                             app.runtime.status = format!(
-                                "Comment #{} added -> {} ({} commit(s) marked ISSUE_FOUND)",
+                                "Comment #{} added -> {} ({} commit(s) marked Issue Found)",
                                 id,
                                 app.deps.comments.report_path().display(),
                                 target.commits.len()

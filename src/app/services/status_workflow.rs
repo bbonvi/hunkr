@@ -21,7 +21,11 @@ pub(in crate::app) fn set_status_for_ids(
     let mut status_message = if let Err(err) = save_result {
         format!("failed to persist status change: {err:#}")
     } else {
-        format!("{} commit(s) -> {}", ids.len(), status.as_str())
+        format!(
+            "{} commit(s) -> {}",
+            ids.len(),
+            status_display_label(status)
+        )
     };
     let hidden_selected =
         selected_rows_hidden_by_status_filter(&app.domain.commits, app.ui.commit_ui.status_filter);
