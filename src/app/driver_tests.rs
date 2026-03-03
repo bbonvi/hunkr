@@ -120,6 +120,13 @@ fn bootstrap_driver(repo_root: &Path) -> AppDriver {
     bootstrap_driver_with_state(repo_root, ReviewState::default())
 }
 
+fn bootstrap_app(repo_root: &Path) -> App {
+    let ports = TestBootstrapPorts {
+        repo_root: repo_root.to_path_buf(),
+    };
+    App::bootstrap_with(&ports).expect("bootstrap app")
+}
+
 fn draw_app(app: &mut App, width: u16, height: u16) {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("create test terminal");
@@ -391,6 +398,23 @@ fn startup_with_stale_persisted_selection_falls_back_to_starter() {
     assert_eq!(snapshot.selected_commit_ids.len(), 1);
     assert_ne!(snapshot.selected_commit_ids[0], "stale-commit-id");
     assert!(snapshot.status.starts_with("Starter selection:"));
+}
+
+#[test]
+fn onboarding_completion_applies_starter_selection() {
+    let repo = init_test_repo();
+    let mut app = bootstrap_app(repo.path());
+    assert!(app.onboarding_active());
+
+    app.handle_event(Event::Key(press(KeyCode::Char('y'), KeyModifiers::NONE)));
+    app.handle_event(Event::Key(press(KeyCode::Char('n'), KeyModifiers::NONE)));
+
+    assert!(!app.onboarding_active());
+    assert_eq!(
+        app.domain.commits.iter().filter(|row| row.selected).count(),
+        1
+    );
+    assert!(app.runtime.status.contains("Starter selection:"));
 }
 
 #[test]
