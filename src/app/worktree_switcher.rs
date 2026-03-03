@@ -199,22 +199,21 @@ impl App {
             return;
         }
         match key.code {
-            KeyCode::Esc => {
-                self.ui.worktree_switch.search_active = false;
-                self.ui.worktree_switch.query.clear();
-                self.sync_worktree_cursor(None, fallback_visible_idx);
-                self.runtime.status = "Worktree search cleared".to_owned();
-            }
+            KeyCode::Esc => self.clear_worktree_search(fallback_visible_idx),
             KeyCode::Enter => {
                 self.ui.worktree_switch.search_active = false;
                 let query = self.ui.worktree_switch.query.trim();
                 self.runtime.status = if query.is_empty() {
-                    "Worktree search off".to_owned()
+                    "Worktree filter off".to_owned()
                 } else {
                     format!("Worktree filter: /{query}")
                 };
             }
             KeyCode::Backspace => {
+                if self.ui.worktree_switch.query.is_empty() {
+                    self.clear_worktree_search(fallback_visible_idx);
+                    return;
+                }
                 self.ui.worktree_switch.query.pop();
                 self.sync_worktree_cursor(None, fallback_visible_idx);
                 self.runtime.status = format!("/{}", self.ui.worktree_switch.query);
@@ -235,6 +234,13 @@ impl App {
         self.ui.worktree_switch.search_active = false;
         self.ui.preferences.input_mode = InputMode::Normal;
         self.runtime.status = "Worktree switcher closed".to_owned();
+    }
+
+    fn clear_worktree_search(&mut self, fallback_visible_idx: Option<usize>) {
+        self.ui.worktree_switch.search_active = false;
+        self.ui.worktree_switch.query.clear();
+        self.sync_worktree_cursor(None, fallback_visible_idx);
+        self.runtime.status = "Worktree filter cleared".to_owned();
     }
 }
 

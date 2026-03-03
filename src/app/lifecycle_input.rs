@@ -340,13 +340,13 @@ impl App {
             KeyCode::Esc => self.cancel_diff_search_input(),
             KeyCode::Enter => {
                 let query = self.ui.search.diff_buffer.trim().to_owned();
+                if query.is_empty() {
+                    self.cancel_diff_search_input();
+                    return;
+                }
                 self.ui.preferences.input_mode = InputMode::Normal;
                 self.ui.search.diff_buffer.clear();
                 self.ui.search.diff_cursor = 0;
-                if query.is_empty() {
-                    self.runtime.status = "Diff search canceled".to_owned();
-                    return;
-                }
                 self.execute_diff_search(&query, true);
             }
             KeyCode::Backspace if self.ui.search.diff_buffer.is_empty() => {
@@ -367,12 +367,8 @@ impl App {
 
     fn cancel_diff_search_input(&mut self) {
         self.ui.preferences.input_mode = InputMode::Normal;
-        let cleared = self.clear_diff_search();
-        self.runtime.status = if cleared {
-            "Diff search cleared".to_owned()
-        } else {
-            "Diff search canceled".to_owned()
-        };
+        self.clear_diff_search();
+        self.runtime.status = "Diff search cleared".to_owned();
     }
 
     fn cancel_list_search_input(
@@ -387,13 +383,13 @@ impl App {
                 self.ui.search.commit_query.clear();
                 self.ui.search.commit_cursor = 0;
                 self.sync_commit_cursor_for_filters(preferred_commit_id, fallback_visible_idx);
-                self.runtime.status = "Commit search cleared".to_owned();
+                self.runtime.status = "Commit filter cleared".to_owned();
             }
             FocusPane::Files => {
                 self.ui.search.file_query.clear();
                 self.ui.search.file_cursor = 0;
                 self.sync_file_cursor_for_filters();
-                self.runtime.status = "File search cleared".to_owned();
+                self.runtime.status = "File filter cleared".to_owned();
             }
             FocusPane::Diff => {}
         }
@@ -434,29 +430,44 @@ impl App {
             KeyCode::Enter => {
                 self.ui.preferences.input_mode = InputMode::Normal;
                 let query = match pane {
-                    FocusPane::Commits => self.ui.search.commit_query.trim(),
-                    FocusPane::Files => self.ui.search.file_query.trim(),
-                    FocusPane::Diff => "",
+                    FocusPane::Commits => {
+                        let trimmed = self.ui.search.commit_query.trim().to_owned();
+                        self.ui.search.commit_query = trimmed.clone();
+                        self.ui.search.commit_cursor = self.ui.search.commit_query.len();
+                        self.sync_commit_cursor_for_filters(
+                            preferred_commit_id.as_deref(),
+                            fallback_visible_idx,
+                        );
+                        trimmed
+                    }
+                    FocusPane::Files => {
+                        let trimmed = self.ui.search.file_query.trim().to_owned();
+                        self.ui.search.file_query = trimmed.clone();
+                        self.ui.search.file_cursor = self.ui.search.file_query.len();
+                        self.sync_file_cursor_for_filters();
+                        trimmed
+                    }
+                    FocusPane::Diff => String::new(),
                 };
                 self.runtime.status = if query.is_empty() {
                     match pane {
                         FocusPane::Commits => {
                             format!(
-                                "Commit search off ({})",
+                                "Commit filter off ({})",
                                 self.ui.commit_ui.status_filter.label()
                             )
                         }
-                        FocusPane::Files => "File search off".to_owned(),
+                        FocusPane::Files => "File filter off".to_owned(),
                         FocusPane::Diff => "Search off".to_owned(),
                     }
                 } else {
                     match pane {
                         FocusPane::Commits => format!(
                             "Commit filter: /{} ({})",
-                            query,
+                            query.as_str(),
                             self.ui.commit_ui.status_filter.label()
                         ),
-                        FocusPane::Files => format!("File filter: /{query}"),
+                        FocusPane::Files => format!("File filter: /{}", query.as_str()),
                         FocusPane::Diff => format!("/{query}"),
                     }
                 };
