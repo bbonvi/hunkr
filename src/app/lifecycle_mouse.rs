@@ -62,24 +62,38 @@ impl App {
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if in_diff {
+                    self.set_focus(FocusPane::Diff);
                     self.clear_keyboard_diff_visual_selection();
                     self.scroll_diff_viewport(self.ui.preferences.diff_wheel_scroll_lines);
-                } else if in_files && self.should_scroll_list_wheel(FocusPane::Files, 1) {
-                    self.scroll_file_list_lines(1);
-                } else if in_commits && self.should_scroll_list_wheel(FocusPane::Commits, 1) {
-                    self.ui.commit_ui.visual_anchor = None;
-                    self.scroll_commit_list_lines(1);
+                } else if in_files {
+                    self.set_focus(FocusPane::Files);
+                    if self.should_scroll_list_wheel(FocusPane::Files, 1) {
+                        self.scroll_file_list_lines(1);
+                    }
+                } else if in_commits {
+                    self.set_focus(FocusPane::Commits);
+                    if self.should_scroll_list_wheel(FocusPane::Commits, 1) {
+                        self.ui.commit_ui.visual_anchor = None;
+                        self.scroll_commit_list_lines(1);
+                    }
                 }
             }
             MouseEventKind::ScrollUp => {
                 if in_diff {
+                    self.set_focus(FocusPane::Diff);
                     self.clear_keyboard_diff_visual_selection();
                     self.scroll_diff_viewport(-self.ui.preferences.diff_wheel_scroll_lines);
-                } else if in_files && self.should_scroll_list_wheel(FocusPane::Files, -1) {
-                    self.scroll_file_list_lines(-1);
-                } else if in_commits && self.should_scroll_list_wheel(FocusPane::Commits, -1) {
-                    self.ui.commit_ui.visual_anchor = None;
-                    self.scroll_commit_list_lines(-1);
+                } else if in_files {
+                    self.set_focus(FocusPane::Files);
+                    if self.should_scroll_list_wheel(FocusPane::Files, -1) {
+                        self.scroll_file_list_lines(-1);
+                    }
+                } else if in_commits {
+                    self.set_focus(FocusPane::Commits);
+                    if self.should_scroll_list_wheel(FocusPane::Commits, -1) {
+                        self.ui.commit_ui.visual_anchor = None;
+                        self.scroll_commit_list_lines(-1);
+                    }
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {

@@ -758,6 +758,8 @@ impl App {
             return;
         }
 
+        let cleared_commit_visual = self.ui.commit_ui.visual_anchor.is_some();
+        let cleared_diff_visual = self.ui.diff_ui.visual_selection.is_some();
         if self.ui.preferences.focused == FocusPane::Commits && next != FocusPane::Commits {
             self.flush_pending_selection_rebuild();
         }
@@ -769,6 +771,12 @@ impl App {
         self.ui.commit_ui.mouse_drag_baseline = None;
         self.clear_diff_visual_selection();
         self.ui.diff_ui.pending_op = None;
+        if let Some(cleared) = focus_change_cleared_selection_note(
+            cleared_commit_visual,
+            cleared_diff_visual,
+        ) {
+            self.runtime.status = format!("Focus -> {} ({cleared})", focus_pane_label(next));
+        }
     }
 
     pub(super) fn focus_next(&mut self) {
@@ -1247,6 +1255,26 @@ fn should_preserve_directory_row_focus(
     selected_row_selectable: Option<bool>,
 ) -> bool {
     focused == FocusPane::Files && selected_row_selectable == Some(false)
+}
+
+fn focus_pane_label(pane: FocusPane) -> &'static str {
+    match pane {
+        FocusPane::Commits => "Commits",
+        FocusPane::Files => "Files",
+        FocusPane::Diff => "Diff",
+    }
+}
+
+fn focus_change_cleared_selection_note(
+    cleared_commit_visual: bool,
+    cleared_diff_visual: bool,
+) -> Option<&'static str> {
+    match (cleared_commit_visual, cleared_diff_visual) {
+        (true, true) => Some("cleared commit and diff visual ranges"),
+        (true, false) => Some("cleared commit visual range"),
+        (false, true) => Some("cleared diff visual range"),
+        (false, false) => None,
+    }
 }
 
 #[cfg(test)]
