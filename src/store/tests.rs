@@ -6,7 +6,6 @@ use tempfile::tempdir;
 use super::*;
 use crate::model::{
     UiSessionCommitStatusFilter, UiSessionDiffPosition, UiSessionFocusPane, UiSessionState,
-    UiSessionThemeMode,
 };
 
 #[test]
@@ -183,7 +182,6 @@ fn state_roundtrip_preserves_ui_session_snapshot() {
             commit_cursor_id: Some("b2".to_owned()),
             commit_status_filter: Some(UiSessionCommitStatusFilter::Reviewed),
             focused_pane: Some(UiSessionFocusPane::Diff),
-            theme_mode: Some(UiSessionThemeMode::Light),
             selected_file: Some("src/lib.rs".to_owned()),
             diff_positions: BTreeMap::from([(
                 "src/lib.rs".to_owned(),
@@ -198,6 +196,29 @@ fn state_roundtrip_preserves_ui_session_snapshot() {
     store.save(&state).expect("save");
     let loaded = store.load().expect("load");
     assert_eq!(loaded.ui_session, state.ui_session);
+}
+
+#[test]
+fn load_ignores_legacy_ui_session_theme_mode_field() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+    let legacy_raw = r#"{
+  "version": 2,
+  "statuses": {},
+  "ui_session": {
+    "selected_commit_ids": ["a1"],
+    "theme_mode": "LIGHT"
+  }
+}"#;
+
+    fs::create_dir_all(store.root_dir()).expect("mkdir");
+    fs::write(store.state_path.clone(), legacy_raw).expect("write");
+
+    let loaded = store.load().expect("load");
+    assert_eq!(
+        loaded.ui_session.selected_commit_ids,
+        BTreeSet::from(["a1".to_owned()])
+    );
 }
 
 #[test]

@@ -67,8 +67,6 @@ pub struct UiSessionState {
     #[serde(default)]
     pub focused_pane: Option<UiSessionFocusPane>,
     #[serde(default)]
-    pub theme_mode: Option<UiSessionThemeMode>,
-    #[serde(default)]
     pub selected_file: Option<String>,
     #[serde(default)]
     pub diff_positions: BTreeMap<String, UiSessionDiffPosition>,
@@ -90,14 +88,6 @@ pub enum UiSessionCommitStatusFilter {
     All,
     UnreviewedOrIssueFound,
     Reviewed,
-}
-
-/// Serializable UI theme-mode variant for restart persistence.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum UiSessionThemeMode {
-    Dark,
-    Light,
 }
 
 /// Serializable per-file local diff viewport snapshot for restart persistence.

@@ -17,9 +17,6 @@ impl App {
         if let Some(filter) = session.commit_status_filter {
             self.ui.commit_ui.status_filter = commit_status_filter_from_session(filter);
         }
-        if let Some(theme_mode) = session.theme_mode {
-            self.ui.preferences.theme_mode = theme_mode_from_session(theme_mode);
-        }
 
         restore_commit_selection(&mut self.domain.commits, &session.selected_commit_ids);
         self.ui.commit_ui.visual_anchor = None;
@@ -85,7 +82,6 @@ impl App {
                 self.ui.commit_ui.status_filter,
             )),
             focused_pane: Some(focus_pane_to_session(self.ui.preferences.focused)),
-            theme_mode: Some(theme_mode_to_session(self.ui.preferences.theme_mode)),
             selected_file: self
                 .ui
                 .diff_cache
@@ -979,20 +975,6 @@ fn commit_status_filter_from_session(
             CommitStatusFilter::UnreviewedOrIssueFound
         }
         crate::model::UiSessionCommitStatusFilter::Reviewed => CommitStatusFilter::Reviewed,
-    }
-}
-
-fn theme_mode_to_session(theme_mode: ThemeMode) -> crate::model::UiSessionThemeMode {
-    match theme_mode {
-        ThemeMode::Dark => crate::model::UiSessionThemeMode::Dark,
-        ThemeMode::Light => crate::model::UiSessionThemeMode::Light,
-    }
-}
-
-fn theme_mode_from_session(theme_mode: crate::model::UiSessionThemeMode) -> ThemeMode {
-    match theme_mode {
-        crate::model::UiSessionThemeMode::Dark => ThemeMode::Dark,
-        crate::model::UiSessionThemeMode::Light => ThemeMode::Light,
     }
 }
 
