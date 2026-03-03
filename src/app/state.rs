@@ -110,6 +110,10 @@ impl App {
         repository_workflow::rebuild_selection_dependent_views(self)
     }
 
+    pub(super) fn apply_startup_starter_selection(&mut self) -> anyhow::Result<bool> {
+        repository_workflow::apply_startup_starter_selection(self)
+    }
+
     pub(super) fn prune_diff_positions_for_removed_files(&mut self) {
         let existing_paths = self
             .domain

@@ -201,6 +201,93 @@ pub(in crate::app) fn rebuild_selection_dependent_views(app: &mut App) -> anyhow
     Ok(())
 }
 
+/// Applies a one-time starter selection so startup lands on a useful initial diff.
+pub(in crate::app) fn apply_startup_starter_selection(app: &mut App) -> anyhow::Result<bool> {
+    if app.domain.commits.is_empty() || app.domain.commits.iter().any(|row| row.selected) {
+        return Ok(false);
+    }
+
+    let Some(mut selected_idx) = app
+        .domain
+        .commits
+        .iter()
+        .position(|row| row.is_uncommitted)
+        .or_else(|| {
+            app.domain
+                .commits
+                .iter()
+                .position(|row| !row.is_uncommitted)
+        })
+    else {
+        return Ok(false);
+    };
+
+    select_only_index(&mut app.domain.commits, selected_idx);
+    let preferred_commit_id = app
+        .domain
+        .commits
+        .get(selected_idx)
+        .map(|row| row.info.id.clone());
+    app.ui.commit_ui.selection_anchor = Some(selected_idx);
+    app.ui.commit_ui.visual_anchor = None;
+    app.ui.commit_ui.mouse_anchor = None;
+    app.ui.commit_ui.mouse_dragging = false;
+    app.ui.commit_ui.mouse_drag_mode = None;
+    app.ui.commit_ui.mouse_drag_baseline = None;
+    app.runtime.selection_rebuild_due = None;
+    app.reset_diff_view_for_commit_selection_change();
+    app.rebuild_selection_dependent_views()?;
+    app.sync_comment_report()?;
+    app.sync_commit_cursor_for_filters(
+        preferred_commit_id.as_deref(),
+        app.ui.commit_ui.list_state.selected(),
+    );
+
+    if app
+        .domain
+        .commits
+        .get(selected_idx)
+        .is_some_and(|row| row.is_uncommitted)
+        && app.domain.aggregate.files.is_empty()
+        && let Some(fallback_idx) = app
+            .domain
+            .commits
+            .iter()
+            .position(|row| !row.is_uncommitted)
+    {
+        selected_idx = fallback_idx;
+        select_only_index(&mut app.domain.commits, selected_idx);
+        let preferred_commit_id = app
+            .domain
+            .commits
+            .get(selected_idx)
+            .map(|row| row.info.id.clone());
+        app.ui.commit_ui.selection_anchor = Some(selected_idx);
+        app.runtime.selection_rebuild_due = None;
+        app.reset_diff_view_for_commit_selection_change();
+        app.rebuild_selection_dependent_views()?;
+        app.sync_comment_report()?;
+        app.sync_commit_cursor_for_filters(
+            preferred_commit_id.as_deref(),
+            app.ui.commit_ui.list_state.selected(),
+        );
+        app.runtime.status = "Starter selection: first commit (no uncommitted changes)".to_owned();
+        return Ok(true);
+    }
+
+    app.runtime.status = if app
+        .domain
+        .commits
+        .get(selected_idx)
+        .is_some_and(|row| row.is_uncommitted)
+    {
+        "Starter selection: Uncommitted".to_owned()
+    } else {
+        "Starter selection: first commit".to_owned()
+    };
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{

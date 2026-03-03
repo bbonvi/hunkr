@@ -41,14 +41,26 @@ impl App {
         };
         let mut app = Self::from_bootstrap_deps(deps, &config, first_open);
         app.reload_theme_from_disk(true);
+        let has_persisted_selection = !app
+            .domain
+            .review_state
+            .ui_session
+            .selected_commit_ids
+            .is_empty();
 
         if app.onboarding_active() {
             app.runtime.status.clear();
         } else {
             app.reload_commits(true)?;
             app.restore_persisted_ui_session()?;
+            let has_restored_selection = app.domain.commits.iter().any(|row| row.selected);
+            if !has_persisted_selection || !has_restored_selection {
+                app.apply_startup_starter_selection()?;
+            }
             let selected = app.domain.commits.iter().filter(|row| row.selected).count();
-            app.runtime.status = format!("{selected} commit(s) selected");
+            if !app.runtime.status.starts_with("Starter selection:") {
+                app.runtime.status = format!("{selected} commit(s) selected");
+            }
         }
         Ok(app)
     }
@@ -220,6 +232,14 @@ impl App {
             self.runtime.status = format!("reload failed after setup: {err:#}");
             return;
         }
+        let starter_note = match self.apply_startup_starter_selection() {
+            Ok(true) => Some(self.runtime.status.clone()),
+            Ok(false) => None,
+            Err(err) => {
+                self.runtime.status = format!("failed to set starter selection: {err:#}");
+                return;
+            }
+        };
         self.ensure_rendered_diff();
         self.runtime.onboarding_step = None;
         let now = self.deps.clock.now_instant();
@@ -232,7 +252,7 @@ impl App {
             .iter()
             .filter(|row| row.selected)
             .count();
-        let ready = format!("{selected} commit(s) selected");
+        let ready = starter_note.unwrap_or_else(|| format!("{selected} commit(s) selected"));
         self.runtime.status = if let Some(note) = onboarding_note {
             format!("{note} {ready}")
         } else {
