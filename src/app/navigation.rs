@@ -495,44 +495,6 @@ impl App {
         self.runtime.status = format!("hunk {}", idx.saturating_add(1));
     }
 
-    /// Moves the diff cursor to the first row of the previous comment block.
-    pub(super) fn move_prev_comment(&mut self) {
-        let Some(idx) =
-            prev_comment_start_index(&self.domain.rendered_diff, self.domain.diff_position.cursor)
-        else {
-            self.runtime.status = "No previous comment".to_owned();
-            return;
-        };
-        let crossed_viewport_boundary = !self.diff_row_visible_in_viewport(idx);
-        self.set_diff_cursor(idx);
-        if crossed_viewport_boundary {
-            self.center_diff_cursor_in_viewport();
-        }
-        let id = self.domain.rendered_diff[idx]
-            .comment_id
-            .expect("comment jump target must have comment id");
-        self.runtime.status = format!("comment #{id}");
-    }
-
-    /// Moves the diff cursor to the first row of the next comment block.
-    pub(super) fn move_next_comment(&mut self) {
-        let Some(idx) =
-            next_comment_start_index(&self.domain.rendered_diff, self.domain.diff_position.cursor)
-        else {
-            self.runtime.status = "No next comment".to_owned();
-            return;
-        };
-        let crossed_viewport_boundary = !self.diff_row_visible_in_viewport(idx);
-        self.set_diff_cursor(idx);
-        if crossed_viewport_boundary {
-            self.center_diff_cursor_in_viewport();
-        }
-        let id = self.domain.rendered_diff[idx]
-            .comment_id
-            .expect("comment jump target must have comment id");
-        self.runtime.status = format!("comment #{id}");
-    }
-
     pub(super) fn sticky_commit_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
         if scroll == 0 || self.domain.rendered_diff.is_empty() {
             return None;
@@ -544,7 +506,7 @@ impl App {
             let is_commit_banner = self.domain.rendered_diff[idx]
                 .anchor
                 .as_ref()
-                .is_some_and(is_commit_anchor);
+                .is_some_and(is_commit_line_anchor);
             if is_commit_banner {
                 return (idx < top).then_some(idx);
             }
@@ -808,125 +770,6 @@ impl App {
         }
     }
 
-    pub(super) fn diff_selection_spans_multiple_files(&self) -> bool {
-        let Some((start, end)) = self.diff_selected_range() else {
-            return false;
-        };
-        let mut paths = BTreeSet::new();
-        for idx in start..=end {
-            if let Some(path) = self.file_path_for_line(idx) {
-                paths.insert(path);
-                if paths.len() > 1 {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    pub(super) fn comment_target_from_selection(&self) -> anyhow::Result<Option<CommentTarget>> {
-        if self.diff_selection_spans_multiple_files() {
-            return Ok(None);
-        }
-
-        let selected_commits_ordered = self.selected_commit_ids_oldest_first();
-        let Some((start_idx, end_idx)) = self.diff_selected_range() else {
-            return Ok(None);
-        };
-        let mut commit_anchors = Vec::new();
-        let mut hunk_anchors = Vec::new();
-        let mut commit_paths = BTreeSet::new();
-        let mut hunk_paths = BTreeSet::new();
-        let mut commit_lines = Vec::new();
-        let mut hunk_lines = Vec::new();
-
-        for idx in start_idx..=end_idx {
-            let Some(line) = self.domain.rendered_diff.get(idx) else {
-                continue;
-            };
-            if let Some(anchor) = &line.anchor {
-                if is_commit_anchor(anchor) {
-                    commit_anchors.push(anchor.clone());
-                    commit_paths.insert(anchor.file_path.clone());
-                    if !line.raw_text.trim().is_empty() {
-                        commit_lines.push(line.raw_text.clone());
-                    }
-                } else {
-                    hunk_anchors.push(anchor.clone());
-                    hunk_paths.insert(anchor.file_path.clone());
-                    if !line.raw_text.trim().is_empty() {
-                        hunk_lines.push(line.raw_text.clone());
-                    }
-                }
-            }
-        }
-
-        if hunk_anchors.is_empty() && commit_anchors.is_empty() {
-            return Ok(None);
-        }
-
-        if hunk_anchors.is_empty() {
-            if commit_paths.len() > 1 {
-                return Ok(None);
-            }
-            let Some(anchor) = commit_anchors.last().cloned() else {
-                return Ok(None);
-            };
-            let commits = self.deps.git.commits_affecting_selection(
-                &selected_commits_ordered,
-                &anchor.file_path,
-                &[],
-            )?;
-            let commits = if commits.is_empty() {
-                BTreeSet::from([anchor.commit_id.clone()])
-            } else {
-                commits
-            };
-            return Ok(Some(CommentTarget {
-                kind: CommentTargetKind::Commit,
-                start: anchor.clone(),
-                end: anchor.clone(),
-                commits,
-                selected_lines: commit_lines
-                    .last()
-                    .map(|line| vec![line.clone()])
-                    .unwrap_or_default(),
-            }));
-        }
-
-        if hunk_paths.len() > 1 {
-            return Ok(None);
-        }
-
-        let Some(start) = hunk_anchors.first().cloned() else {
-            return Ok(None);
-        };
-        let Some(end) = hunk_anchors.last().cloned() else {
-            return Ok(None);
-        };
-        let commits = self.deps.git.commits_affecting_selection(
-            &selected_commits_ordered,
-            &start.file_path,
-            &hunk_lines,
-        )?;
-        let commits = if commits.is_empty() {
-            hunk_anchors
-                .iter()
-                .map(|anchor| anchor.commit_id.clone())
-                .collect::<BTreeSet<_>>()
-        } else {
-            commits
-        };
-
-        Ok(Some(CommentTarget {
-            kind: CommentTargetKind::Hunk,
-            start,
-            end,
-            commits,
-            selected_lines: hunk_lines,
-        }))
-    }
-
     pub(super) fn status_counts(&self) -> (usize, usize, usize) {
         let mut unreviewed = 0;
         let mut reviewed = 0;
@@ -1031,54 +874,6 @@ impl App {
             self.clear_diff_visual_selection();
         }
     }
-
-    /// Copies the active review-task markdown path to clipboard for quick sharing.
-    pub(super) fn copy_review_tasks_path(&mut self) {
-        let report_path = format_path_with_home_tilde(self.deps.comments.report_path());
-        let scope = format!("review tasks path: {report_path}");
-        self.runtime.status = clipboard_copy_status(
-            crate::clipboard::copy_to_clipboard_with_fallbacks(&report_path),
-            &scope,
-            &scope,
-        );
-    }
-
-    pub(super) fn sync_comment_report(&self) -> anyhow::Result<()> {
-        self.deps.comments.sync_review_tasks_report(|commit_id| {
-            self.deps
-                .store
-                .commit_status(&self.domain.review_state, commit_id)
-        })?;
-        Ok(())
-    }
-}
-
-/// Finds the first row of the previous comment block, wrapping at boundaries.
-pub(super) fn prev_comment_start_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
-    if lines.is_empty() {
-        return None;
-    }
-    let cursor = cursor.min(lines.len().saturating_sub(1));
-    let start = comment_block_start_for_cursor(lines, cursor);
-    let starts = comment_block_starts(lines);
-    let Some(last_before) = starts.iter().copied().rev().find(|&idx| idx < start) else {
-        return starts.last().copied();
-    };
-    Some(last_before)
-}
-
-/// Finds the first row of the next comment block, wrapping at boundaries.
-pub(super) fn next_comment_start_index(lines: &[RenderedDiffLine], cursor: usize) -> Option<usize> {
-    if lines.is_empty() {
-        return None;
-    }
-    let cursor = cursor.min(lines.len().saturating_sub(1));
-    let start = comment_block_start_for_cursor(lines, cursor);
-    let starts = comment_block_starts(lines);
-    let Some(first_after) = starts.iter().copied().find(|&idx| idx > start) else {
-        return starts.first().copied();
-    };
-    Some(first_after)
 }
 
 /// Finds the previous hunk-header row, wrapping at boundaries.
@@ -1105,32 +900,6 @@ pub(super) fn next_hunk_header_index(lines: &[RenderedDiffLine], cursor: usize) 
         return hunk_indexes.first().copied();
     };
     Some(first_after)
-}
-
-fn comment_block_start_for_cursor(lines: &[RenderedDiffLine], cursor: usize) -> usize {
-    let Some(comment_id) = lines[cursor].comment_id else {
-        return cursor;
-    };
-    let mut idx = cursor;
-    while idx > 0 && lines[idx - 1].comment_id == Some(comment_id) {
-        idx -= 1;
-    }
-    idx
-}
-
-fn comment_block_starts(lines: &[RenderedDiffLine]) -> Vec<usize> {
-    lines
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, _)| is_comment_block_start(lines, idx).then_some(idx))
-        .collect()
-}
-
-fn is_comment_block_start(lines: &[RenderedDiffLine], idx: usize) -> bool {
-    let Some(comment_id) = lines[idx].comment_id else {
-        return false;
-    };
-    idx == 0 || lines[idx - 1].comment_id != Some(comment_id)
 }
 
 fn hunk_header_indexes(lines: &[RenderedDiffLine]) -> Vec<usize> {
@@ -1189,23 +958,6 @@ impl App {
         self.ui.diff_ui.block_cursor_col = 0;
         self.ui.diff_ui.block_cursor_goal = 0;
     }
-}
-
-fn format_path_with_home_tilde(path: &std::path::Path) -> String {
-    let Some(home) = std::env::var_os("HOME") else {
-        return path.display().to_string();
-    };
-    let home = std::path::PathBuf::from(home);
-    if let Ok(relative) = path.strip_prefix(&home) {
-        if relative.as_os_str().is_empty() {
-            return "~".to_owned();
-        }
-        return std::path::Path::new("~")
-            .join(relative)
-            .display()
-            .to_string();
-    }
-    path.display().to_string()
 }
 
 fn file_focus_target_path_for_visible_row(
@@ -1277,18 +1029,8 @@ fn focus_change_cleared_selection_note(
 mod tests {
     use super::{
         FocusPane, TreeRow, current_visible_file_row_selectable,
-        file_focus_target_path_for_visible_row, format_path_with_home_tilde,
-        should_preserve_directory_row_focus,
+        file_focus_target_path_for_visible_row, should_preserve_directory_row_focus,
     };
-
-    #[test]
-    fn non_home_path_stays_absolute() {
-        let path = std::path::Path::new("/opt/tools/review-tasks.md");
-        assert_eq!(
-            format_path_with_home_tilde(path),
-            "/opt/tools/review-tasks.md"
-        );
-    }
 
     fn row(path: Option<&str>, depth: usize, selectable: bool) -> TreeRow {
         TreeRow {

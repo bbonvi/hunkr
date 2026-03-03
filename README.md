@@ -9,8 +9,6 @@ It lets you review a selected commit range as one net diff across all changed fi
 - Multi-commit net diff review in a focused 3-pane workflow (commits, changed files, diff)
 - Fast commit range selection with per-commit review states: `Unreviewed`, `Reviewed`, `Issue Found`
 - First-run baseline: visible pushed commits are auto-marked `REVIEWED`; unpushed commits stay `UNREVIEWED`
-- Inline review comments anchored to commit/hunk/line selections
-- Auto-generated review task markdown for agent handoff and follow-up
 - Built-in filters/search for commits and files
 - In-app worktree switcher to move across linked git worktrees without leaving the session
 - Built-in git actions are read-only by product design
@@ -31,7 +29,7 @@ It lets you review a selected commit range as one net diff across all changed fi
 
 - Open the worktree switcher in-app and move between linked worktrees without restarting the session.
 - Worktree entries are ordered by latest commit activity (freshest first) while keeping the main repo worktree pinned at the top.
-- Review metadata remains anchored to the launch workspace `.hunkr/` directory, so commit statuses/comments stay shared inside that session.
+- Review metadata remains anchored to the launch workspace `.hunkr/` directory, so commit statuses stay shared inside that session.
 
 ## Local-First Data
 
@@ -39,8 +37,6 @@ All review state stays in your repo under `.hunkr/`:
 
 - `.hunkr/state.json` for review statuses and session context
 - `.hunkr/shell-history.json` for `!` command history
-- `.hunkr/comments/index.json` for comment storage
-- `.hunkr/comments/<branch>-review-tasks.md` for exported review tasks
 
 ## Quick Start
 

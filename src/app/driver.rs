@@ -44,8 +44,6 @@ impl AppDriver {
             },
             input_mode: match self.app.ui.preferences.input_mode {
                 InputMode::Normal => "normal",
-                InputMode::CommentCreate => "comment_create",
-                InputMode::CommentEdit(_) => "comment_edit",
                 InputMode::ShellCommand => "shell_command",
                 InputMode::WorktreeSwitch => "worktree_switch",
                 InputMode::DiffSearch => "diff_search",

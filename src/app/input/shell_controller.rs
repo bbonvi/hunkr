@@ -147,14 +147,6 @@ mod tests {
             crate::store::StateStore::for_project(repo_root)
         }
 
-        fn open_comment_store(
-            &self,
-            store_root: &Path,
-            branch: &str,
-        ) -> anyhow::Result<crate::comments::CommentStore> {
-            crate::comments::CommentStore::new(store_root, branch)
-        }
-
         fn clock(&self) -> Arc<dyn crate::app::AppClock> {
             Arc::new(TestClock)
         }

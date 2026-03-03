@@ -1,6 +1,5 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::path::PathBuf;
 
-use super::view_models::comment_badge_commit_ids_from_comments;
 use crate::app::{App, CommitRow, CommitStatusFilter, FocusPane, InputMode, TreeRow};
 
 /// Immutable snapshot consumed by render/view-model builders.
@@ -33,7 +32,6 @@ pub(in crate::app) struct CommitPaneSnapshot {
     pub commits_search_mode: bool,
     pub commit_query: String,
     pub visible_commits: Vec<CommitRow>,
-    pub comment_badge_commit_ids: BTreeSet<String>,
     pub selected_total: usize,
     pub total_commits: usize,
     pub status_counts: (usize, usize, usize),
@@ -47,8 +45,6 @@ pub(in crate::app) struct FooterSnapshot {
     pub status: String,
     pub commit_visual_active: bool,
     pub diff_visual_active: bool,
-    pub comment_buffer: String,
-    pub comment_cursor: usize,
     pub diff_search_buffer: String,
     pub diff_search_cursor: usize,
     pub commit_query: String,
@@ -113,9 +109,6 @@ impl App {
             ),
             commit_query: self.ui.search.commit_query.clone(),
             visible_commits,
-            comment_badge_commit_ids: comment_badge_commit_ids_from_comments(
-                self.deps.comments.comments(),
-            ),
             selected_total: self
                 .domain
                 .commits
@@ -132,8 +125,6 @@ impl App {
             status: self.runtime.status.clone(),
             commit_visual_active: self.ui.commit_ui.visual_anchor.is_some(),
             diff_visual_active: self.ui.diff_ui.visual_selection.is_some(),
-            comment_buffer: self.ui.comment_editor.buffer.clone(),
-            comment_cursor: self.ui.comment_editor.cursor,
             diff_search_buffer: self.ui.search.diff_buffer.clone(),
             diff_search_cursor: self.ui.search.diff_cursor,
             commit_query: self.ui.search.commit_query.clone(),
@@ -217,14 +208,6 @@ mod tests {
 
         fn state_store_for_repo(&self, repo_root: &Path) -> crate::store::StateStore {
             crate::store::StateStore::for_project(repo_root)
-        }
-
-        fn open_comment_store(
-            &self,
-            store_root: &Path,
-            branch: &str,
-        ) -> anyhow::Result<crate::comments::CommentStore> {
-            crate::comments::CommentStore::new(store_root, branch)
         }
 
         fn clock(&self) -> Arc<dyn crate::app::AppClock> {

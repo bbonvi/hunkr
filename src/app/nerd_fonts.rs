@@ -188,11 +188,6 @@ pub(super) fn commit_status_badge(status: ReviewStatus, nerd_fonts: bool) -> &'s
     }
 }
 
-/// Returns the commit-row marker that indicates at least one linked review comment.
-pub(super) fn commit_comment_badge(nerd_fonts: bool) -> &'static str {
-    if nerd_fonts { "" } else { "*" }
-}
-
 /// Returns the commit-pane status-filter label prefix.
 pub(super) fn commit_status_filter_label_prefix(nerd_fonts: bool) -> &'static str {
     if nerd_fonts {

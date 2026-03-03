@@ -46,38 +46,6 @@ fn commit_info(id: &str, unpushed: bool) -> CommitInfo {
     }
 }
 
-fn sample_comment(start: CommentAnchor, end: CommentAnchor, text: &str) -> ReviewComment {
-    ReviewComment {
-        id: 7,
-        target: CommentTarget {
-            kind: CommentTargetKind::Hunk,
-            start,
-            end,
-            commits: BTreeSet::from(["abc".to_owned()]),
-            selected_lines: vec!["+x".to_owned()],
-        },
-        text: text.to_owned(),
-        created_at: "2026-01-01T00:00:00Z".to_owned(),
-        updated_at: "2026-01-01T00:00:00Z".to_owned(),
-    }
-}
-
-fn sample_commit_comment(anchor: CommentAnchor, text: &str) -> ReviewComment {
-    ReviewComment {
-        id: 9,
-        target: CommentTarget {
-            kind: CommentTargetKind::Commit,
-            start: anchor.clone(),
-            end: anchor.clone(),
-            commits: BTreeSet::from([anchor.commit_id.clone()]),
-            selected_lines: vec!["---- commit abc1234 add parser (1m)".to_owned()],
-        },
-        text: text.to_owned(),
-        created_at: "2026-01-01T00:00:00Z".to_owned(),
-        updated_at: "2026-01-01T00:00:00Z".to_owned(),
-    }
-}
-
 #[test]
 fn first_open_reviewed_commit_ids_excludes_unpushed_commits() {
     let commits = vec![
@@ -370,69 +338,6 @@ fn char_delete_handles_unicode_scalars() {
 }
 
 #[test]
-fn comment_cursor_line_and_col_track_multiline_positions() {
-    let text = "one\ntwo\nthree";
-    let cursor = text.find("three").expect("three start");
-    assert_eq!(comment_cursor_line_col(text, cursor), (3, 1));
-}
-
-#[test]
-fn comment_modal_lines_includes_cursor_marker() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let rendered = comment_modal_lines("abc", 1, None, 4, 24, &theme);
-    let flattened = rendered.lines[0]
-        .spans
-        .iter()
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-
-    assert!(!flattened.contains('|'));
-    assert!(
-        rendered.lines[0]
-            .spans
-            .iter()
-            .any(|span| span.content == "b" && span.style.bg == Some(theme.modal_cursor_bg))
-    );
-    assert!(flattened.contains("ab"));
-    assert!(flattened.contains("c"));
-    assert!(rendered.text_offset > 0);
-}
-
-#[test]
-fn comment_modal_lines_wraps_long_input_and_keeps_cursor_visible() {
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let text = "abcdefghij0123456789";
-    let cursor = text.find('7').expect("cursor char");
-    let rendered = comment_modal_lines(text, cursor, None, 3, 10, &theme);
-
-    assert_eq!(rendered.lines.len(), 3);
-    assert_eq!(rendered.line_ranges.len(), 3);
-    assert!(
-        rendered.lines.iter().any(|line| line
-            .spans
-            .iter()
-            .any(|span| span.content == "7" && span.style.bg == Some(theme.modal_cursor_bg))),
-        "wrapped viewport should still include the cursor cell",
-    );
-}
-
-#[test]
-fn delete_selection_range_cuts_selected_text() {
-    let mut text = "alpha beta".to_owned();
-    let mut cursor = text.len();
-    let mut selection = Some((2, 8));
-
-    assert!(delete_selection_range(
-        &mut text,
-        &mut cursor,
-        &mut selection
-    ));
-    assert_eq!(text, "alta");
-    assert_eq!(cursor, 2);
-    assert!(selection.is_none());
-}
-
-#[test]
 fn ctrl_u_and_ctrl_k_style_deletes_stay_within_current_line() {
     let mut text = "one\ntwo words\nthree".to_owned();
     let mut cursor = text.find("words").expect("cursor on words");
@@ -444,21 +349,6 @@ fn ctrl_u_and_ctrl_k_style_deletes_stay_within_current_line() {
     cursor = text.find("rds").expect("cursor in words");
     delete_to_line_end(&mut text, &mut cursor);
     assert_eq!(text, "one\nwo\nthree");
-}
-
-#[test]
-fn vertical_cursor_movement_keeps_column_when_possible() {
-    let text = "abcd\nxy\npqrst";
-    let base = text.find("cd").expect("cd start") + 2;
-    let up = move_cursor_up(text, base);
-    let down = move_cursor_down(text, up);
-
-    assert_eq!(up, base);
-    assert_eq!(down, text.find("xy").expect("xy start") + 2);
-    assert_eq!(
-        move_cursor_down(text, down),
-        text.find("pq").expect("pq start") + 2
-    );
 }
 
 #[test]
@@ -664,7 +554,6 @@ fn rendered_separator_line_keeps_empty_raw_text_without_placeholder_glyphs() {
 
     assert_eq!(separator.raw_text, "");
     assert!(separator.anchor.is_none());
-    assert_eq!(separator.comment_id, None);
     assert_eq!(content, "");
 }
 
@@ -773,7 +662,7 @@ fn diff_column_for_rendered_code_line_skips_line_number_gutter() {
             Span::raw("target"),
         ]),
         raw_text: "+target".to_owned(),
-        anchor: Some(CommentAnchor {
+        anchor: Some(DiffLineAnchor {
             commit_id: "abc".to_owned(),
             commit_summary: "summary".to_owned(),
             file_path: "src/main.rs".to_owned(),
@@ -781,7 +670,6 @@ fn diff_column_for_rendered_code_line_skips_line_number_gutter() {
             old_lineno: Some(12),
             new_lineno: Some(12345),
         }),
-        comment_id: None,
     };
     let content_left = rect.x + 1;
 
@@ -804,7 +692,6 @@ fn diff_column_for_rendered_non_code_line_uses_display_column() {
         line: Line::from(vec![Span::raw("@@ "), Span::raw("-1 +1 @@")]),
         raw_text: "@@ -1 +1 @@".to_owned(),
         anchor: None,
-        comment_id: None,
     };
 
     assert_eq!(
@@ -824,7 +711,7 @@ fn diff_column_for_wrapped_row_applies_row_offset_before_raw_mapping() {
             Span::raw("target"),
         ]),
         raw_text: "+target".to_owned(),
-        anchor: Some(CommentAnchor {
+        anchor: Some(DiffLineAnchor {
             commit_id: "abc".to_owned(),
             commit_summary: "summary".to_owned(),
             file_path: "src/main.rs".to_owned(),
@@ -832,7 +719,6 @@ fn diff_column_for_wrapped_row_applies_row_offset_before_raw_mapping() {
             old_lineno: Some(12),
             new_lineno: Some(12345),
         }),
-        comment_id: None,
     };
 
     let wrapped_row_offset = 1;
@@ -1094,7 +980,7 @@ fn prune_diff_positions_keeps_existing_paths_even_if_content_changed() {
 
 #[test]
 fn pending_anchor_resolves_cursor_and_top_after_insertions() {
-    let anchor = CommentAnchor {
+    let anchor = DiffLineAnchor {
         commit_id: "abc123".to_owned(),
         commit_summary: "summary".to_owned(),
         file_path: "src/lib.rs".to_owned(),
@@ -1107,19 +993,16 @@ fn pending_anchor_resolves_cursor_and_top_after_insertions() {
             line: Line::from("context-a"),
             raw_text: "context-a".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("+target"),
             raw_text: "+target".to_owned(),
             anchor: Some(anchor.clone()),
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("context-b"),
             raw_text: "context-b".to_owned(),
             anchor: None,
-            comment_id: None,
         },
     ];
     let pending = capture_pending_diff_view_anchor(
@@ -1136,25 +1019,21 @@ fn pending_anchor_resolves_cursor_and_top_after_insertions() {
             line: Line::from("inserted"),
             raw_text: "inserted".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("context-a"),
             raw_text: "context-a".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("+target"),
             raw_text: "+target".to_owned(),
             anchor: Some(anchor),
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("context-b"),
             raw_text: "context-b".to_owned(),
             anchor: None,
-            comment_id: None,
         },
     ];
 
@@ -1171,13 +1050,11 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
             line: Line::from("repeat"),
             raw_text: "repeat".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("repeat"),
             raw_text: "repeat".to_owned(),
             anchor: None,
-            comment_id: None,
         },
     ];
     let locator = capture_pending_diff_view_anchor(
@@ -1195,19 +1072,16 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
             line: Line::from("repeat"),
             raw_text: "repeat".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("other"),
             raw_text: "other".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("repeat"),
             raw_text: "repeat".to_owned(),
             anchor: None,
-            comment_id: None,
         },
     ];
 
@@ -1217,7 +1091,7 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
 
 #[test]
 fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
-    let anchor = CommentAnchor {
+    let anchor = DiffLineAnchor {
         commit_id: "abc123".to_owned(),
         commit_summary: "summary".to_owned(),
         file_path: "src/lib.rs".to_owned(),
@@ -1230,13 +1104,11 @@ fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
             line: Line::from("dup"),
             raw_text: "dup".to_owned(),
             anchor: Some(anchor.clone()),
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("dup"),
             raw_text: "dup".to_owned(),
             anchor: Some(anchor.clone()),
-            comment_id: None,
         },
     ];
     let locator = capture_pending_diff_view_anchor(
@@ -1254,25 +1126,21 @@ fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
             line: Line::from("dup"),
             raw_text: "dup".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("dup"),
             raw_text: "dup".to_owned(),
             anchor: Some(anchor.clone()),
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("x"),
             raw_text: "x".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("dup"),
             raw_text: "dup".to_owned(),
             anchor: Some(anchor),
-            comment_id: None,
         },
     ];
 
@@ -1287,13 +1155,11 @@ fn line_locator_handles_empty_raw_text_occurrence() {
             line: Line::from(""),
             raw_text: String::new(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from(""),
             raw_text: String::new(),
             anchor: None,
-            comment_id: None,
         },
     ];
     let locator = capture_pending_diff_view_anchor(
@@ -1311,19 +1177,16 @@ fn line_locator_handles_empty_raw_text_occurrence() {
             line: Line::from(""),
             raw_text: String::new(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("x"),
             raw_text: "x".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from(""),
             raw_text: String::new(),
             anchor: None,
-            comment_id: None,
         },
     ];
 
@@ -2013,7 +1876,7 @@ fn commit_banner_renders_only_when_commit_changes() {
 
 #[test]
 fn commit_anchor_marker_is_detected() {
-    let commit_anchor = CommentAnchor {
+    let commit_anchor = DiffLineAnchor {
         commit_id: "abc1234".to_owned(),
         commit_summary: "summary".to_owned(),
         file_path: "src/lib.rs".to_owned(),
@@ -2021,20 +1884,20 @@ fn commit_anchor_marker_is_detected() {
         old_lineno: None,
         new_lineno: None,
     };
-    let hunk_anchor = CommentAnchor {
+    let hunk_anchor = DiffLineAnchor {
         hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
         old_lineno: Some(1),
         new_lineno: Some(1),
         ..commit_anchor.clone()
     };
 
-    assert!(is_commit_anchor(&commit_anchor));
-    assert!(!is_commit_anchor(&hunk_anchor));
+    assert!(is_commit_line_anchor(&commit_anchor));
+    assert!(!is_commit_line_anchor(&hunk_anchor));
 }
 
 #[test]
-fn comment_anchor_match_requires_exact_line_mapping() {
-    let base = CommentAnchor {
+fn diff_line_anchor_match_requires_exact_line_mapping() {
+    let base = DiffLineAnchor {
         commit_id: "abc".to_owned(),
         commit_summary: "summary".to_owned(),
         file_path: "src/lib.rs".to_owned(),
@@ -2046,205 +1909,8 @@ fn comment_anchor_match_requires_exact_line_mapping() {
     let mut different = base.clone();
     different.new_lineno = Some(2);
 
-    assert!(comment_anchor_matches(&base, &same));
-    assert!(!comment_anchor_matches(&base, &different));
-}
-
-#[test]
-fn comment_location_formats_range_when_bounds_differ() {
-    let start = CommentAnchor {
-        commit_id: "abc".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
-    let end = CommentAnchor {
-        old_lineno: Some(3),
-        new_lineno: Some(4),
-        ..start.clone()
-    };
-    let comment = sample_comment(start, end, "check this");
-
-    assert_eq!(
-        comment_location_label(&comment),
-        "range old 1/new 1 -> old 3/new 4"
-    );
-}
-
-#[test]
-fn comment_location_formats_commit_targets() {
-    let anchor = CommentAnchor {
-        commit_id: "abc1234deadbeef".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
-        old_lineno: None,
-        new_lineno: None,
-    };
-    let comment = sample_commit_comment(anchor, "commit-level note");
-
-    assert_eq!(comment_location_label(&comment), "commit abc1234");
-}
-
-#[test]
-fn comment_commit_membership_uses_commit_anchor() {
-    let anchor = CommentAnchor {
-        commit_id: "abc1234deadbeef".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
-        old_lineno: None,
-        new_lineno: None,
-    };
-    let comment = sample_commit_comment(anchor, "commit-level note");
-
-    assert!(comment_targets_commit_end(
-        &comment,
-        "src/lib.rs",
-        "abc1234deadbeef"
-    ));
-    assert!(!comment_targets_commit_end(
-        &comment,
-        "src/lib.rs",
-        "fffffff"
-    ));
-}
-
-#[test]
-fn comment_hunk_membership_uses_end_anchor() {
-    let start = CommentAnchor {
-        commit_id: "start".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
-    let end = CommentAnchor {
-        commit_id: "end".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -10,1 +10,1 @@".to_owned(),
-        old_lineno: Some(10),
-        new_lineno: Some(10),
-    };
-    let mut comment = sample_comment(start, end.clone(), "multi hunk");
-    comment.id = 8;
-    comment.target.commits = BTreeSet::from(["start".to_owned(), "end".to_owned()]);
-
-    assert!(comment_targets_hunk_end(
-        &comment,
-        "src/lib.rs",
-        "end",
-        "@@ -10,1 +10,1 @@"
-    ));
-    assert!(!comment_targets_hunk_end(
-        &comment,
-        "src/lib.rs",
-        "start",
-        "@@ -1,1 +1,1 @@"
-    ));
-    assert!(!comment_targets_hunk_end(
-        &comment,
-        "src/other.rs",
-        "end",
-        "@@ -10,1 +10,1 @@"
-    ));
-}
-
-#[test]
-fn push_comment_lines_sets_comment_id_on_each_rendered_row() {
-    let start = CommentAnchor {
-        commit_id: "abc".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
-    let end = CommentAnchor {
-        old_lineno: Some(2),
-        new_lineno: Some(2),
-        ..start.clone()
-    };
-    let comment = sample_comment(start, end, "line one\nline two");
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let mut rendered = Vec::new();
-
-    push_comment_lines(&mut rendered, &comment, &theme, 0);
-
-    assert_eq!(rendered.len(), 3);
-    assert!(
-        rendered
-            .iter()
-            .all(|line| line.comment_id == Some(comment.id))
-    );
-}
-
-#[test]
-fn push_comment_lines_sanitizes_comment_text() {
-    let start = CommentAnchor {
-        commit_id: "abc".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
-    let end = CommentAnchor {
-        old_lineno: Some(2),
-        new_lineno: Some(2),
-        ..start.clone()
-    };
-    let comment = sample_comment(start, end, "one \u{1b}[31mred\u{1b}[0m\nnext\u{0}x");
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let mut rendered = Vec::new();
-
-    push_comment_lines(&mut rendered, &comment, &theme, 0);
-
-    let flattened = rendered
-        .iter()
-        .flat_map(|line| line.line.spans.iter())
-        .map(|span| span.content.to_string())
-        .collect::<String>();
-    assert!(!flattened.contains('\u{1b}'));
-    assert!(!rendered[0].raw_text.contains('\u{1b}'));
-    assert!(flattened.contains("one red"));
-    assert!(flattened.contains("nextx"));
-}
-
-#[test]
-fn push_comment_lines_for_anchor_injects_once_on_matching_end_anchor() {
-    let start = CommentAnchor {
-        commit_id: "abc".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
-    let end = CommentAnchor {
-        old_lineno: Some(2),
-        new_lineno: Some(2),
-        ..start.clone()
-    };
-    let comment = sample_comment(start.clone(), end.clone(), "line one");
-    let theme = UiTheme::from_mode(ThemeMode::Dark);
-    let mut rendered = Vec::new();
-    let comments = vec![&comment];
-    let mut injected = BTreeSet::new();
-
-    push_comment_lines_for_anchor(&mut rendered, &comments, &mut injected, &start, &theme, 0);
-    assert!(rendered.is_empty());
-
-    push_comment_lines_for_anchor(&mut rendered, &comments, &mut injected, &end, &theme, 0);
-    let inserted_rows = rendered.len();
-    assert!(inserted_rows > 0);
-
-    push_comment_lines_for_anchor(&mut rendered, &comments, &mut injected, &end, &theme, 0);
-    assert_eq!(rendered.len(), inserted_rows);
+    assert!(diff_line_anchor_matches(&base, &same));
+    assert!(!diff_line_anchor_matches(&base, &different));
 }
 
 #[test]
@@ -2254,19 +1920,16 @@ fn diff_search_wraps_forward() {
             line: Line::from("alpha"),
             raw_text: "alpha".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("beta"),
             raw_text: "beta".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("gamma"),
             raw_text: "gamma".to_owned(),
             anchor: None,
-            comment_id: None,
         },
     ];
 
@@ -2284,19 +1947,16 @@ fn diff_search_wraps_backward() {
             line: Line::from("alpha"),
             raw_text: "alpha".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("beta"),
             raw_text: "beta".to_owned(),
             anchor: None,
-            comment_id: None,
         },
         RenderedDiffLine {
             line: Line::from("gamma"),
             raw_text: "gamma".to_owned(),
             anchor: None,
-            comment_id: None,
         },
     ];
 
@@ -2313,7 +1973,6 @@ fn diff_search_steps_between_occurrences_on_same_line() {
         line: Line::from("alpha alpha beta"),
         raw_text: "alpha alpha beta".to_owned(),
         anchor: None,
-        comment_id: None,
     }];
 
     let found = find_diff_match_from_cursor(&lines, "alpha", true, 0, 0);
@@ -2335,7 +1994,6 @@ fn diff_search_steps_backward_between_occurrences_on_same_line() {
         line: Line::from("alpha alpha beta"),
         raw_text: "alpha alpha beta".to_owned(),
         anchor: None,
-        comment_id: None,
     }];
 
     let found = find_diff_match_from_cursor(&lines, "alpha", false, 0, 6);
@@ -2347,7 +2005,7 @@ fn diff_search_steps_backward_between_occurrences_on_same_line() {
 
 #[test]
 fn hunk_header_detection_ignores_commit_banner() {
-    let commit_anchor = CommentAnchor {
+    let commit_anchor = DiffLineAnchor {
         commit_id: "abc1234".to_owned(),
         commit_summary: "summary".to_owned(),
         file_path: "src/lib.rs".to_owned(),
@@ -2355,7 +2013,7 @@ fn hunk_header_detection_ignores_commit_banner() {
         old_lineno: None,
         new_lineno: None,
     };
-    let hunk_anchor = CommentAnchor {
+    let hunk_anchor = DiffLineAnchor {
         hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
         old_lineno: Some(1),
         new_lineno: Some(1),
@@ -2366,13 +2024,11 @@ fn hunk_header_detection_ignores_commit_banner() {
         line: Line::from("---- commit abc1234 summary"),
         raw_text: "---- commit abc1234 summary".to_owned(),
         anchor: Some(commit_anchor),
-        comment_id: None,
     };
     let hunk_line = RenderedDiffLine {
         line: Line::from("@@ -1,1 +1,1 @@"),
         raw_text: "@@ -1,1 +1,1 @@".to_owned(),
         anchor: Some(hunk_anchor),
-        comment_id: None,
     };
 
     assert!(!is_hunk_header_line(&commit_line));

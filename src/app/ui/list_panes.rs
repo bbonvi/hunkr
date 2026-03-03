@@ -11,11 +11,10 @@ use ratatui::{
 
 use super::super::{
     CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
-    blend_colors, commit_comment_badge, commit_push_chain_marker, commit_selection_marker,
-    commit_status_badge, commit_status_filter_label_prefix, display_width,
-    format_file_change_badge, format_relative_time, list_highlight_symbol,
-    list_highlight_symbol_width, sanitize_terminal_text, sanitized_span, truncate,
-    uncommitted_badge,
+    blend_colors, commit_push_chain_marker, commit_selection_marker, commit_status_badge,
+    commit_status_filter_label_prefix, display_width, format_file_change_badge,
+    format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
+    sanitize_terminal_text, sanitized_span, truncate, uncommitted_badge,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, list_content_width, status_style};
 
@@ -42,7 +41,6 @@ pub(in crate::app) struct FilePaneModel<'a> {
 /// Render payload for the commits pane.
 pub(in crate::app) struct CommitPaneModel<'a> {
     pub commits: &'a [CommitRow],
-    pub comment_badge_commit_ids: &'a BTreeSet<String>,
     pub status_counts: (usize, usize, usize),
     pub selected_total: usize,
     pub shown_commits: usize,
@@ -184,7 +182,6 @@ impl<'a> ListPaneRenderer<'a> {
     ) {
         let CommitPaneModel {
             commits,
-            comment_badge_commit_ids,
             status_counts,
             selected_total,
             shown_commits,
@@ -277,14 +274,13 @@ impl<'a> ListPaneRenderer<'a> {
             .map(|(idx, row)| {
                 let is_cursor = cursor_idx == Some(idx);
                 let push_chain_kind = push_chain_kinds.get(idx).copied().flatten();
-                let has_comments = comment_badge_commit_ids.contains(&row.info.id);
                 let cursor_bg = if self.focused == FocusPane::Commits {
                     self.theme.focused_cursor_bg
                 } else {
                     self.theme.cursor_bg
                 };
                 let line = apply_row_highlight(
-                    &presenter.commit_row_line_with_push_chain(row, push_chain_kind, has_comments),
+                    &presenter.commit_row_line_with_push_chain(row, push_chain_kind),
                     line_width,
                     row.selected,
                     is_cursor,
@@ -478,14 +474,13 @@ impl<'a> ListLinePresenter<'a> {
         } else {
             Some(CommitPushChainMarkerKind::Pushed)
         };
-        self.commit_row_line_with_push_chain(row, default_push_chain, false)
+        self.commit_row_line_with_push_chain(row, default_push_chain)
     }
 
     pub(in crate::app) fn commit_row_line_with_push_chain(
         &self,
         row: &CommitRow,
         push_chain_kind: Option<CommitPushChainMarkerKind>,
-        has_comments: bool,
     ) -> Line<'static> {
         let commit_text_style = if row.selected {
             Style::default()
@@ -546,22 +541,6 @@ impl<'a> ListLinePresenter<'a> {
                 }
                 right_spans.push(Span::styled(rendered.clone(), decoration_style));
                 right_width += display_width(&rendered) + usize::from(right_width > 0);
-            }
-        }
-        if has_comments {
-            let comment_badge = commit_comment_badge(self.nerd_fonts).to_owned();
-            let comment_needed = display_width(&comment_badge) + usize::from(right_width > 0);
-            if right_width + comment_needed <= max_right_width {
-                if right_width > 0 {
-                    right_spans.push(Span::raw(" "));
-                }
-                right_spans.push(Span::styled(
-                    comment_badge,
-                    Style::default()
-                        .fg(self.theme.accent)
-                        .add_modifier(Modifier::BOLD),
-                ));
-                right_width += comment_needed;
             }
         }
         if commit_has_tag(row) {
@@ -1046,7 +1025,7 @@ mod tests {
             is_uncommitted: false,
         };
 
-        let line = presenter.commit_row_line_with_push_chain(&row, None, false);
+        let line = presenter.commit_row_line_with_push_chain(&row, None);
         assert!(line.spans.iter().any(|span| {
             span.content.contains("tag")
                 && !span.style.add_modifier.contains(Modifier::BOLD)

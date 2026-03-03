@@ -28,7 +28,6 @@ use syntect::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-mod comment_helpers;
 mod core_helpers;
 mod flow;
 mod input;
@@ -49,11 +48,10 @@ mod theme_palette;
 mod tree_highlight;
 mod ui;
 mod worktree_switcher;
-use self::comment_helpers::*;
 use self::core_helpers::*;
 use self::nerd_fonts::{
     CommitPushChainMarkerKind, NerdFontTheme, app_title_label, branch_label_prefix,
-    commit_comment_badge, commit_push_chain_marker, commit_selection_marker, commit_status_badge,
+    commit_push_chain_marker, commit_selection_marker, commit_status_badge,
     commit_status_filter_label_prefix, file_change_kind_symbol, format_file_change_badge,
     format_path_with_icon, format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
     list_highlight_symbol_width, uncommitted_badge, worktree_label_prefix,
@@ -73,13 +71,12 @@ use self::ui::style::{CursorSelectionPolicy, apply_row_highlight};
 use self::worktree_switcher::short_path_label;
 
 use crate::{
-    comments::CommentStore,
     config::StartupTheme,
     git_data::{GitService, WorktreeInfo},
     model::{
-        AggregatedDiff, CommentAnchor, CommentTarget, CommentTargetKind, CommitInfo, DiffLineKind,
-        FileChangeKind, FileChangeSummary, FilePatch, HunkLine, ReviewComment, ReviewState,
-        ReviewStatus, UNCOMMITTED_COMMIT_ID, UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
+        AggregatedDiff, CommitInfo, DiffLineAnchor, DiffLineKind, FileChangeKind,
+        FileChangeSummary, FilePatch, HunkLine, ReviewState, ReviewStatus, UNCOMMITTED_COMMIT_ID,
+        UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
     },
     store::{InstanceLock, StateStore},
 };
@@ -109,8 +106,6 @@ enum FocusPane {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InputMode {
     Normal,
-    CommentCreate,
-    CommentEdit(u64),
     ShellCommand,
     WorktreeSwitch,
     DiffSearch,
@@ -352,8 +347,7 @@ struct PaneRects {
 struct RenderedDiffLine {
     line: Line<'static>,
     raw_text: String,
-    anchor: Option<CommentAnchor>,
-    comment_id: Option<u64>,
+    anchor: Option<DiffLineAnchor>,
 }
 
 #[derive(Debug, Clone)]
@@ -463,26 +457,6 @@ struct DiffCacheState {
     rendered_cache: HashMap<(String, ThemeMode), Arc<Vec<RenderedDiffLine>>>,
     rendered_key: Option<RenderedDiffKey>,
     highlighter: DiffSyntaxHighlighter,
-}
-
-/// Comment modal/editor mutable state.
-struct CommentEditorState {
-    buffer: String,
-    cursor: usize,
-    selection: Option<(usize, usize)>,
-    mouse_anchor: Option<usize>,
-    rect: Option<ratatui::layout::Rect>,
-    line_ranges: Vec<(usize, usize)>,
-    view_start: usize,
-    text_offset: u16,
-    create_target_cache: Option<CommentCreateTargetCache>,
-}
-
-/// Cached comment target resolution for create-mode modal rendering/submission.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CommentCreateTargetCache {
-    Ready(Box<Option<CommentTarget>>),
-    Error(String),
 }
 
 /// Shell command modal/editor mutable state.
@@ -607,7 +581,6 @@ struct AppDependencies {
     git: GitService,
     store: StateStore,
     instance_lock: Option<InstanceLock>,
-    comments: CommentStore,
     clock: Arc<dyn AppClock>,
     runtime_ports: Arc<dyn AppRuntimePorts>,
 }
@@ -630,7 +603,6 @@ struct AppUiState {
     preferences: UiPreferences,
     diff_ui: DiffUiState,
     diff_cache: DiffCacheState,
-    comment_editor: CommentEditorState,
     shell_command: ShellCommandState,
     worktree_switch: WorktreeSwitchState,
     search: SearchState,

@@ -36,8 +36,5 @@ pub(in crate::app) fn set_status_for_ids(
     if status != ReviewStatus::Unreviewed {
         app.ui.commit_ui.visual_anchor = None;
     }
-    if let Err(err) = app.sync_comment_report() {
-        status_message.push_str(&format!(", review tasks sync failed: {err:#}"));
-    }
     app.runtime.status = status_message;
 }

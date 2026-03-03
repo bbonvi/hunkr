@@ -1,4 +1,4 @@
-//! Mouse interaction handlers for list panes, diff, and comment editor modal.
+//! Mouse interaction handlers for list panes and diff interactions.
 use super::input::modal_controller;
 use crate::app::*;
 
@@ -280,56 +280,6 @@ impl App {
     fn clear_keyboard_diff_visual_selection(&mut self) {
         if should_clear_diff_visual_on_wheel(self.ui.diff_ui.visual_selection) {
             self.clear_diff_visual_selection();
-        }
-    }
-
-    pub(in crate::app) fn handle_comment_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
-        let Some(editor_rect) = self.ui.comment_editor.rect else {
-            return;
-        };
-        if self.ui.comment_editor.line_ranges.is_empty() {
-            return;
-        }
-        let inside_editor = contains(editor_rect, mouse.column, mouse.row);
-        let resolve_cursor = |app: &Self, x: u16, y: u16| -> usize {
-            let row = y.saturating_sub(editor_rect.y) as usize;
-            let line_idx = row.min(app.ui.comment_editor.line_ranges.len() - 1);
-            let (line_start, line_end) = app.ui.comment_editor.line_ranges[line_idx];
-            let col = x
-                .saturating_sub(editor_rect.x)
-                .saturating_sub(app.ui.comment_editor.text_offset)
-                .min(editor_rect.width.saturating_sub(1)) as usize;
-            line_cursor_with_column(&app.ui.comment_editor.buffer, line_start, line_end, col)
-        };
-
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) if inside_editor => {
-                let idx = resolve_cursor(self, mouse.column, mouse.row);
-                self.ui.comment_editor.cursor = idx;
-                self.ui.comment_editor.selection = None;
-                self.ui.comment_editor.mouse_anchor = Some(idx);
-            }
-            MouseEventKind::Drag(MouseButton::Left) if inside_editor => {
-                let idx = resolve_cursor(self, mouse.column, mouse.row);
-                self.ui.comment_editor.cursor = idx;
-                if let Some(anchor) = self.ui.comment_editor.mouse_anchor {
-                    self.ui.comment_editor.selection = (anchor != idx).then_some((anchor, idx));
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) if inside_editor => {
-                let idx = resolve_cursor(self, mouse.column, mouse.row);
-                self.ui.comment_editor.cursor = idx;
-                if let Some(anchor) = self.ui.comment_editor.mouse_anchor.take() {
-                    self.ui.comment_editor.selection = (anchor != idx).then_some((anchor, idx));
-                }
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                self.ui.comment_editor.mouse_anchor = None;
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                self.ui.comment_editor.mouse_anchor = None;
-            }
-            _ => {}
         }
     }
 

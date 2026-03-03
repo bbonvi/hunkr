@@ -106,7 +106,6 @@ impl App {
             rect,
             CommitPaneModel {
                 commits: vm.commits,
-                comment_badge_commit_ids: vm.comment_badge_commit_ids,
                 status_counts: vm.status_counts,
                 selected_total: vm.selected_total,
                 shown_commits: vm.shown_commits,
@@ -215,7 +214,7 @@ impl App {
     ) -> Option<Line<'static>> {
         let rendered = self.domain.rendered_diff.get(idx)?;
         let anchor = rendered.anchor.as_ref()?;
-        if is_commit_anchor(anchor) {
+        if is_commit_line_anchor(anchor) {
             return None;
         }
 
@@ -273,21 +272,6 @@ impl App {
         );
 
         let (pane_line, pane_bindings) = match snapshot.footer.input_mode {
-            InputMode::CommentCreate | InputMode::CommentEdit(_) => (
-                Line::from(vec![
-                    key_chip("Enter", theme),
-                    Span::styled(" save ", Style::default().fg(theme.muted)),
-                    key_chip("Alt+Enter", theme),
-                    Span::styled(" newline ", Style::default().fg(theme.muted)),
-                    key_chip("Esc", theme),
-                    Span::styled(" cancel", Style::default().fg(theme.muted)),
-                ]),
-                vec![
-                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
-                    helper_key("Alt+Enter", KeyCode::Enter, KeyModifiers::ALT),
-                    helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
-                ],
-            ),
             InputMode::ShellCommand => {
                 if snapshot.footer.shell.running {
                     (
@@ -457,8 +441,6 @@ impl App {
                     Line::from(vec![
                         key_chip("v", theme),
                         Span::styled(" range ", Style::default().fg(theme.muted)),
-                        key_chip("m", theme),
-                        Span::styled(" comment ", Style::default().fg(theme.muted)),
                         key_chip("/", theme),
                         Span::styled(" search ", Style::default().fg(theme.muted)),
                         key_chip("n", theme),
@@ -472,7 +454,6 @@ impl App {
                     ]),
                     vec![
                         helper_key("v", KeyCode::Char('v'), KeyModifiers::NONE),
-                        helper_key("m", KeyCode::Char('m'), KeyModifiers::NONE),
                         helper_key("/", KeyCode::Char('/'), KeyModifiers::NONE),
                         helper_key("n", KeyCode::Char('n'), KeyModifiers::NONE),
                         helper_key("N", KeyCode::Char('N'), KeyModifiers::SHIFT),
@@ -564,23 +545,6 @@ impl App {
         }
 
         match snapshot.footer.input_mode {
-            InputMode::CommentCreate | InputMode::CommentEdit(_) => {
-                let line_count = snapshot.footer.comment_buffer.matches('\n').count() + 1;
-                let (line, col) = comment_cursor_line_col(
-                    &snapshot.footer.comment_buffer,
-                    snapshot.footer.comment_cursor,
-                );
-                status.push(footer_separator(theme));
-                status.push(footer_detail_chip(
-                    format!("{} chars", snapshot.footer.comment_buffer.chars().count()),
-                    theme,
-                ));
-                status.push(Span::raw(" "));
-                status.push(footer_detail_chip(
-                    format!("Ln {line}, Col {col}, {line_count} lines"),
-                    theme,
-                ));
-            }
             InputMode::DiffSearch => {
                 status.push(footer_separator(theme));
                 status.extend(search_prompt_spans(
@@ -756,162 +720,6 @@ impl App {
             .style(Style::default().bg(theme.modal_bg));
         frame.render_widget(widget, inner);
     }
-
-    pub(super) fn render_comment_modal(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {
-        let area = centered_rect(56, 48, frame.area());
-        frame.render_widget(Clear, area);
-
-        let title = match self.ui.preferences.input_mode {
-            InputMode::CommentCreate => " NEW COMMENT ",
-            InputMode::CommentEdit(_) => " EDIT COMMENT ",
-            InputMode::Normal
-            | InputMode::ShellCommand
-            | InputMode::WorktreeSwitch
-            | InputMode::DiffSearch
-            | InputMode::ListSearch(_) => " COMMENT ",
-        };
-        let shell = Block::default()
-            .title(Span::styled(
-                title,
-                Style::default()
-                    .fg(theme.panel_title_fg)
-                    .bg(theme.panel_title_bg)
-                    .add_modifier(Modifier::BOLD),
-            ))
-            .title_alignment(ratatui::layout::Alignment::Center)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Double)
-            .style(Style::default().bg(theme.modal_bg))
-            .border_style(Style::default().fg(theme.focus_border));
-        frame.render_widget(shell.clone(), area);
-        let inner = shell.inner(area);
-
-        let sections = ratatui::layout::Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([
-                ratatui::layout::Constraint::Length(2),
-                ratatui::layout::Constraint::Length(6),
-                ratatui::layout::Constraint::Min(5),
-                ratatui::layout::Constraint::Length(1),
-            ])
-            .split(inner);
-
-        let mode_badge = match self.ui.preferences.input_mode {
-            InputMode::CommentCreate => "create",
-            InputMode::CommentEdit(_) => "edit",
-            InputMode::Normal
-            | InputMode::ShellCommand
-            | InputMode::WorktreeSwitch
-            | InputMode::DiffSearch
-            | InputMode::ListSearch(_) => "idle",
-        };
-        let status_style = if self.runtime.status.contains("Failed")
-            || self.runtime.status.contains("failed")
-            || self.runtime.status.contains("empty")
-            || self.runtime.status.contains("No ")
-        {
-            Style::default().fg(theme.issue)
-        } else {
-            Style::default().fg(theme.muted)
-        };
-        let header = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("mode:", Style::default().fg(theme.dimmed)),
-                Span::styled(
-                    format!(" {mode_badge} "),
-                    Style::default()
-                        .fg(theme.panel_title_fg)
-                        .bg(theme.panel_title_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    format!("{} chars", self.ui.comment_editor.buffer.chars().count()),
-                    Style::default().fg(theme.dimmed),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("status: ", Style::default().fg(theme.dimmed)),
-                Span::styled(self.runtime.status.clone(), status_style),
-            ]),
-        ])
-        .style(Style::default().bg(theme.modal_bg));
-        frame.render_widget(header, sections[0]);
-
-        let context_block = Block::default()
-            .title(" Context ")
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .style(Style::default().bg(theme.modal_bg))
-            .border_style(Style::default().fg(theme.border));
-        let context_inner = context_block.inner(sections[1]);
-        if matches!(self.ui.preferences.input_mode, InputMode::CommentCreate)
-            && self.ui.comment_editor.create_target_cache.is_none()
-        {
-            self.refresh_comment_create_target_cache();
-        }
-        let context_lines =
-            self.comment_context_preview_lines(context_inner.height as usize, theme);
-        frame.render_widget(context_block, sections[1]);
-        frame.render_widget(
-            Paragraph::new(context_lines).style(Style::default().fg(theme.text)),
-            context_inner,
-        );
-
-        let editor_block = Block::default()
-            .title(" Comment ")
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .style(Style::default().bg(theme.modal_editor_bg))
-            .border_style(Style::default().fg(theme.border));
-        let editor_inner = editor_block.inner(sections[2]);
-        let modal_view = comment_modal_lines(
-            &self.ui.comment_editor.buffer,
-            self.ui.comment_editor.cursor,
-            self.ui.comment_editor.selection,
-            editor_inner.height.saturating_sub(1) as usize,
-            editor_inner.width as usize,
-            theme,
-        );
-        let CommentModalView {
-            lines,
-            line_ranges,
-            view_start,
-            text_offset,
-        } = modal_view;
-        self.ui.comment_editor.rect = Some(editor_inner);
-        self.ui.comment_editor.line_ranges = line_ranges;
-        self.ui.comment_editor.view_start = view_start;
-        self.ui.comment_editor.text_offset = text_offset;
-        frame.render_widget(editor_block, sections[2]);
-        frame.render_widget(
-            Paragraph::new(lines).style(Style::default().fg(theme.text)),
-            editor_inner,
-        );
-
-        let footer_line = Line::from(vec![
-            key_chip("Enter", theme),
-            Span::styled(" save  ", Style::default().fg(theme.muted)),
-            key_chip("Esc", theme),
-            Span::styled(" cancel  ", Style::default().fg(theme.muted)),
-            key_chip("Alt+Enter", theme),
-            Span::styled(" newline", Style::default().fg(theme.muted)),
-        ]);
-        let footer = Paragraph::new(footer_line.clone()).style(Style::default().bg(theme.modal_bg));
-        frame.render_widget(footer, sections[3]);
-        self.register_helper_click_line(
-            &footer_line,
-            sections[3],
-            0,
-            &[
-                helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
-                helper_key("Esc", KeyCode::Esc, KeyModifiers::NONE),
-                helper_key("Alt+Enter", KeyCode::Enter, KeyModifiers::ALT),
-            ],
-            theme,
-        );
-    }
-
     pub(super) fn render_shell_command_modal(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {
         let area = centered_rect(68, 44, frame.area());
         frame.render_widget(Clear, area);
@@ -1209,193 +1017,6 @@ impl App {
         );
         self.register_helper_click_line(&footer_text, sections[3], 0, &footer_bindings, theme);
     }
-
-    fn comment_context_preview_lines(
-        &self,
-        max_rows: usize,
-        theme: &UiTheme,
-    ) -> Vec<Line<'static>> {
-        let rows = max_rows.max(1);
-        let mut lines = Vec::<Line<'static>>::new();
-        let mut has_primary_context = false;
-
-        match self.ui.preferences.input_mode {
-            InputMode::CommentEdit(id) => {
-                if let Some(comment) = self.deps.comments.comment_by_id(id) {
-                    lines.push(Line::from(vec![
-                        Span::styled("target ", Style::default().fg(theme.dimmed)),
-                        Span::styled(
-                            format!(
-                                "{} {} ({} selected lines)",
-                                comment.target.kind.as_str(),
-                                comment_location_label(comment),
-                                comment.target.selected_lines.len()
-                            ),
-                            Style::default().fg(theme.muted),
-                        ),
-                    ]));
-                    has_primary_context = !comment.target.selected_lines.is_empty();
-                    self.push_compact_selection_preview(
-                        &mut lines,
-                        &comment.target.selected_lines,
-                        rows.saturating_sub(1),
-                        theme,
-                    );
-                }
-            }
-            InputMode::CommentCreate => match self.ui.comment_editor.create_target_cache.as_ref() {
-                Some(CommentCreateTargetCache::Ready(target)) => match target.as_ref() {
-                    Some(target) => {
-                        let start =
-                            format_anchor_lines(target.start.old_lineno, target.start.new_lineno);
-                        let end = format_anchor_lines(target.end.old_lineno, target.end.new_lineno);
-                        let span = if start == end {
-                            start
-                        } else {
-                            format!("{start} -> {end}")
-                        };
-                        lines.push(Line::from(vec![
-                            Span::styled("target ", Style::default().fg(theme.dimmed)),
-                            Span::styled(
-                                format!(
-                                    "{} {} ({span}; {} selected lines)",
-                                    target.kind.as_str(),
-                                    sanitize_terminal_text(&target.start.file_path),
-                                    target.selected_lines.len()
-                                ),
-                                Style::default().fg(theme.muted),
-                            ),
-                        ]));
-                        has_primary_context = !target.selected_lines.is_empty();
-                        self.push_compact_selection_preview(
-                            &mut lines,
-                            &target.selected_lines,
-                            rows.saturating_sub(1),
-                            theme,
-                        );
-                    }
-                    None => {
-                        lines.push(Line::from(vec![
-                            Span::styled("target ", Style::default().fg(theme.dimmed)),
-                            Span::styled(
-                                "no anchor at cursor; showing local diff snippet",
-                                Style::default().fg(theme.muted),
-                            ),
-                        ]));
-                    }
-                },
-                Some(CommentCreateTargetCache::Error(err)) => {
-                    lines.push(Line::from(vec![
-                        Span::styled("target ", Style::default().fg(theme.dimmed)),
-                        Span::styled(
-                            format!("failed to resolve target: {err}"),
-                            Style::default().fg(theme.issue),
-                        ),
-                    ]));
-                }
-                None => {}
-            },
-            InputMode::Normal
-            | InputMode::ShellCommand
-            | InputMode::WorktreeSwitch
-            | InputMode::DiffSearch
-            | InputMode::ListSearch(_) => {}
-        }
-
-        if !has_primary_context && !self.domain.rendered_diff.is_empty() {
-            let cursor = self.domain.diff_position.cursor;
-            let start = cursor.saturating_sub(1);
-            let end = (cursor + 1).min(self.domain.rendered_diff.len().saturating_sub(1));
-            for idx in start..=end {
-                if lines.len() >= rows {
-                    break;
-                }
-                let focused = idx == cursor;
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        if focused { "> " } else { "  " },
-                        if focused {
-                            Style::default().fg(theme.accent)
-                        } else {
-                            Style::default().fg(theme.dimmed)
-                        },
-                    ),
-                    Span::raw(truncate(
-                        &sanitize_terminal_text(&self.domain.rendered_diff[idx].raw_text),
-                        120,
-                    )),
-                ]));
-            }
-        }
-
-        if lines.is_empty() {
-            lines.push(Line::from(Span::styled(
-                "No diff context available at cursor.",
-                Style::default().fg(theme.muted),
-            )));
-        }
-        lines.truncate(rows);
-        lines
-    }
-
-    fn push_compact_selection_preview(
-        &self,
-        out: &mut Vec<Line<'static>>,
-        snippets: &[String],
-        max_rows: usize,
-        theme: &UiTheme,
-    ) {
-        if max_rows == 0 || snippets.is_empty() {
-            return;
-        }
-        if snippets.len() <= max_rows {
-            for snippet in snippets.iter().take(max_rows) {
-                out.push(Line::from(vec![
-                    Span::styled("  ", Style::default().fg(theme.dimmed)),
-                    Span::raw(truncate(snippet, 120)),
-                ]));
-            }
-            return;
-        }
-
-        if max_rows == 1 {
-            out.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(theme.dimmed)),
-                Span::styled(
-                    format!("… {} lines selected …", snippets.len()),
-                    Style::default().fg(theme.muted),
-                ),
-            ]));
-            return;
-        }
-
-        let preview_rows = max_rows.saturating_sub(1);
-        let head = preview_rows / 2;
-        let tail = preview_rows.saturating_sub(head);
-        for snippet in snippets.iter().take(head) {
-            out.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(theme.dimmed)),
-                Span::raw(truncate(snippet, 120)),
-            ]));
-        }
-
-        let omitted = snippets.len().saturating_sub(head + tail);
-        out.push(Line::from(vec![
-            Span::styled("  ", Style::default().fg(theme.dimmed)),
-            Span::styled(
-                format!("… {omitted} lines omitted …"),
-                Style::default().fg(theme.muted),
-            ),
-        ]));
-
-        for snippet in snippets.iter().skip(snippets.len().saturating_sub(tail)) {
-            out.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(theme.dimmed)),
-                Span::raw(truncate(snippet, 120)),
-            ]));
-        }
-    }
-
     pub(super) fn render_help_overlay(&mut self, frame: &mut Frame<'_>, theme: &UiTheme) {
         // Help is a modal overlay, so only help-local helper chips should be clickable.
         self.ui.helper_click_hitboxes.clear();
@@ -1508,8 +1129,6 @@ impl App {
                 Line::from(vec![
                     key_chip("v", theme),
                     Span::raw(" visual range  "),
-                    key_chip("m", theme),
-                    Span::raw(" add comment  "),
                     key_chip("[", theme),
                     Span::raw(" prev hunk  "),
                     key_chip("]", theme),
@@ -1517,7 +1136,6 @@ impl App {
                 ]),
                 vec![
                     helper_key("v", KeyCode::Char('v'), KeyModifiers::NONE),
-                    helper_key("m", KeyCode::Char('m'), KeyModifiers::NONE),
                     helper_key("[", KeyCode::Char('['), KeyModifiers::NONE),
                     helper_key("]", KeyCode::Char(']'), KeyModifiers::NONE),
                 ],
@@ -1835,7 +1453,6 @@ pub(super) fn footer_mode_label(
     diff_visual_active: bool,
 ) -> &'static str {
     match input_mode {
-        InputMode::CommentCreate | InputMode::CommentEdit(_) => "COMMENT",
         InputMode::ShellCommand => "SHELL",
         InputMode::WorktreeSwitch => "WORKTREE",
         InputMode::DiffSearch | InputMode::ListSearch(_) => "SEARCH",
@@ -1929,7 +1546,6 @@ fn footer_mode_style(mode: &str, theme: &UiTheme) -> Style {
     match mode {
         "VISUAL" => base.bg(blend_colors(theme.visual_bg, theme.panel_title_bg, 170)),
         "SEARCH" => base.bg(blend_colors(theme.accent, theme.panel_title_bg, 92)),
-        "COMMENT" => base.bg(blend_colors(theme.accent, theme.panel_title_bg, 138)),
         _ => base.bg(theme.panel_title_bg),
     }
 }

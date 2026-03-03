@@ -6,7 +6,7 @@ pub(in crate::app) fn switch_repository_context(
     app: &mut App,
     target: &Path,
 ) -> anyhow::Result<()> {
-    reconcile_repository_context(app, target, true)?;
+    reconcile_repository_context(app, target)?;
     reload_commits_inner(app, true).context("failed to refresh commit and diff state")?;
 
     let now = app.now_instant();
@@ -22,35 +22,18 @@ pub(in crate::app) fn reload_commits(
     preserve_manual_selection: bool,
 ) -> anyhow::Result<()> {
     let target = app.deps.git.root().to_path_buf();
-    reconcile_repository_context(app, &target, false)?;
+    reconcile_repository_context(app, &target)?;
     reload_commits_inner(app, preserve_manual_selection)
 }
 
-/// Reopens the git context and refreshes branch-scoped comment storage when needed.
-fn reconcile_repository_context(
-    app: &mut App,
-    target: &Path,
-    force_comment_store_reload: bool,
-) -> anyhow::Result<()> {
-    let previous_root = app.deps.git.root().to_path_buf();
-    let previous_branch = app.deps.git.branch_name().to_owned();
+/// Reopens the git context for the requested repository target.
+fn reconcile_repository_context(app: &mut App, target: &Path) -> anyhow::Result<()> {
     let reopened = app
         .deps
         .runtime_ports
         .open_git_at(target)
         .with_context(|| format!("failed to reopen repository at {}", target.display()))?;
-    let branch = reopened.branch_name().to_owned();
-    let root_changed = previous_root != reopened.root();
-    let branch_changed = previous_branch != branch;
     app.deps.git = reopened;
-
-    if force_comment_store_reload || root_changed || branch_changed {
-        app.deps.comments = app
-            .deps
-            .runtime_ports
-            .open_comment_store(app.deps.store.root_dir(), &branch)
-            .with_context(|| format!("failed to reload comments for branch {branch}"))?;
-    }
 
     Ok(())
 }
@@ -151,7 +134,6 @@ fn reload_commits_inner(app: &mut App, preserve_manual_selection: bool) -> anyho
     }
 
     rebuild_selection_dependent_views(app)?;
-    app.sync_comment_report()?;
     Ok(())
 }
 
@@ -237,7 +219,6 @@ pub(in crate::app) fn apply_startup_starter_selection(app: &mut App) -> anyhow::
     app.runtime.selection_rebuild_due = None;
     app.reset_diff_view_for_commit_selection_change();
     app.rebuild_selection_dependent_views()?;
-    app.sync_comment_report()?;
     app.sync_commit_cursor_for_filters(
         preferred_commit_id.as_deref(),
         app.ui.commit_ui.list_state.selected(),
@@ -266,7 +247,6 @@ pub(in crate::app) fn apply_startup_starter_selection(app: &mut App) -> anyhow::
         app.runtime.selection_rebuild_due = None;
         app.reset_diff_view_for_commit_selection_change();
         app.rebuild_selection_dependent_views()?;
-        app.sync_comment_report()?;
         app.sync_commit_cursor_for_filters(
             preferred_commit_id.as_deref(),
             app.ui.commit_ui.list_state.selected(),
@@ -321,7 +301,6 @@ mod tests {
     #[derive(Default)]
     struct RuntimePortCalls {
         open_git_at: AtomicUsize,
-        open_comment_store: AtomicUsize,
     }
 
     struct TestRuntimePorts {
@@ -332,17 +311,6 @@ mod tests {
         fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService> {
             self.calls.open_git_at.fetch_add(1, Ordering::Relaxed);
             GitService::open_at(path)
-        }
-
-        fn open_comment_store(
-            &self,
-            store_root: &Path,
-            branch: &str,
-        ) -> anyhow::Result<CommentStore> {
-            self.calls
-                .open_comment_store
-                .fetch_add(1, Ordering::Relaxed);
-            CommentStore::new(store_root, branch)
         }
     }
 
@@ -362,14 +330,6 @@ mod tests {
 
         fn state_store_for_repo(&self, repo_root: &Path) -> StateStore {
             StateStore::for_project(repo_root)
-        }
-
-        fn open_comment_store(
-            &self,
-            store_root: &Path,
-            branch: &str,
-        ) -> anyhow::Result<CommentStore> {
-            CommentStore::new(store_root, branch)
         }
 
         fn clock(&self) -> Arc<dyn AppClock> {
@@ -427,7 +387,6 @@ mod tests {
 
         super::switch_repository_context(&mut app, repo.path()).expect("switch repository context");
         assert_eq!(calls.open_git_at.load(Ordering::Relaxed), 2);
-        assert_eq!(calls.open_comment_store.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -449,7 +408,6 @@ mod tests {
         let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
 
         let before_git = calls.open_git_at.load(Ordering::Relaxed);
-        let before_comments = calls.open_comment_store.load(Ordering::Relaxed);
         run_git(
             repo.path(),
             &["checkout", "-q", "-b", "feature/external-sync"],
@@ -458,14 +416,10 @@ mod tests {
         super::reload_commits(&mut app, true).expect("reload commits after external checkout");
         assert_eq!(app.deps.git.branch_name(), "feature/external-sync");
         assert_eq!(calls.open_git_at.load(Ordering::Relaxed), before_git + 1);
-        assert_eq!(
-            calls.open_comment_store.load(Ordering::Relaxed),
-            before_comments + 1
-        );
     }
 
     #[test]
-    fn reload_commits_skips_comment_store_reload_when_branch_unchanged() {
+    fn reload_commits_reopens_git_when_branch_unchanged() {
         let repo = init_test_repo();
         let store = StateStore::for_project(repo.path());
         store
@@ -483,13 +437,8 @@ mod tests {
         let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
 
         let before_git = calls.open_git_at.load(Ordering::Relaxed);
-        let before_comments = calls.open_comment_store.load(Ordering::Relaxed);
         super::reload_commits(&mut app, true).expect("reload commits");
 
         assert_eq!(calls.open_git_at.load(Ordering::Relaxed), before_git + 1);
-        assert_eq!(
-            calls.open_comment_store.load(Ordering::Relaxed),
-            before_comments
-        );
     }
 }

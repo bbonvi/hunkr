@@ -492,56 +492,6 @@ pub(super) fn line_end_boundary(text: &str, cursor: usize) -> usize {
         .unwrap_or(text.len())
 }
 
-pub(super) fn line_char_count(text: &str, line_start: usize, line_end: usize) -> usize {
-    text[line_start..line_end].chars().count()
-}
-
-pub(super) fn line_cursor_with_column(
-    text: &str,
-    line_start: usize,
-    line_end: usize,
-    column: usize,
-) -> usize {
-    let mut idx = line_start;
-    let mut col = 0usize;
-    while idx < line_end && col < column {
-        let next = next_char_boundary(text, idx);
-        if next <= idx || next > line_end {
-            break;
-        }
-        idx = next;
-        col += 1;
-    }
-    idx
-}
-
-pub(super) fn move_cursor_up(text: &str, cursor: usize) -> usize {
-    let idx = clamp_char_boundary(text, cursor);
-    let current_start = line_start_boundary(text, idx);
-    if current_start == 0 {
-        return idx;
-    }
-    let current_col = line_char_count(text, current_start, idx);
-    let prev_end = current_start.saturating_sub(1);
-    let prev_start = line_start_boundary(text, prev_end);
-    let prev_len = line_char_count(text, prev_start, prev_end);
-    line_cursor_with_column(text, prev_start, prev_end, current_col.min(prev_len))
-}
-
-pub(super) fn move_cursor_down(text: &str, cursor: usize) -> usize {
-    let idx = clamp_char_boundary(text, cursor);
-    let current_start = line_start_boundary(text, idx);
-    let current_end = line_end_boundary(text, idx);
-    if current_end >= text.len() {
-        return idx;
-    }
-    let current_col = line_char_count(text, current_start, idx);
-    let next_start = current_end + 1;
-    let next_end = line_end_boundary(text, next_start);
-    let next_len = line_char_count(text, next_start, next_end);
-    line_cursor_with_column(text, next_start, next_end, current_col.min(next_len))
-}
-
 pub(super) fn delete_to_line_start(text: &mut String, cursor: &mut usize) {
     let idx = clamp_char_boundary(text, *cursor);
     let start = line_start_boundary(text, idx);
@@ -562,55 +512,4 @@ pub(super) fn delete_to_line_end(text: &mut String, cursor: &mut usize) {
     }
     text.replace_range(idx..end, "");
     *cursor = idx;
-}
-
-pub(super) fn normalize_selection_range(
-    text: &str,
-    selection: Option<(usize, usize)>,
-) -> Option<(usize, usize)> {
-    let (raw_start, raw_end) = selection?;
-    let start = clamp_char_boundary(text, raw_start);
-    let end = clamp_char_boundary(text, raw_end);
-    let (lo, hi) = if start <= end {
-        (start, end)
-    } else {
-        (end, start)
-    };
-    (lo < hi).then_some((lo, hi))
-}
-
-pub(super) fn delete_selection_range(
-    text: &mut String,
-    cursor: &mut usize,
-    selection: &mut Option<(usize, usize)>,
-) -> bool {
-    let Some((start, end)) = normalize_selection_range(text, *selection) else {
-        *selection = None;
-        return false;
-    };
-    text.replace_range(start..end, "");
-    *cursor = start;
-    *selection = None;
-    true
-}
-
-pub(super) fn comment_line_ranges(text: &str) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::<(usize, usize)>::new();
-    let mut start = 0usize;
-    for (idx, ch) in text.char_indices() {
-        if ch == '\n' {
-            ranges.push((start, idx));
-            start = idx + ch.len_utf8();
-        }
-    }
-    ranges.push((start, text.len()));
-    ranges
-}
-
-pub(super) fn comment_cursor_line_col(text: &str, cursor: usize) -> (usize, usize) {
-    let idx = clamp_char_boundary(text, cursor);
-    let line = text[..idx].chars().filter(|ch| *ch == '\n').count() + 1;
-    let line_start = text[..idx].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
-    let col = text[line_start..idx].chars().count() + 1;
-    (line, col)
 }

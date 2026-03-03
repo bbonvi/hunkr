@@ -9,8 +9,9 @@ use ratatui::{
 use unicode_width::UnicodeWidthChar;
 
 use super::super::{
-    CommentAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme, blend_colors,
-    comment_anchor_matches, format_path_with_icon, is_commit_anchor, sanitized_span,
+    DiffLineAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme,
+    blend_colors, diff_line_anchor_matches, format_path_with_icon, is_commit_line_anchor,
+    sanitized_span,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
 
@@ -23,7 +24,7 @@ pub(in crate::app) struct PendingDiffViewAnchor {
 
 #[derive(Debug, Clone)]
 pub(in crate::app) struct DiffLineLocator {
-    anchor: Option<CommentAnchor>,
+    anchor: Option<DiffLineAnchor>,
     raw_text: String,
     raw_text_occurrence: usize,
 }
@@ -266,7 +267,7 @@ pub(in crate::app) fn is_hunk_header_line(line: &RenderedDiffLine) -> bool {
         && line
             .anchor
             .as_ref()
-            .is_some_and(|anchor| !is_commit_anchor(anchor))
+            .is_some_and(|anchor| !is_commit_line_anchor(anchor))
 }
 
 pub(in crate::app) fn find_diff_match_from_cursor(
@@ -367,7 +368,7 @@ pub(in crate::app) fn find_index_for_line_locator(
             .enumerate()
             .filter_map(|(idx, line)| {
                 line.anchor.as_ref().and_then(|actual| {
-                    comment_anchor_matches(actual, expected_anchor).then_some(idx)
+                    diff_line_anchor_matches(actual, expected_anchor).then_some(idx)
                 })
             })
             .collect::<Vec<_>>();
@@ -553,7 +554,7 @@ fn diff_payload_layout(rendered: &RenderedDiffLine, line: &Line<'static>) -> Dif
     let looks_like_code_line = rendered
         .anchor
         .as_ref()
-        .is_some_and(|anchor| !is_commit_anchor(anchor))
+        .is_some_and(|anchor| !is_commit_line_anchor(anchor))
         && line.spans.len() >= 4
         && matches!(
             rendered.raw_text.chars().next(),
@@ -881,7 +882,7 @@ fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
 mod tests {
     use super::{SelectionRenderContext, display_line_with_selection, patch_line_byte_range};
     use crate::app::{RenderedDiffLine, ThemeMode, UiTheme, blend_colors};
-    use crate::model::CommentAnchor;
+    use crate::model::DiffLineAnchor;
     use ratatui::{
         style::{Color, Style},
         text::{Line, Span},
@@ -902,7 +903,6 @@ mod tests {
             line: Line::from("==== file 1/12: src/app/ui/diff_pane.rs ===="),
             raw_text: "==== file 1/12: src/app/ui/diff_pane.rs ====".to_owned(),
             anchor: None,
-            comment_id: None,
         };
         let selection = SelectionRenderContext {
             visual_range: None,
@@ -934,7 +934,7 @@ mod tests {
                 Span::styled("pub block_cursor_col: usize,", Style::default()),
             ]),
             raw_text: "+ pub block_cursor_col: usize,".to_owned(),
-            anchor: Some(CommentAnchor {
+            anchor: Some(DiffLineAnchor {
                 commit_id: "head".to_owned(),
                 commit_summary: "summary".to_owned(),
                 file_path: "src/app/ui/diff_pane.rs".to_owned(),
@@ -942,7 +942,6 @@ mod tests {
                 old_lineno: Some(43),
                 new_lineno: Some(43),
             }),
-            comment_id: None,
         };
         let selection = SelectionRenderContext {
             visual_range: Some((0, 0)),
@@ -987,7 +986,7 @@ mod tests {
                 Span::styled("pub block_cursor_col: usize,", Style::default()),
             ]),
             raw_text: "+ pub block_cursor_col: usize,".to_owned(),
-            anchor: Some(CommentAnchor {
+            anchor: Some(DiffLineAnchor {
                 commit_id: "head".to_owned(),
                 commit_summary: "summary".to_owned(),
                 file_path: "src/app/ui/diff_pane.rs".to_owned(),
@@ -995,7 +994,6 @@ mod tests {
                 old_lineno: Some(43),
                 new_lineno: Some(43),
             }),
-            comment_id: None,
         };
         let selection = SelectionRenderContext {
             visual_range: None,
@@ -1039,7 +1037,7 @@ mod tests {
                 ),
             ]),
             raw_text: "   pub(in crate::app) struct DiffPaneBody<'a> {".to_owned(),
-            anchor: Some(CommentAnchor {
+            anchor: Some(DiffLineAnchor {
                 commit_id: "head".to_owned(),
                 commit_summary: "summary".to_owned(),
                 file_path: "src/app/ui/diff_pane.rs".to_owned(),
@@ -1047,7 +1045,6 @@ mod tests {
                 old_lineno: Some(9),
                 new_lineno: Some(9),
             }),
-            comment_id: None,
         };
         let selection = SelectionRenderContext {
             visual_range: None,

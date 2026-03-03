@@ -1,6 +1,5 @@
 //! Shared UI/diff helper functions used across rendering, navigation, and onboarding flows.
 use crate::app::*;
-use chrono::DateTime;
 
 pub(super) fn blend_colors(base: Color, overlay: Color, overlay_weight: u8) -> Color {
     match (base, overlay) {
@@ -144,7 +143,7 @@ fn code_line_number_prefix_cells(rendered_line: Option<&RenderedDiffLine>) -> Op
     let is_numbered_code_line = line
         .anchor
         .as_ref()
-        .is_some_and(|anchor| !is_commit_anchor(anchor))
+        .is_some_and(|anchor| !is_commit_line_anchor(anchor))
         && line.line.spans.len() >= 4
         && matches!(
             line.raw_text.chars().next(),
@@ -599,71 +598,7 @@ pub(super) fn should_render_commit_banner(
     previous_commit_id != Some(current_commit_id)
 }
 
-pub(super) fn push_comment_lines_for_anchor(
-    rendered: &mut Vec<RenderedDiffLine>,
-    comments: &[&ReviewComment],
-    injected_ids: &mut BTreeSet<u64>,
-    anchor: &CommentAnchor,
-    theme: &UiTheme,
-    now_ts: i64,
-) {
-    for comment in comments {
-        if injected_ids.contains(&comment.id) {
-            continue;
-        }
-        if comment_anchor_matches(anchor, &comment.target.end) {
-            injected_ids.insert(comment.id);
-            push_comment_lines(rendered, comment, theme, now_ts);
-        }
-    }
-}
-
-pub(super) fn push_comment_lines(
-    rendered: &mut Vec<RenderedDiffLine>,
-    comment: &ReviewComment,
-    theme: &UiTheme,
-    now_ts: i64,
-) {
-    let age = comment_age(comment, now_ts);
-    let location = comment_location_label(comment);
-    let sanitized_comment_text = sanitize_terminal_text(&comment.text);
-    rendered.push(RenderedDiffLine {
-        line: Line::from(vec![
-            Span::styled(
-                format!("  [#{}] ", comment.id),
-                Style::default()
-                    .fg(theme.focus_border)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("[{}] ", comment.target.kind.as_str()),
-                Style::default().fg(theme.accent),
-            ),
-            Span::styled(location, Style::default().fg(theme.muted)),
-            Span::raw(" "),
-            Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
-            Span::raw(" "),
-            Span::styled("[e edit | D delete]", Style::default().fg(theme.dimmed)),
-        ]),
-        raw_text: format!("#{} {}", comment.id, sanitized_comment_text),
-        anchor: None,
-        comment_id: Some(comment.id),
-    });
-
-    for text in sanitized_comment_text.lines() {
-        rendered.push(RenderedDiffLine {
-            line: Line::from(vec![
-                Span::styled("       ", Style::default().fg(theme.dimmed)),
-                Span::styled(text.to_owned(), Style::default().fg(theme.text)),
-            ]),
-            raw_text: text.to_owned(),
-            anchor: None,
-            comment_id: Some(comment.id),
-        });
-    }
-}
-
-pub(super) fn comment_anchor_matches(actual: &CommentAnchor, expected: &CommentAnchor) -> bool {
+pub(super) fn diff_line_anchor_matches(actual: &DiffLineAnchor, expected: &DiffLineAnchor) -> bool {
     actual.commit_id == expected.commit_id
         && actual.file_path == expected.file_path
         && actual.hunk_header == expected.hunk_header
@@ -671,72 +606,10 @@ pub(super) fn comment_anchor_matches(actual: &CommentAnchor, expected: &CommentA
         && actual.new_lineno == expected.new_lineno
 }
 
-pub(super) fn is_commit_anchor(anchor: &CommentAnchor) -> bool {
+pub(super) fn is_commit_line_anchor(anchor: &DiffLineAnchor) -> bool {
     anchor.hunk_header == COMMIT_ANCHOR_HEADER
         && anchor.old_lineno.is_none()
         && anchor.new_lineno.is_none()
-}
-
-pub(super) fn comment_targets_commit_end(
-    comment: &ReviewComment,
-    path: &str,
-    commit_id: &str,
-) -> bool {
-    comment.target.kind == CommentTargetKind::Commit
-        && comment.target.end.file_path == path
-        && comment.target.end.commit_id == commit_id
-}
-
-pub(super) fn comment_targets_hunk_end(
-    comment: &ReviewComment,
-    path: &str,
-    commit_id: &str,
-    hunk_header: &str,
-) -> bool {
-    comment.target.kind == CommentTargetKind::Hunk
-        && comment.target.end.file_path == path
-        && comment.target.end.commit_id == commit_id
-        && comment.target.end.hunk_header == hunk_header
-}
-
-pub(super) fn format_anchor_lines(old_lineno: Option<u32>, new_lineno: Option<u32>) -> String {
-    match (old_lineno, new_lineno) {
-        (Some(old), Some(new)) => format!("old {old}/new {new}"),
-        (Some(old), None) => format!("old {old}"),
-        (None, Some(new)) => format!("new {new}"),
-        (None, None) => "n/a".to_owned(),
-    }
-}
-
-pub(super) fn comment_location_label(comment: &ReviewComment) -> String {
-    if comment.target.kind == CommentTargetKind::Commit {
-        let short = comment
-            .target
-            .end
-            .commit_id
-            .chars()
-            .take(7)
-            .collect::<String>();
-        return format!("commit {short}");
-    }
-
-    let start = format_anchor_lines(
-        comment.target.start.old_lineno,
-        comment.target.start.new_lineno,
-    );
-    let end = format_anchor_lines(comment.target.end.old_lineno, comment.target.end.new_lineno);
-    if start == end {
-        format!("line {start}")
-    } else {
-        format!("range {start} -> {end}")
-    }
-}
-
-pub(super) fn comment_age(comment: &ReviewComment, now_ts: i64) -> String {
-    let ts = DateTime::parse_from_rfc3339(&comment.updated_at)
-        .map(|dt| dt.timestamp())
-        .unwrap_or(now_ts);
-    format_relative_time(ts, now_ts)
 }
 
 pub(super) fn page_step(height: u16, multiplier: f32) -> isize {

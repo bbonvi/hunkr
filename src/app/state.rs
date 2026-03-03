@@ -293,24 +293,10 @@ impl App {
         self.ensure_rendered_diff();
     }
 
-    pub(super) fn current_comment_id(&self) -> Option<u64> {
-        self.domain
-            .rendered_diff
-            .get(self.domain.diff_position.cursor)
-            .and_then(|line| line.comment_id)
-    }
-
     pub(super) fn build_diff_lines(&self, patch: &FilePatch) -> Vec<RenderedDiffLine> {
         let mut rendered = Vec::new();
         let theme = self.active_theme().clone();
         let now_ts = self.now_timestamp();
-        let file_comments: Vec<&ReviewComment> = self
-            .deps
-            .comments
-            .comments()
-            .iter()
-            .filter(|comment| comment.target.end.file_path == patch.path)
-            .collect();
         let deleted_file =
             should_hide_deleted_file_content(self.domain.aggregate.file_changes.get(&patch.path));
         let deleted_content_expanded = deleted_file
@@ -320,19 +306,15 @@ impl App {
                 .contains(&patch.path);
         if deleted_file && !deleted_content_expanded {
             let mut last_commit_banner: Option<String> = None;
-            let mut inserted_commit_comments = BTreeSet::new();
             let mut rendered_toggle = false;
             for hunk in &patch.hunks {
                 if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
-                    push_commit_banner_and_comments(
-                        &mut rendered,
-                        &file_comments,
-                        &mut inserted_commit_comments,
+                    rendered.push(rendered_commit_banner_line(
                         &patch.path,
                         hunk,
                         &theme,
                         now_ts,
-                    );
+                    ));
                     if !rendered_toggle {
                         rendered.push(deleted_file_toggle_line(
                             false,
@@ -351,32 +333,20 @@ impl App {
                     &theme,
                 ));
             }
-
-            let mut sorted_comments = file_comments.clone();
-            sorted_comments.sort_by_key(|comment| comment.id);
-            for comment in sorted_comments {
-                if inserted_commit_comments.insert(comment.id) {
-                    push_comment_lines(&mut rendered, comment, &theme, now_ts);
-                }
-            }
             rendered.push(rendered_separator_line(&theme));
             return rendered;
         }
         let mut last_commit_banner: Option<String> = None;
-        let mut inserted_commit_comments = BTreeSet::new();
         let mut rendered_deleted_toggle = false;
 
         for hunk in &patch.hunks {
             if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
-                push_commit_banner_and_comments(
-                    &mut rendered,
-                    &file_comments,
-                    &mut inserted_commit_comments,
+                rendered.push(rendered_commit_banner_line(
                     &patch.path,
                     hunk,
                     &theme,
                     now_ts,
-                );
+                ));
                 if deleted_content_expanded && !rendered_deleted_toggle {
                     rendered.push(deleted_file_toggle_line(
                         true,
@@ -388,24 +358,6 @@ impl App {
             }
             last_commit_banner = Some(hunk.commit_id.clone());
 
-            let mut hunk_comments: Vec<&ReviewComment> = file_comments
-                .iter()
-                .copied()
-                .filter(|comment| {
-                    comment_targets_hunk_end(comment, &patch.path, &hunk.commit_id, &hunk.header)
-                })
-                .collect();
-            hunk_comments.sort_by_key(|comment| comment.id);
-            let mut injected_comment_ids = BTreeSet::new();
-
-            let hunk_anchor = CommentAnchor {
-                commit_id: hunk.commit_id.clone(),
-                commit_summary: hunk.commit_summary.clone(),
-                file_path: patch.path.clone(),
-                hunk_header: hunk.header.clone(),
-                old_lineno: Some(hunk.old_start),
-                new_lineno: Some(hunk.new_start),
-            };
             let hunk_header = sanitize_terminal_text(&hunk.header);
             let hunk_label = format!("@@ {hunk_header}");
             rendered.push(RenderedDiffLine {
@@ -414,7 +366,7 @@ impl App {
                     Span::styled(hunk_header.clone(), Style::default().fg(theme.diff_header)),
                 ]),
                 raw_text: hunk_label,
-                anchor: Some(CommentAnchor {
+                anchor: Some(DiffLineAnchor {
                     commit_id: hunk.commit_id.clone(),
                     commit_summary: hunk.commit_summary.clone(),
                     file_path: patch.path.clone(),
@@ -422,19 +374,10 @@ impl App {
                     old_lineno: Some(hunk.old_start),
                     new_lineno: Some(hunk.new_start),
                 }),
-                comment_id: None,
             });
-            push_comment_lines_for_anchor(
-                &mut rendered,
-                &hunk_comments,
-                &mut injected_comment_ids,
-                &hunk_anchor,
-                &theme,
-                now_ts,
-            );
 
             for line in &hunk.lines {
-                let anchor = CommentAnchor {
+                let anchor = DiffLineAnchor {
                     commit_id: hunk.commit_id.clone(),
                     commit_summary: hunk.commit_summary.clone(),
                     file_path: patch.path.clone(),
@@ -445,23 +388,8 @@ impl App {
                 rendered.push(RenderedDiffLine {
                     line: self.render_code_line(line, &theme),
                     raw_text: raw_diff_text(line),
-                    anchor: Some(anchor.clone()),
-                    comment_id: None,
+                    anchor: Some(anchor),
                 });
-                push_comment_lines_for_anchor(
-                    &mut rendered,
-                    &hunk_comments,
-                    &mut injected_comment_ids,
-                    &anchor,
-                    &theme,
-                    now_ts,
-                );
-            }
-
-            for comment in hunk_comments {
-                if injected_comment_ids.insert(comment.id) {
-                    push_comment_lines(&mut rendered, comment, &theme, now_ts);
-                }
             }
 
             rendered.push(rendered_separator_line(&theme));
@@ -837,17 +765,14 @@ fn diff_viewport_layout_ready(rects: &PaneRects) -> bool {
     rects.diff.height > 2
 }
 
-/// Renders one commit banner row and injects commit-scoped comments under it.
-fn push_commit_banner_and_comments(
-    rendered: &mut Vec<RenderedDiffLine>,
-    file_comments: &[&ReviewComment],
-    inserted_commit_comments: &mut BTreeSet<u64>,
+/// Renders one commit banner row for the current file+commit hunk boundary.
+fn rendered_commit_banner_line(
     patch_path: &str,
     hunk: &crate::model::Hunk,
     theme: &UiTheme,
     now_ts: i64,
-) {
-    let commit_anchor = CommentAnchor {
+) -> RenderedDiffLine {
+    let commit_anchor = DiffLineAnchor {
         commit_id: hunk.commit_id.clone(),
         commit_summary: hunk.commit_summary.clone(),
         file_path: patch_path.to_owned(),
@@ -889,23 +814,10 @@ fn push_commit_banner_and_comments(
             ]),
         )
     };
-    rendered.push(RenderedDiffLine {
+    RenderedDiffLine {
         line,
         raw_text: commit_line,
         anchor: Some(commit_anchor),
-        comment_id: None,
-    });
-
-    let mut commit_comments: Vec<&ReviewComment> = file_comments
-        .iter()
-        .copied()
-        .filter(|comment| comment_targets_commit_end(comment, patch_path, &hunk.commit_id))
-        .collect();
-    commit_comments.sort_by_key(|comment| comment.id);
-    for comment in commit_comments {
-        if inserted_commit_comments.insert(comment.id) {
-            push_comment_lines(rendered, comment, theme, now_ts);
-        }
     }
 }
 
@@ -934,7 +846,6 @@ fn deleted_file_toggle_line(expanded: bool, nerd_fonts: bool, theme: &UiTheme) -
         ]),
         raw_text: DELETED_FILE_TOGGLE_RAW_TEXT.to_owned(),
         anchor: None,
-        comment_id: None,
     }
 }
 
@@ -1089,7 +1000,6 @@ pub(super) fn rendered_file_header_line(
         line: Line::from(spans),
         raw_text,
         anchor: None,
-        comment_id: None,
     }
 }
 
@@ -1111,7 +1021,6 @@ pub(super) fn rendered_separator_line(_theme: &UiTheme) -> RenderedDiffLine {
         line: Line::from(""),
         raw_text: String::new(),
         anchor: None,
-        comment_id: None,
     }
 }
 

@@ -3,7 +3,6 @@
 pub mod app;
 mod atomic_write;
 pub mod clipboard;
-pub mod comments;
 pub mod config;
 pub mod git_data;
 pub mod model;

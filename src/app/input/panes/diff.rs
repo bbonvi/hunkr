@@ -31,15 +31,6 @@ impl App {
             return;
         }
 
-        if let Some(forward) = diff_comment_jump_direction(key) {
-            if forward {
-                self.move_next_comment();
-            } else {
-                self.move_prev_comment();
-            }
-            return;
-        }
-
         if let Some(target) = absolute_nav_target(key.code) {
             match target {
                 AbsoluteNavTarget::Start => {
@@ -159,48 +150,12 @@ impl App {
                     self.runtime.status = "Diff visual range on".to_owned();
                 }
             }
-            KeyCode::Char('m') => {
-                if self.uncommitted_selected() {
-                    self.runtime.status =
-                        "Comments are disabled for uncommitted changes".to_owned();
-                    return;
-                }
-                self.ui.preferences.input_mode = InputMode::CommentCreate;
-                self.reset_comment_editor_state();
-                self.refresh_comment_create_target_cache();
-                self.ui.diff_ui.pending_op = None;
-                self.runtime.status =
-                    "Comment mode: Enter save, Alt+Enter newline, Esc cancel".to_owned();
-            }
-            KeyCode::Char('e') | KeyCode::Char('E')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                if self.uncommitted_selected() {
-                    self.runtime.status =
-                        "Comments are disabled for uncommitted changes".to_owned();
-                    return;
-                }
-                self.start_comment_edit_mode();
-            }
             KeyCode::Char('y') if key.modifiers == KeyModifiers::NONE => {
                 self.copy_diff_visual_selection();
             }
             KeyCode::Enter if self.toggle_deleted_file_content_under_cursor() => {}
             KeyCode::Enter if self.ui.diff_ui.visual_selection.is_some() => {
                 self.copy_diff_visual_selection();
-            }
-            KeyCode::Char('Y')
-                if key.modifiers == KeyModifiers::SHIFT || key.modifiers == KeyModifiers::NONE =>
-            {
-                self.copy_review_tasks_path();
-            }
-            KeyCode::Char('D') => {
-                if self.uncommitted_selected() {
-                    self.runtime.status =
-                        "Comments are disabled for uncommitted changes".to_owned();
-                    return;
-                }
-                self.delete_current_comment();
             }
             _ => {}
         }
@@ -237,17 +192,6 @@ pub(in crate::app) fn diff_search_repeat_direction(key: KeyEvent) -> Option<bool
         KeyCode::Char('N') if key.modifiers == KeyModifiers::SHIFT => Some(false),
         KeyCode::Char('N') if key.modifiers == KeyModifiers::NONE => Some(false),
         KeyCode::Char('n') if key.modifiers == KeyModifiers::SHIFT => Some(false),
-        _ => None,
-    }
-}
-
-/// Resolves `p/P` comment-jump keys with tolerant Shift encoding handling.
-pub(in crate::app) fn diff_comment_jump_direction(key: KeyEvent) -> Option<bool> {
-    match key.code {
-        KeyCode::Char('p') if key.modifiers == KeyModifiers::NONE => Some(true),
-        KeyCode::Char('P') if key.modifiers == KeyModifiers::SHIFT => Some(false),
-        KeyCode::Char('P') if key.modifiers == KeyModifiers::NONE => Some(false),
-        KeyCode::Char('p') if key.modifiers == KeyModifiers::SHIFT => Some(false),
         _ => None,
     }
 }

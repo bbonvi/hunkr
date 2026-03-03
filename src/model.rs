@@ -200,52 +200,13 @@ impl AggregatedDiff {
     }
 }
 
-/// Anchor metadata saved when adding review comments.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CommentAnchor {
+/// Stable metadata for one rendered diff position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffLineAnchor {
     pub commit_id: String,
     pub commit_summary: String,
     pub file_path: String,
     pub hunk_header: String,
     pub old_lineno: Option<u32>,
     pub new_lineno: Option<u32>,
-}
-
-/// Scope of a review comment target.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum CommentTargetKind {
-    Commit,
-    #[default]
-    Hunk,
-}
-
-impl CommentTargetKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Commit => "COMMIT",
-            Self::Hunk => "HUNK",
-        }
-    }
-}
-
-/// Comment target can be a single line or a visual range.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CommentTarget {
-    #[serde(default)]
-    pub kind: CommentTargetKind,
-    pub start: CommentAnchor,
-    pub end: CommentAnchor,
-    pub commits: BTreeSet<String>,
-    pub selected_lines: Vec<String>,
-}
-
-/// Persisted review comment entity.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReviewComment {
-    pub id: u64,
-    pub target: CommentTarget,
-    pub text: String,
-    pub created_at: String,
-    pub updated_at: String,
 }

@@ -10,7 +10,6 @@ struct BootstrapDeps {
     git: GitService,
     store: StateStore,
     instance_lock: Option<InstanceLock>,
-    comments: CommentStore,
     clock: Arc<dyn AppClock>,
     runtime_ports: Arc<dyn AppRuntimePorts>,
     review_state: ReviewState,
@@ -29,12 +28,10 @@ impl App {
         let instance_lock = store.try_acquire_instance_lock()?;
         let first_open = !store.has_state_file();
         let review_state = store.load()?;
-        let comments = ports.open_comment_store(store.root_dir(), git.branch_name())?;
         let deps = BootstrapDeps {
             git,
             store,
             instance_lock,
-            comments,
             clock: ports.clock(),
             runtime_ports: ports.runtime_ports(),
             review_state,
@@ -81,7 +78,6 @@ impl App {
                 git: deps.git,
                 store: deps.store,
                 instance_lock: deps.instance_lock,
-                comments: deps.comments,
                 clock: deps.clock,
                 runtime_ports: deps.runtime_ports,
             },
@@ -136,17 +132,6 @@ impl App {
                     rendered_cache: HashMap::new(),
                     rendered_key: None,
                     highlighter: DiffSyntaxHighlighter::new(),
-                },
-                comment_editor: CommentEditorState {
-                    buffer: String::new(),
-                    cursor: 0,
-                    selection: None,
-                    mouse_anchor: None,
-                    rect: None,
-                    line_ranges: Vec::new(),
-                    view_start: 0,
-                    text_offset: 0,
-                    create_target_cache: None,
                 },
                 shell_command: ShellCommandState {
                     buffer: String::new(),
@@ -385,10 +370,6 @@ impl App {
         }
 
         self.ensure_rendered_diff();
-        self.ui.comment_editor.rect = None;
-        self.ui.comment_editor.line_ranges.clear();
-        self.ui.comment_editor.view_start = 0;
-        self.ui.comment_editor.text_offset = 0;
         self.ui.shell_command.output_rect = None;
         self.ui.shell_command.output_viewport = 0;
         self.ui.helper_click_hitboxes.clear();
@@ -444,12 +425,7 @@ impl App {
         if self.runtime.show_help {
             self.render_help_overlay(frame, &theme);
         }
-        if matches!(
-            self.ui.preferences.input_mode,
-            InputMode::CommentCreate | InputMode::CommentEdit(_)
-        ) {
-            self.render_comment_modal(frame, &theme);
-        } else if matches!(self.ui.preferences.input_mode, InputMode::ShellCommand) {
+        if matches!(self.ui.preferences.input_mode, InputMode::ShellCommand) {
             self.render_shell_command_modal(frame, &theme);
         } else if matches!(self.ui.preferences.input_mode, InputMode::WorktreeSwitch) {
             self.render_worktree_switcher_modal(frame, &theme);
@@ -620,14 +596,6 @@ mod tests {
         fn open_git_at(&self, _path: &Path) -> anyhow::Result<GitService> {
             panic!("runtime open_git_at should not be called when bootstrap fails");
         }
-
-        fn open_comment_store(
-            &self,
-            _store_root: &Path,
-            _branch: &str,
-        ) -> anyhow::Result<CommentStore> {
-            panic!("runtime open_comment_store should not be called when bootstrap fails");
-        }
     }
 
     impl AppBootstrapPorts for FailingGitBootstrapPorts {
@@ -641,14 +609,6 @@ mod tests {
 
         fn state_store_for_repo(&self, _repo_root: &Path) -> StateStore {
             panic!("state_store_for_repo should not be called when git open fails");
-        }
-
-        fn open_comment_store(
-            &self,
-            _store_root: &Path,
-            _branch: &str,
-        ) -> anyhow::Result<CommentStore> {
-            panic!("open_comment_store should not be called when git open fails");
         }
 
         fn clock(&self) -> Arc<dyn AppClock> {

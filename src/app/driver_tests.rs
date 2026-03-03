@@ -46,10 +46,6 @@ impl AppRuntimePorts for TestRuntimePorts {
     fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService> {
         GitService::open_at(path)
     }
-
-    fn open_comment_store(&self, store_root: &Path, branch: &str) -> anyhow::Result<CommentStore> {
-        CommentStore::new(store_root, branch)
-    }
 }
 
 impl AppBootstrapPorts for TestBootstrapPorts {
@@ -63,10 +59,6 @@ impl AppBootstrapPorts for TestBootstrapPorts {
 
     fn state_store_for_repo(&self, repo_root: &Path) -> StateStore {
         StateStore::for_project(repo_root)
-    }
-
-    fn open_comment_store(&self, store_root: &Path, branch: &str) -> anyhow::Result<CommentStore> {
-        CommentStore::new(store_root, branch)
     }
 
     fn clock(&self) -> Arc<dyn AppClock> {
