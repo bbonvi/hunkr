@@ -8,7 +8,8 @@ pub(super) fn commit_mouse_selection_mode(modifiers: KeyModifiers) -> CommitMous
     CommitMouseSelectionMode::Replace
 }
 
-/// Resolves the fixed anchor used when extending commit ranges from keyboard `Space`.
+/// Resolves the anchor used when extending commit ranges from keyboard `Space`.
+/// Prefers the previous `Space` cursor anchor, then falls back to nearest selected row.
 pub(super) fn range_anchor_for_space(
     rows: &[CommitRow],
     selection_anchor: Option<usize>,

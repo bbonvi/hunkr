@@ -54,7 +54,7 @@ impl App {
                         cursor,
                     );
                     apply_range_selection(&mut self.domain.commits, anchor, cursor);
-                    self.ui.commit_ui.selection_anchor = Some(anchor);
+                    self.ui.commit_ui.selection_anchor = Some(cursor);
                 }
                 self.ui.commit_ui.visual_anchor = None;
                 self.on_selection_changed();
