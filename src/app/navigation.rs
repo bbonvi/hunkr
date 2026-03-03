@@ -156,12 +156,6 @@ impl App {
                 select_only_index(&mut self.domain.commits, full_idx);
                 self.ui.commit_ui.selection_anchor = Some(full_idx);
             }
-            CommitMouseSelectionMode::Toggle => {
-                if let Some(row) = self.domain.commits.get_mut(full_idx) {
-                    row.selected = !row.selected;
-                }
-                self.ui.commit_ui.selection_anchor = Some(full_idx);
-            }
             CommitMouseSelectionMode::Range => {
                 let anchor = self
                     .ui
@@ -726,8 +720,6 @@ impl App {
         self.ui.commit_ui.visual_anchor = None;
         self.ui.commit_ui.mouse_anchor = None;
         self.ui.commit_ui.mouse_dragging = false;
-        self.ui.commit_ui.mouse_drag_mode = None;
-        self.ui.commit_ui.mouse_drag_baseline = None;
         self.clear_diff_visual_selection();
         self.ui.diff_ui.pending_op = None;
         if let Some(cleared) =

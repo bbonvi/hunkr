@@ -103,8 +103,6 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.ui.commit_ui.mouse_anchor = None;
                 self.ui.commit_ui.mouse_dragging = false;
-                self.ui.commit_ui.mouse_drag_mode = None;
-                self.ui.commit_ui.mouse_drag_baseline = None;
                 if in_files {
                     self.set_focus(FocusPane::Files);
                     self.ui.diff_ui.mouse_anchor = None;
@@ -121,18 +119,10 @@ impl App {
                     self.ui.commit_ui.visual_anchor = None;
                     if let Some(idx) = resolve_commit_visible_idx(self, y) {
                         let drag_mode = commit_mouse_selection_mode(mouse.modifiers);
-                        let baseline = self.domain.commits.iter().map(|row| row.selected).collect();
                         let clicked_full_idx =
                             self.select_commit_row_with_mouse(idx, mouse.modifiers);
-                        if matches!(
-                            drag_mode,
-                            CommitMouseSelectionMode::Replace | CommitMouseSelectionMode::Toggle
-                        ) {
+                        if drag_mode == CommitMouseSelectionMode::Replace {
                             self.ui.commit_ui.mouse_anchor = clicked_full_idx;
-                            self.ui.commit_ui.mouse_drag_mode = Some(drag_mode);
-                            if drag_mode == CommitMouseSelectionMode::Toggle {
-                                self.ui.commit_ui.mouse_drag_baseline = Some(baseline);
-                            }
                         } else {
                             self.ui.commit_ui.mouse_anchor = None;
                         }
@@ -171,27 +161,7 @@ impl App {
                     if let Some(full_idx) = visible_indices.get(visible_idx).copied() {
                         self.ui.commit_ui.list_state.select(Some(visible_idx));
                         let anchor = self.ui.commit_ui.mouse_anchor.expect("checked above");
-                        match self.ui.commit_ui.mouse_drag_mode {
-                            Some(CommitMouseSelectionMode::Toggle) => {
-                                if let Some(baseline) =
-                                    self.ui.commit_ui.mouse_drag_baseline.as_deref()
-                                {
-                                    apply_toggle_range_from_baseline(
-                                        &mut self.domain.commits,
-                                        baseline,
-                                        anchor,
-                                        full_idx,
-                                    );
-                                } else {
-                                    apply_range_selection(
-                                        &mut self.domain.commits,
-                                        anchor,
-                                        full_idx,
-                                    );
-                                }
-                            }
-                            _ => apply_range_selection(&mut self.domain.commits, anchor, full_idx),
-                        }
+                        apply_range_selection(&mut self.domain.commits, anchor, full_idx);
                         if anchor != full_idx {
                             self.ui.commit_ui.mouse_dragging = true;
                         }
@@ -218,8 +188,6 @@ impl App {
                 let commit_dragging = self.ui.commit_ui.mouse_dragging;
                 self.ui.commit_ui.mouse_anchor = None;
                 self.ui.commit_ui.mouse_dragging = false;
-                self.ui.commit_ui.mouse_drag_mode = None;
-                self.ui.commit_ui.mouse_drag_baseline = None;
 
                 if in_diff {
                     if let Some(row) = resolve_diff_row(self, y) {

@@ -180,6 +180,35 @@ fn driver_quit_key_sets_quit_flag() {
 }
 
 #[test]
+fn commit_space_extends_range_from_anchor_and_selects_single_when_empty() {
+    let repo = init_test_repo();
+    let readme = repo.path().join("README.md");
+    std::fs::write(&readme, "init\none\n").expect("update readme");
+    run_git(repo.path(), &["add", "README.md"]);
+    run_git(repo.path(), &["commit", "-m", "one", "-q"]);
+    std::fs::write(&readme, "init\none\ntwo\n").expect("update readme");
+    run_git(repo.path(), &["add", "README.md"]);
+    run_git(repo.path(), &["commit", "-m", "two", "-q"]);
+
+    let mut driver = bootstrap_driver(repo.path());
+    assert_eq!(driver.snapshot().selected_commit_ids.len(), 1);
+
+    driver.send_key(press(KeyCode::Down, KeyModifiers::NONE));
+    driver.send_key(press(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert_eq!(driver.snapshot().selected_commit_ids.len(), 2);
+
+    driver.send_key(press(KeyCode::Down, KeyModifiers::NONE));
+    driver.send_key(press(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert_eq!(driver.snapshot().selected_commit_ids.len(), 3);
+
+    driver.send_key(press(KeyCode::Char('x'), KeyModifiers::NONE));
+    assert!(driver.snapshot().selected_commit_ids.is_empty());
+
+    driver.send_key(press(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert_eq!(driver.snapshot().selected_commit_ids.len(), 1);
+}
+
+#[test]
 fn driver_shell_modal_swallow_mouse_keeps_focus_context() {
     let repo = init_test_repo();
     let mut driver = bootstrap_driver(repo.path());

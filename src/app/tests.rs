@@ -1340,39 +1340,60 @@ fn range_selection_handles_reverse_bounds() {
 }
 
 #[test]
-fn toggle_range_from_baseline_inverts_only_rows_inside_range() {
-    let baseline = vec![true, false, true, false];
-    let mut rows = vec![
-        commit_row("a", baseline[0], ReviewStatus::Unreviewed),
-        commit_row("b", baseline[1], ReviewStatus::Unreviewed),
-        commit_row("c", baseline[2], ReviewStatus::Unreviewed),
-        commit_row("d", baseline[3], ReviewStatus::Unreviewed),
-    ];
-
-    apply_toggle_range_from_baseline(&mut rows, &baseline, 1, 2);
-
-    assert!(rows[0].selected);
-    assert!(rows[1].selected);
-    assert!(!rows[2].selected);
-    assert!(!rows[3].selected);
+fn commit_mouse_selection_mode_defaults_to_replace_without_shift() {
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::NONE),
+        CommitMouseSelectionMode::Replace
+    );
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::CONTROL),
+        CommitMouseSelectionMode::Replace
+    );
 }
 
 #[test]
-fn toggle_range_from_baseline_handles_reverse_bounds() {
-    let baseline = vec![false, false, true, true];
-    let mut rows = vec![
-        commit_row("a", baseline[0], ReviewStatus::Unreviewed),
-        commit_row("b", baseline[1], ReviewStatus::Unreviewed),
-        commit_row("c", baseline[2], ReviewStatus::Unreviewed),
-        commit_row("d", baseline[3], ReviewStatus::Unreviewed),
+fn commit_mouse_selection_mode_uses_range_with_shift() {
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::SHIFT),
+        CommitMouseSelectionMode::Range
+    );
+    assert_eq!(
+        commit_mouse_selection_mode(KeyModifiers::SHIFT | KeyModifiers::CONTROL),
+        CommitMouseSelectionMode::Range
+    );
+}
+
+#[test]
+fn range_anchor_for_space_prefers_existing_anchor() {
+    let rows = vec![
+        commit_row("a", false, ReviewStatus::Unreviewed),
+        commit_row("b", true, ReviewStatus::Unreviewed),
+        commit_row("c", false, ReviewStatus::Unreviewed),
     ];
 
-    apply_toggle_range_from_baseline(&mut rows, &baseline, 3, 1);
+    assert_eq!(range_anchor_for_space(&rows, Some(1), 2), 1);
+}
 
-    assert!(!rows[0].selected);
-    assert!(rows[1].selected);
-    assert!(!rows[2].selected);
-    assert!(!rows[3].selected);
+#[test]
+fn range_anchor_for_space_uses_closest_selected_when_anchor_absent() {
+    let rows = vec![
+        commit_row("a", true, ReviewStatus::Unreviewed),
+        commit_row("b", false, ReviewStatus::Unreviewed),
+        commit_row("c", false, ReviewStatus::Unreviewed),
+        commit_row("d", true, ReviewStatus::Unreviewed),
+    ];
+
+    assert_eq!(range_anchor_for_space(&rows, None, 2), 3);
+}
+
+#[test]
+fn range_anchor_for_space_falls_back_to_cursor_without_selection() {
+    let rows = vec![
+        commit_row("a", false, ReviewStatus::Unreviewed),
+        commit_row("b", false, ReviewStatus::Unreviewed),
+    ];
+
+    assert_eq!(range_anchor_for_space(&rows, None, 1), 1);
 }
 
 #[test]

@@ -5,29 +5,30 @@ pub(super) fn commit_mouse_selection_mode(modifiers: KeyModifiers) -> CommitMous
     if modifiers.contains(KeyModifiers::SHIFT) {
         return CommitMouseSelectionMode::Range;
     }
-    if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER) {
-        return CommitMouseSelectionMode::Toggle;
-    }
     CommitMouseSelectionMode::Replace
 }
 
-pub(super) fn apply_toggle_range_from_baseline(
-    rows: &mut [CommitRow],
-    baseline: &[bool],
-    start: usize,
-    end: usize,
-) {
-    if rows.len() != baseline.len() {
-        return;
+/// Resolves the fixed anchor used when extending commit ranges from keyboard `Space`.
+pub(super) fn range_anchor_for_space(
+    rows: &[CommitRow],
+    selection_anchor: Option<usize>,
+    cursor: usize,
+) -> usize {
+    if let Some(anchor) = selection_anchor.filter(|idx| *idx < rows.len()) {
+        return anchor;
     }
-    let (start, end) = (min(start, end), max(start, end));
-    for (idx, row) in rows.iter_mut().enumerate() {
-        row.selected = if idx >= start && idx <= end {
-            !baseline[idx]
-        } else {
-            baseline[idx]
-        };
+
+    let has_selection = rows.iter().any(|row| row.selected);
+    if !has_selection {
+        return cursor;
     }
+
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| row.selected)
+        .min_by_key(|(idx, _)| idx.abs_diff(cursor))
+        .map(|(idx, _)| idx)
+        .unwrap_or(cursor)
 }
 
 pub(super) fn selected_ids_oldest_first(rows: &[CommitRow]) -> Vec<String> {

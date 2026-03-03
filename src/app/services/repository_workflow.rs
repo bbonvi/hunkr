@@ -214,8 +214,6 @@ pub(in crate::app) fn apply_startup_starter_selection(app: &mut App) -> anyhow::
     app.ui.commit_ui.visual_anchor = None;
     app.ui.commit_ui.mouse_anchor = None;
     app.ui.commit_ui.mouse_dragging = false;
-    app.ui.commit_ui.mouse_drag_mode = None;
-    app.ui.commit_ui.mouse_drag_baseline = None;
     app.runtime.selection_rebuild_due = None;
     app.reset_diff_view_for_commit_selection_change();
     app.rebuild_selection_dependent_views()?;

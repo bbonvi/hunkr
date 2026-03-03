@@ -23,8 +23,6 @@ impl App {
         self.ui.commit_ui.selection_anchor = None;
         self.ui.commit_ui.mouse_anchor = None;
         self.ui.commit_ui.mouse_dragging = false;
-        self.ui.commit_ui.mouse_drag_mode = None;
-        self.ui.commit_ui.mouse_drag_baseline = None;
 
         self.runtime.selection_rebuild_due = None;
         self.reset_diff_view_for_commit_selection_change();
@@ -906,9 +904,14 @@ fn diff_position_from_session(position: crate::model::UiSessionDiffPosition) -> 
 }
 
 fn restore_commit_selection(rows: &mut [CommitRow], selected_commit_ids: &BTreeSet<String>) {
-    for row in rows {
+    for row in rows.iter_mut() {
         row.selected = selected_commit_ids.contains(&row.info.id);
     }
+    let Some(start) = rows.iter().position(|row| row.selected) else {
+        return;
+    };
+    let end = rows.iter().rposition(|row| row.selected).unwrap_or(start);
+    apply_range_selection(rows, start, end);
 }
 
 fn restore_focus_with_availability(focused: FocusPane, has_files: bool) -> FocusPane {
@@ -1051,7 +1054,7 @@ mod restore_tests {
     }
 
     #[test]
-    fn restore_commit_selection_keeps_only_available_ids() {
+    fn restore_commit_selection_keeps_only_available_ids_and_coalesces_to_range() {
         let mut rows = vec![row("a1"), row("b2"), row("c3")];
         rows.insert(
             0,
@@ -1079,7 +1082,7 @@ mod restore_tests {
         restore_commit_selection(&mut rows, &selected);
 
         assert!(rows[0].selected);
-        assert!(!rows[1].selected);
+        assert!(rows[1].selected);
         assert!(rows[2].selected);
         assert!(!rows[3].selected);
     }

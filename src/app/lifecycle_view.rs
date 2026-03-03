@@ -416,7 +416,7 @@ impl App {
                 FocusPane::Commits => (
                     Line::from(vec![
                         key_chip("Space", theme),
-                        Span::styled(" select ", Style::default().fg(theme.muted)),
+                        Span::styled(" range ", Style::default().fg(theme.muted)),
                         key_chip("u", theme),
                         Span::styled(" Unreviewed ", Style::default().fg(theme.muted)),
                         key_chip("r", theme),
@@ -1084,12 +1084,15 @@ impl App {
             ),
             (
                 Line::from(vec![
+                    key_chip("Enter", theme),
+                    Span::raw(" single select  "),
                     key_chip("Space", theme),
-                    Span::raw(" toggle commit selection  "),
+                    Span::raw(" extend range  "),
                     key_chip("e", theme),
                     Span::raw(" cycle Status Filter"),
                 ]),
                 vec![
+                    helper_key("Enter", KeyCode::Enter, KeyModifiers::NONE),
                     helper_key("Space", KeyCode::Char(' '), KeyModifiers::NONE),
                     helper_key("e", KeyCode::Char('e'), KeyModifiers::NONE),
                 ],

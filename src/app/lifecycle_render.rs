@@ -97,8 +97,6 @@ impl App {
                     selection_anchor: None,
                     mouse_anchor: None,
                     mouse_dragging: false,
-                    mouse_drag_mode: None,
-                    mouse_drag_baseline: None,
                     status_filter: CommitStatusFilter::All,
                 },
                 file_ui: FileUiState {

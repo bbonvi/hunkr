@@ -377,7 +377,6 @@ enum DiffPendingOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommitMouseSelectionMode {
     Replace,
-    Toggle,
     Range,
 }
 
@@ -394,8 +393,6 @@ struct CommitUiState {
     selection_anchor: Option<usize>,
     mouse_anchor: Option<usize>,
     mouse_dragging: bool,
-    mouse_drag_mode: Option<CommitMouseSelectionMode>,
-    mouse_drag_baseline: Option<Vec<bool>>,
     status_filter: CommitStatusFilter,
 }
 

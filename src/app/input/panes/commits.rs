@@ -47,11 +47,14 @@ impl App {
                 }
             }
             KeyCode::Char(' ') => {
-                if let Some(idx) = self.selected_commit_full_index()
-                    && let Some(row) = self.domain.commits.get_mut(idx)
-                {
-                    row.selected = !row.selected;
-                    self.ui.commit_ui.selection_anchor = Some(idx);
+                if let Some(cursor) = self.selected_commit_full_index() {
+                    let anchor = range_anchor_for_space(
+                        &self.domain.commits,
+                        self.ui.commit_ui.selection_anchor,
+                        cursor,
+                    );
+                    apply_range_selection(&mut self.domain.commits, anchor, cursor);
+                    self.ui.commit_ui.selection_anchor = Some(anchor);
                 }
                 self.ui.commit_ui.visual_anchor = None;
                 self.on_selection_changed();
