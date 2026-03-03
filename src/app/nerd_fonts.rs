@@ -44,11 +44,7 @@ pub(super) fn branch_label_prefix(nerd_fonts: bool) -> &'static str {
 
 /// Returns the worktree label prefix for the header.
 pub(super) fn worktree_label_prefix(nerd_fonts: bool) -> &'static str {
-    if nerd_fonts {
-        "󱘎 worktree:"
-    } else {
-        "worktree:"
-    }
+    if nerd_fonts { "󱘎 " } else { "worktree:" }
 }
 
 /// Returns commit selection marker for list rows.
@@ -499,7 +495,7 @@ mod tests {
 
     #[test]
     fn nerd_mode_keeps_text_with_icons_for_key_labels() {
-        assert!(worktree_label_prefix(true).contains("worktree"));
+        assert_eq!(worktree_label_prefix(true), "󱘎 ");
         assert!(commit_status_filter_label_prefix(true).contains("Status Filter"));
         assert_eq!(uncommitted_badge(true), "[\u{f126} Uncommitted]");
     }

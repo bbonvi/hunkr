@@ -35,17 +35,10 @@ impl App {
         } else {
             format!("{branch_prefix}{} ", snapshot.header.branch_name)
         };
-        let wt_label = if nerd_fonts {
-            format!(
-                "{wt_prefix} {} ",
-                short_path_label(&snapshot.header.repo_root)
-            )
-        } else {
-            format!(
-                "{wt_prefix}{} ",
-                short_path_label(&snapshot.header.repo_root)
-            )
-        };
+        let wt_label = format!(
+            "{wt_prefix}{} ",
+            short_path_label(&snapshot.header.repo_root)
+        );
         let headline = Line::from(vec![
             Span::styled(
                 app_title_label(nerd_fonts),
