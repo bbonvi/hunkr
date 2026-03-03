@@ -8,6 +8,10 @@ impl App {
             return;
         }
 
+        if self.runtime.show_help {
+            return;
+        }
+
         if modal_controller::dispatch_modal_mouse(self, mouse) {
             return;
         }
