@@ -570,6 +570,8 @@ struct RuntimeTuning {
     selection_rebuild_debounce: Duration,
     terminal_clear_every: Duration,
     diff_cursor_scroll_off_lines: usize,
+    diff_context_lines: u32,
+    diff_hunk_merge_distance_lines: u32,
 }
 
 impl RuntimeTuning {
@@ -582,6 +584,8 @@ impl RuntimeTuning {
             selection_rebuild_debounce: Duration::from_millis(config.selection_rebuild_debounce_ms),
             terminal_clear_every: Duration::from_secs(config.terminal_clear_every_secs),
             diff_cursor_scroll_off_lines: config.diff_cursor_scroll_off_lines,
+            diff_context_lines: config.diff_context_lines,
+            diff_hunk_merge_distance_lines: config.diff_hunk_merge_distance_lines,
         }
     }
 }

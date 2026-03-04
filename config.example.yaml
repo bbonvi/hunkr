@@ -25,3 +25,7 @@ selection_rebuild_debounce_ms: 120
 terminal_clear_every_secs: 120
 # diff_cursor_scroll_off_lines: cursor gutter kept while scrolling the diff pane (must be >= 1).
 diff_cursor_scroll_off_lines: 3
+# diff_context_lines: unchanged context lines around each diff hunk (0 disables context expansion).
+diff_context_lines: 3
+# diff_hunk_merge_distance_lines: merge nearby hunks when their untouched gap is within this many lines (0 disables merge-by-distance).
+diff_hunk_merge_distance_lines: 15

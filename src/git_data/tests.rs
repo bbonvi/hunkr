@@ -119,6 +119,100 @@ fn aggregate_for_multiple_commits_returns_only_net_changes() {
 }
 
 #[test]
+fn aggregate_for_single_commit_merges_nearby_hunks_by_default() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(
+        repo_dir.path(),
+        "spread.txt",
+        &numbered_lines(1, 80),
+        "seed spread",
+    );
+
+    let mut lines = numbered_lines_vec(1, 80);
+    lines[9] = "line-010 updated\n".to_owned();
+    lines[29] = "line-030 updated\n".to_owned();
+    commit_file(
+        repo_dir.path(),
+        "spread.txt",
+        &lines.concat(),
+        "touch distant lines",
+    );
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[0].id.clone()];
+    let aggregate = service.aggregate_for_commits(&selected).expect("aggregate");
+    let patch = aggregate.files.get("spread.txt").expect("spread patch");
+
+    assert_eq!(
+        patch.hunks.len(),
+        1,
+        "default merge distance should coalesce nearby hunks into one block",
+    );
+}
+
+#[test]
+fn aggregate_with_options_respects_context_and_merge_distance() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(
+        repo_dir.path(),
+        "spread.txt",
+        &numbered_lines(1, 80),
+        "seed spread",
+    );
+
+    let mut lines = numbered_lines_vec(1, 80);
+    lines[9] = "line-010 updated\n".to_owned();
+    lines[29] = "line-030 updated\n".to_owned();
+    commit_file(
+        repo_dir.path(),
+        "spread.txt",
+        &lines.concat(),
+        "touch distant lines",
+    );
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[0].id.clone()];
+    let default_aggregate = service
+        .aggregate_for_commits(&selected)
+        .expect("default aggregate");
+    let custom_aggregate = service
+        .aggregate_for_commits_with_options(&selected, 1, 0)
+        .expect("custom aggregate");
+
+    let default_patch = default_aggregate
+        .files
+        .get("spread.txt")
+        .expect("default patch");
+    let custom_patch = custom_aggregate
+        .files
+        .get("spread.txt")
+        .expect("custom patch");
+
+    assert_eq!(
+        default_patch.hunks.len(),
+        1,
+        "default settings should merge hunks"
+    );
+    assert_eq!(
+        custom_patch.hunks.len(),
+        2,
+        "merge distance 0 should keep separated hunks distinct",
+    );
+    assert_eq!(
+        custom_patch.hunks[0].old_start, 9,
+        "context=1 should start hunk one line before the changed line",
+    );
+    assert_eq!(
+        custom_patch.hunks[0].new_start, 9,
+        "context=1 should mirror old/new starts for in-place line edits",
+    );
+}
+
+#[test]
 fn aggregate_sanitizes_crlf_payload_without_carriage_returns() {
     let repo_dir = tempdir().expect("tempdir");
     init_repo(repo_dir.path());
@@ -497,6 +591,16 @@ fn sort_worktrees_keeps_main_first_then_newest_linked_entries() {
     assert_eq!(worktrees[0].path, main);
     assert_eq!(worktrees[1].path, newer);
     assert_eq!(worktrees[2].path, older);
+}
+
+fn numbered_lines(start: usize, end: usize) -> String {
+    numbered_lines_vec(start, end).concat()
+}
+
+fn numbered_lines_vec(start: usize, end: usize) -> Vec<String> {
+    (start..=end)
+        .map(|idx| format!("line-{idx:03}\n"))
+        .collect()
 }
 
 fn init_repo(path: &Path) {

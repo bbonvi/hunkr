@@ -17,6 +17,8 @@ const DEFAULT_THEME_RELOAD_POLL_EVERY_MS: u64 = 1_000;
 const DEFAULT_SELECTION_REBUILD_DEBOUNCE_MS: u64 = 120;
 const DEFAULT_TERMINAL_CLEAR_EVERY_SECS: u64 = 120;
 const DEFAULT_DIFF_CURSOR_SCROLL_OFF_LINES: usize = 3;
+const DEFAULT_DIFF_CONTEXT_LINES: u32 = 3;
+const DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES: u32 = 15;
 
 /// Startup UI theme name from config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -42,6 +44,8 @@ pub struct AppConfig {
     pub selection_rebuild_debounce_ms: u64,
     pub terminal_clear_every_secs: u64,
     pub diff_cursor_scroll_off_lines: usize,
+    pub diff_context_lines: u32,
+    pub diff_hunk_merge_distance_lines: u32,
 }
 
 impl Default for AppConfig {
@@ -58,6 +62,8 @@ impl Default for AppConfig {
             selection_rebuild_debounce_ms: DEFAULT_SELECTION_REBUILD_DEBOUNCE_MS,
             terminal_clear_every_secs: DEFAULT_TERMINAL_CLEAR_EVERY_SECS,
             diff_cursor_scroll_off_lines: DEFAULT_DIFF_CURSOR_SCROLL_OFF_LINES,
+            diff_context_lines: DEFAULT_DIFF_CONTEXT_LINES,
+            diff_hunk_merge_distance_lines: DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES,
         }
     }
 }

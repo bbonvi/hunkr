@@ -18,6 +18,9 @@ use crate::model::{
     UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
 };
 
+const DEFAULT_DIFF_CONTEXT_LINES: u32 = 3;
+const DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES: u32 = 15;
+
 /// Read-only git access tailored for multi-commit review workflows.
 pub struct GitService {
     repo: Repository,
@@ -223,6 +226,19 @@ impl GitService {
         &self,
         ordered_commit_ids: &[String],
     ) -> anyhow::Result<AggregatedDiff> {
+        self.aggregate_for_commits_with_options(
+            ordered_commit_ids,
+            DEFAULT_DIFF_CONTEXT_LINES,
+            DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES,
+        )
+    }
+
+    pub fn aggregate_for_commits_with_options(
+        &self,
+        ordered_commit_ids: &[String],
+        context_lines: u32,
+        merge_distance_lines: u32,
+    ) -> anyhow::Result<AggregatedDiff> {
         if ordered_commit_ids.is_empty() {
             return Ok(AggregatedDiff::default());
         }
@@ -263,8 +279,7 @@ impl GitService {
             .tree()
             .context("failed to load newest commit tree")?;
 
-        let mut opts = DiffOptions::new();
-        opts.context_lines(3);
+        let mut opts = diff_options(context_lines, merge_distance_lines);
         let mut diff = self
             .repo
             .diff_tree_to_tree(base_tree.as_ref(), Some(&head_tree), Some(&mut opts))
@@ -300,7 +315,18 @@ impl GitService {
     }
 
     pub fn aggregate_uncommitted(&self) -> anyhow::Result<AggregatedDiff> {
-        let mut diff = self.uncommitted_diff()?;
+        self.aggregate_uncommitted_with_options(
+            DEFAULT_DIFF_CONTEXT_LINES,
+            DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES,
+        )
+    }
+
+    pub fn aggregate_uncommitted_with_options(
+        &self,
+        context_lines: u32,
+        merge_distance_lines: u32,
+    ) -> anyhow::Result<AggregatedDiff> {
+        let mut diff = self.uncommitted_diff_with_options(context_lines, merge_distance_lines)?;
         detect_renames_and_copies(&mut diff)?;
 
         let mut files = BTreeMap::<String, FilePatch>::new();
@@ -332,6 +358,23 @@ impl GitService {
         file_path: &str,
         selected_lines: &[String],
     ) -> anyhow::Result<BTreeSet<String>> {
+        self.commits_affecting_selection_with_options(
+            ordered_commit_ids,
+            file_path,
+            selected_lines,
+            DEFAULT_DIFF_CONTEXT_LINES,
+            DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES,
+        )
+    }
+
+    pub fn commits_affecting_selection_with_options(
+        &self,
+        ordered_commit_ids: &[String],
+        file_path: &str,
+        selected_lines: &[String],
+        context_lines: u32,
+        merge_distance_lines: u32,
+    ) -> anyhow::Result<BTreeSet<String>> {
         if ordered_commit_ids.is_empty() {
             return Ok(BTreeSet::new());
         }
@@ -359,8 +402,7 @@ impl GitService {
                 None
             };
 
-            let mut opts = DiffOptions::new();
-            opts.context_lines(3);
+            let mut opts = diff_options(context_lines, merge_distance_lines);
             let mut diff = self
                 .repo
                 .diff_tree_to_tree(parent_tree.as_ref(), Some(&current_tree), Some(&mut opts))
@@ -460,21 +502,38 @@ impl GitService {
     }
 
     fn uncommitted_diff(&self) -> anyhow::Result<git2::Diff<'_>> {
+        self.uncommitted_diff_with_options(
+            DEFAULT_DIFF_CONTEXT_LINES,
+            DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES,
+        )
+    }
+
+    fn uncommitted_diff_with_options(
+        &self,
+        context_lines: u32,
+        merge_distance_lines: u32,
+    ) -> anyhow::Result<git2::Diff<'_>> {
         let head_tree = self
             .repo
             .head()
             .ok()
             .and_then(|head| head.peel_to_tree().ok());
 
-        let mut opts = DiffOptions::new();
-        opts.context_lines(3)
-            .include_untracked(true)
+        let mut opts = diff_options(context_lines, merge_distance_lines);
+        opts.include_untracked(true)
             .show_untracked_content(true)
             .recurse_untracked_dirs(true);
         self.repo
             .diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))
             .context("failed to diff uncommitted worktree/index changes")
     }
+}
+
+fn diff_options(context_lines: u32, merge_distance_lines: u32) -> DiffOptions {
+    let mut opts = DiffOptions::new();
+    opts.context_lines(context_lines)
+        .interhunk_lines(merge_distance_lines);
+    opts
 }
 
 struct DiffSourceMeta {

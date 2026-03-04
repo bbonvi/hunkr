@@ -183,10 +183,20 @@ pub(in crate::app) fn rebuild_selection_dependent_views(app: &mut App) -> anyhow
     let mut aggregate = if selected_ordered.is_empty() {
         AggregatedDiff::default()
     } else {
-        app.deps.git.aggregate_for_commits(&selected_ordered)?
+        app.deps.git.aggregate_for_commits_with_options(
+            &selected_ordered,
+            app.tuning.diff_context_lines,
+            app.tuning.diff_hunk_merge_distance_lines,
+        )?
     };
     if app.uncommitted_selected() {
-        merge_aggregate_diff(&mut aggregate, app.deps.git.aggregate_uncommitted()?);
+        merge_aggregate_diff(
+            &mut aggregate,
+            app.deps.git.aggregate_uncommitted_with_options(
+                app.tuning.diff_context_lines,
+                app.tuning.diff_hunk_merge_distance_lines,
+            )?,
+        );
     }
     let changed_paths = changed_paths_between_aggregates(&app.domain.aggregate, &aggregate);
     let aggregate_changed = !changed_paths.is_empty();
