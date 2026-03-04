@@ -822,10 +822,6 @@ impl App {
         };
 
         self.capture_pending_diff_view_anchor();
-        self.ui
-            .diff_cache
-            .rendered_cache
-            .retain(|(candidate_path, _), _| candidate_path != &path);
         self.ui.diff_cache.rendered_key = None;
         self.ui.diff_cache.file_ranges.clear();
         self.ui.diff_cache.file_range_by_path.clear();

@@ -128,7 +128,6 @@ impl App {
                     file_ranges: Vec::new(),
                     file_range_by_path: HashMap::new(),
                     pending_view_anchor: None,
-                    rendered_cache: HashMap::new(),
                     rendered_key: None,
                     highlighter: DiffSyntaxHighlighter::new(),
                 },

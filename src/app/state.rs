@@ -197,7 +197,23 @@ impl App {
         }
 
         let theme = self.active_theme().clone();
-        let mut rendered = Vec::new();
+        let mut estimated_rows = ordered_paths.len().saturating_mul(2);
+        for path in &ordered_paths {
+            if let Some(patch) = self.domain.aggregate.files.get(path) {
+                let hunk_lines = patch
+                    .hunks
+                    .iter()
+                    .map(|hunk| hunk.lines.len())
+                    .sum::<usize>();
+                estimated_rows = estimated_rows
+                    .saturating_add(hunk_lines)
+                    .saturating_add(patch.hunks.len().saturating_mul(2));
+            } else {
+                estimated_rows = estimated_rows.saturating_add(1);
+            }
+        }
+
+        let mut rendered = Vec::with_capacity(estimated_rows);
         let mut ranges = Vec::new();
         let mut range_by_path = HashMap::new();
         let total_files = ordered_paths.len();
@@ -214,26 +230,14 @@ impl App {
                 &self.ui.preferences.nerd_font_theme,
             ));
 
-            let file_key = (path.clone(), self.ui.preferences.theme_mode);
-            let file_rendered =
-                if let Some(cached) = self.ui.diff_cache.rendered_cache.get(&file_key) {
-                    cached.clone()
-                } else {
-                    let built = self
-                        .domain
-                        .aggregate
-                        .files
-                        .get(path)
-                        .map(|patch| Arc::new(self.build_diff_lines(patch)))
-                        .unwrap_or_else(|| Arc::new(Vec::new()));
-                    self.ui
-                        .diff_cache
-                        .rendered_cache
-                        .insert(file_key.clone(), built.clone());
-                    built
-                };
-
-            rendered.extend(file_rendered.iter().cloned());
+            let mut file_rendered = self
+                .domain
+                .aggregate
+                .files
+                .get(path)
+                .map(|patch| self.build_diff_lines(patch))
+                .unwrap_or_default();
+            rendered.append(&mut file_rendered);
 
             if idx + 1 < total_files {
                 rendered.push(rendered_separator_line(&theme));
@@ -286,7 +290,6 @@ impl App {
     }
 
     pub(super) fn invalidate_diff_cache(&mut self) {
-        self.ui.diff_cache.rendered_cache.clear();
         self.ui.diff_cache.rendered_key = None;
         self.ui.diff_cache.file_ranges.clear();
         self.ui.diff_cache.file_range_by_path.clear();

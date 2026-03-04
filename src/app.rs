@@ -446,7 +446,6 @@ struct DiffCacheState {
     file_ranges: Vec<FileDiffRange>,
     file_range_by_path: HashMap<String, (usize, usize)>,
     pending_view_anchor: Option<PendingDiffViewAnchor>,
-    rendered_cache: HashMap<(String, ThemeMode), Arc<Vec<RenderedDiffLine>>>,
     rendered_key: Option<RenderedDiffKey>,
     highlighter: DiffSyntaxHighlighter,
 }

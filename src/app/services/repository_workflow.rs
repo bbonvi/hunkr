@@ -172,10 +172,6 @@ pub(in crate::app) fn rebuild_selection_dependent_views(app: &mut App) -> anyhow
     app.prune_diff_positions_for_removed_files();
 
     if aggregate_changed {
-        app.ui
-            .diff_cache
-            .rendered_cache
-            .retain(|(path, _), _| !changed_paths.contains(path));
         app.ui.diff_cache.rendered_key = None;
         app.ui.diff_cache.file_ranges.clear();
         app.ui.diff_cache.file_range_by_path.clear();
