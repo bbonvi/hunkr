@@ -1,5 +1,6 @@
 //! File tree construction and syntax-highlighting cache for diff rendering.
 use crate::app::*;
+use std::path::Path;
 
 #[derive(Default)]
 pub(super) struct FileTree {
@@ -148,11 +149,31 @@ impl DiffSyntaxHighlighter {
     }
 
     fn syntax_for_path(&self, path: &str) -> &SyntaxReference {
+        if let Some(ext) = Path::new(path).extension().and_then(|ext| ext.to_str())
+            && let Some(syntax) = self.syntax_for_extension(ext)
+        {
+            return syntax;
+        }
+
         self.syntaxes
             .find_syntax_for_file(path)
             .ok()
             .flatten()
             .unwrap_or_else(|| self.syntaxes.find_syntax_plain_text())
+    }
+
+    fn syntax_for_extension(&self, ext: &str) -> Option<&SyntaxReference> {
+        self.syntaxes.find_syntax_by_extension(ext).or_else(|| {
+            let lower = ext.to_ascii_lowercase();
+            self.syntaxes
+                .find_syntax_by_extension(&lower)
+                .or_else(|| match lower.as_str() {
+                    // Built-in syntect defaults in this binary omit explicit TS/JSX grammars.
+                    // JS fallback keeps React/TypeScript diffs highlighted instead of plain text.
+                    "ts" | "tsx" | "jsx" => self.syntaxes.find_syntax_by_extension("js"),
+                    _ => None,
+                })
+        })
     }
 
     fn theme_for_mode(&self, mode: ThemeMode) -> &Theme {
@@ -210,4 +231,31 @@ fn syntect_to_ratatui(style: syntect::highlighting::Style) -> Style {
         style.foreground.g,
         style.foreground.b,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DiffSyntaxHighlighter;
+
+    #[test]
+    fn syntax_for_missing_react_path_prefers_extension_lookup() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntaxes
+            .find_syntax_by_extension("js")
+            .expect("js syntax");
+        let actual = highlighter.syntax_for_path("missing/path/component.tsx");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_missing_typescript_path_prefers_extension_lookup() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntaxes
+            .find_syntax_by_extension("js")
+            .expect("js syntax");
+        let actual = highlighter.syntax_for_path("missing/path/service.ts");
+        assert_eq!(actual.name, expected.name);
+    }
 }
