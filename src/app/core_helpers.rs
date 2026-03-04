@@ -102,6 +102,7 @@ pub(super) fn diff_column_at(mouse_x: u16, rect: ratatui::layout::Rect) -> usize
 }
 
 /// Returns how many terminal rows a styled line occupies when soft-wrapped at `max_width`.
+#[cfg(test)]
 pub(super) fn wrapped_line_rows(line: &Line<'_>, max_width: usize) -> usize {
     if max_width == 0 {
         return 1;

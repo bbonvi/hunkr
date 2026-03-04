@@ -587,6 +587,72 @@ fn help_overlay_non_close_helper_click_keeps_overlay_open() {
 }
 
 #[test]
+fn draw_virtualized_diff_rows_keep_sticky_and_wrapped_mapping() {
+    let repo = init_test_repo();
+    let readme = repo.path().join("README.md");
+    let long_line = "0123456789".repeat(40);
+    std::fs::write(&readme, format!("init\n{long_line}\n")).expect("write long readme");
+    run_git(repo.path(), &["add", "README.md"]);
+    run_git(repo.path(), &["commit", "-m", "long diff line", "-q"]);
+
+    let mut app = bootstrap_driver(repo.path()).into_app();
+    draw_app(&mut app, 70, 18);
+
+    let code_idx = app
+        .domain
+        .rendered_diff
+        .iter()
+        .position(|line| line.raw_text.starts_with('+'))
+        .expect("code diff row");
+    app.domain.diff_position = DiffPosition {
+        scroll: code_idx,
+        cursor: code_idx,
+    };
+    app.ui.search.diff_query = Some("0123".to_owned());
+    app.ui.diff_ui.visual_selection = Some(DiffVisualSelection {
+        anchor: code_idx,
+        origin: DiffVisualOrigin::Keyboard,
+    });
+
+    draw_app(&mut app, 70, 18);
+
+    let viewport_rows = app
+        .ui
+        .diff_ui
+        .pane_rects
+        .diff
+        .height
+        .saturating_sub(2)
+        .max(1) as usize;
+    let sticky_indexes = app.sticky_banner_indexes_for_scroll(code_idx, viewport_rows);
+    let sticky_rows = sticky_indexes.len().min(viewport_rows.saturating_sub(1));
+
+    assert!(
+        app.ui.diff_ui.visible_rows.len() <= viewport_rows,
+        "diff viewport row map must stay within visible viewport",
+    );
+    assert!(
+        app.ui.diff_ui.visible_rows.len() > sticky_rows,
+        "fixture should leave room for body rows under sticky banners",
+    );
+
+    for (row, sticky_idx) in sticky_indexes.iter().take(sticky_rows).enumerate() {
+        let mapped = app.ui.diff_ui.visible_rows[row];
+        assert_eq!(mapped.line_index, *sticky_idx);
+        assert_eq!(mapped.wrapped_row_offset, 0);
+    }
+
+    let body = &app.ui.diff_ui.visible_rows[sticky_rows..];
+    assert!(
+        body.windows(2).any(|pair| {
+            pair[0].line_index == pair[1].line_index
+                && pair[1].wrapped_row_offset == pair[0].wrapped_row_offset + 1
+        }),
+        "body rows should include wrapped offsets for at least one source diff line",
+    );
+}
+
+#[test]
 fn draw_perf_guardrail_counts_over_budget_frames() {
     let repo = init_test_repo();
     let driver = bootstrap_driver(repo.path());

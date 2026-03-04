@@ -64,9 +64,9 @@ use self::theme_palette::ThemeRuntimeState;
 use self::theme_reload_driver::ThemeReloadDriver;
 use self::tree_highlight::*;
 use self::ui::diff_pane::{
-    DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, PendingDiffViewAnchor,
-    capture_pending_diff_view_anchor, find_diff_match_from_cursor, find_index_for_line_locator,
-    is_hunk_header_line, scrollbar_thumb,
+    DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, DiffViewportBuildInput, PendingDiffViewAnchor,
+    build_diff_viewport_rows, capture_pending_diff_view_anchor, find_diff_match_from_cursor,
+    find_index_for_line_locator, is_hunk_header_line, scrollbar_thumb,
 };
 use self::ui::list_panes::{CommitPaneModel, FilePaneModel, ListPaneRenderer};
 use self::ui::style::{CursorSelectionPolicy, apply_row_highlight};

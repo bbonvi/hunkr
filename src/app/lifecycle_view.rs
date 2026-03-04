@@ -136,49 +136,26 @@ impl App {
         let viewport_rows = rect.height.saturating_sub(2).max(1) as usize;
         let sticky_banner_indexes =
             self.sticky_banner_indexes_for_scroll(self.domain.diff_position.scroll, viewport_rows);
-        let sticky_rows = sticky_banner_indexes
-            .len()
-            .min(viewport_rows.saturating_sub(1));
-        let body_rows = viewport_rows.saturating_sub(sticky_rows);
-        let inner_width = rect.width.saturating_sub(2).max(1) as usize;
-        let mut line_overrides = HashMap::new();
-        let mut visible_rows = Vec::with_capacity(viewport_rows);
-        for idx in sticky_banner_indexes.iter().take(sticky_rows) {
-            visible_rows.push(DiffVisibleRow {
-                line_index: *idx,
-                wrapped_row_offset: 0,
-            });
-            if let Some(line) = self.highlight_visible_diff_line(*idx, theme) {
-                line_overrides.insert(*idx, line);
-            }
-        }
-        let target_rows = sticky_rows.saturating_add(body_rows);
-        let mut line_idx = self.domain.diff_position.scroll;
-        while visible_rows.len() < target_rows && line_idx < self.domain.rendered_diff.len() {
-            if let Some(line) = self.highlight_visible_diff_line(line_idx, theme) {
-                line_overrides.insert(line_idx, line);
-            }
-
-            let fallback_line;
-            let display_line = if let Some(override_line) = line_overrides.get(&line_idx) {
-                override_line
-            } else {
-                fallback_line = render_diff_line(&self.domain.rendered_diff[line_idx], theme);
-                &fallback_line
-            };
-            let wrapped_rows = wrapped_line_rows(display_line, inner_width).max(1);
-            for wrapped_row_offset in 0..wrapped_rows {
-                if visible_rows.len() >= target_rows {
-                    break;
-                }
-                visible_rows.push(DiffVisibleRow {
-                    line_index: line_idx,
-                    wrapped_row_offset,
-                });
-            }
-            line_idx += 1;
-        }
-        self.ui.diff_ui.visible_rows = visible_rows;
+        let diff_search_query = self.ui.search.diff_query.clone();
+        let rendered_diff = Arc::clone(&self.domain.rendered_diff);
+        let viewport = build_diff_viewport_rows(
+            DiffViewportBuildInput {
+                rendered_diff: rendered_diff.as_slice(),
+                diff_position: self.domain.diff_position,
+                block_cursor_col: self.ui.diff_ui.block_cursor_col,
+                search_query: diff_search_query.as_deref(),
+                visual_range,
+                sticky_banner_indexes: &sticky_banner_indexes,
+                viewport_rows,
+                inner_width: rect.width.saturating_sub(2).max(1),
+                focused_diff: self.ui.preferences.focused == FocusPane::Diff,
+            },
+            theme,
+            |_, rendered| self.highlight_visible_diff_line(rendered, theme),
+        );
+        let sticky_rows = viewport.sticky_rows;
+        self.ui.diff_ui.visible_rows = viewport.visible_rows;
+        let visible_lines = viewport.lines;
         let empty_state_message = diff_empty_state_message(
             !self.domain.rendered_diff.is_empty(),
             self.domain.aggregate.files.len(),
@@ -199,24 +176,20 @@ impl App {
             selected_lines,
         };
         let body = DiffPaneBody {
-            rendered_diff: &self.domain.rendered_diff,
-            diff_position: self.domain.diff_position,
-            block_cursor_col: self.ui.diff_ui.block_cursor_col,
-            search_query: self.ui.search.diff_query.as_deref(),
-            visual_range,
-            sticky_banner_indexes: &sticky_banner_indexes,
+            visible_lines: &visible_lines,
             empty_state_message: empty_state_message.as_deref(),
-            line_overrides: &line_overrides,
+            rendered_len: rendered_diff.len(),
+            scroll: self.domain.diff_position.scroll,
+            sticky_rows,
         };
         DiffPaneRenderer::new(theme, self.ui.preferences.focused).render(frame, rect, title, body);
     }
 
     fn highlight_visible_diff_line(
         &mut self,
-        idx: usize,
+        rendered: &RenderedDiffLine,
         theme: &UiTheme,
     ) -> Option<Line<'static>> {
-        let rendered = self.domain.rendered_diff.get(idx)?;
         let anchor = rendered.anchor.as_ref()?;
         if is_commit_line_anchor(anchor) {
             return None;

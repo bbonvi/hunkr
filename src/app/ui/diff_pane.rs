@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use ratatui::{
     Frame,
     style::{Modifier, Style},
@@ -9,8 +7,8 @@ use ratatui::{
 use unicode_width::UnicodeWidthChar;
 
 use super::super::{
-    DiffLineAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme,
-    blend_colors, diff_line_anchor_matches, format_path_with_icon, is_commit_line_anchor,
+    DiffLineAnchor, DiffPosition, DiffVisibleRow, FocusPane, NerdFontTheme, RenderedDiffLine,
+    UiTheme, blend_colors, diff_line_anchor_matches, format_path_with_icon, is_commit_line_anchor,
     render_diff_line, sanitized_span,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
@@ -40,24 +38,128 @@ pub(in crate::app) struct DiffPaneTitle<'a> {
 
 #[derive(Debug, Clone, Copy)]
 pub(in crate::app) struct DiffPaneBody<'a> {
-    pub rendered_diff: &'a [RenderedDiffLine],
-    pub diff_position: DiffPosition,
-    pub block_cursor_col: usize,
-    pub search_query: Option<&'a str>,
-    pub visual_range: Option<(usize, usize)>,
-    pub sticky_banner_indexes: &'a [usize],
+    pub visible_lines: &'a [Line<'static>],
     pub empty_state_message: Option<&'a str>,
-    pub line_overrides: &'a HashMap<usize, Line<'static>>,
+    pub rendered_len: usize,
+    pub scroll: usize,
+    pub sticky_rows: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct SelectionRenderContext<'a> {
+pub(in crate::app) struct SelectionRenderContext<'a> {
     visual_range: Option<(usize, usize)>,
     cursor: usize,
     block_cursor_col: usize,
     search_query: Option<&'a str>,
     focused_diff: bool,
     theme: &'a UiTheme,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(in crate::app) struct DiffViewportBuildInput<'a> {
+    pub rendered_diff: &'a [RenderedDiffLine],
+    pub diff_position: DiffPosition,
+    pub block_cursor_col: usize,
+    pub search_query: Option<&'a str>,
+    pub visual_range: Option<(usize, usize)>,
+    pub sticky_banner_indexes: &'a [usize],
+    pub viewport_rows: usize,
+    pub inner_width: u16,
+    pub focused_diff: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::app) struct DiffViewportRows {
+    pub lines: Vec<Line<'static>>,
+    pub visible_rows: Vec<DiffVisibleRow>,
+    pub sticky_rows: usize,
+}
+
+/// Builds only the currently visible diff rows (including sticky banners) with
+/// all cursor/search/visual styling applied. Callers can reuse `visible_rows`
+/// for mouse hit-testing and render `lines` directly without a second pass.
+pub(in crate::app) fn build_diff_viewport_rows<F>(
+    input: DiffViewportBuildInput<'_>,
+    theme: &UiTheme,
+    mut line_override: F,
+) -> DiffViewportRows
+where
+    F: FnMut(usize, &RenderedDiffLine) -> Option<Line<'static>>,
+{
+    let max_sticky_rows = input.viewport_rows.saturating_sub(1);
+    let sticky_rows = input.sticky_banner_indexes.len().min(max_sticky_rows);
+    let mut lines = Vec::with_capacity(input.viewport_rows);
+    let mut visible_rows = Vec::with_capacity(input.viewport_rows);
+    let selection = SelectionRenderContext {
+        visual_range: input.visual_range,
+        cursor: input.diff_position.cursor,
+        block_cursor_col: input.block_cursor_col,
+        search_query: input.search_query,
+        focused_diff: input.focused_diff,
+        theme,
+    };
+
+    for sticky_idx in input
+        .sticky_banner_indexes
+        .iter()
+        .take(sticky_rows)
+        .copied()
+    {
+        let sticky_line = input
+            .rendered_diff
+            .get(sticky_idx)
+            .map(|line| {
+                display_line_with_selection(
+                    line,
+                    line_override(sticky_idx, line),
+                    sticky_idx,
+                    input.inner_width,
+                    selection,
+                )
+            })
+            .unwrap_or_else(|| Line::from(""));
+        lines.push(sticky_line);
+        visible_rows.push(DiffVisibleRow {
+            line_index: sticky_idx,
+            wrapped_row_offset: 0,
+        });
+    }
+
+    let target_rows = input.viewport_rows;
+    let mut line_idx = input.diff_position.scroll;
+    while lines.len() < target_rows {
+        let Some(line) = input.rendered_diff.get(line_idx) else {
+            break;
+        };
+        let display_line = display_line_with_selection(
+            line,
+            line_override(line_idx, line),
+            line_idx,
+            input.inner_width,
+            selection,
+        );
+        for (wrapped_row_offset, wrapped) in
+            hard_wrap_line(&display_line, input.inner_width as usize)
+                .into_iter()
+                .enumerate()
+        {
+            if lines.len() >= target_rows {
+                break;
+            }
+            lines.push(wrapped);
+            visible_rows.push(DiffVisibleRow {
+                line_index: line_idx,
+                wrapped_row_offset,
+            });
+        }
+        line_idx += 1;
+    }
+
+    DiffViewportRows {
+        lines,
+        visible_rows,
+        sticky_rows,
+    }
 }
 
 /// Renders the diff pane so App can focus on orchestration/state transitions.
@@ -123,98 +225,23 @@ impl<'a> DiffPaneRenderer<'a> {
         if inner.height == 0 || inner.width == 0 {
             return;
         }
-
-        let max_sticky_rows = inner.height.saturating_sub(1) as usize;
-        let sticky_rows = body.sticky_banner_indexes.len().min(max_sticky_rows);
-        let selection = SelectionRenderContext {
-            visual_range: body.visual_range,
-            cursor: body.diff_position.cursor,
-            block_cursor_col: body.block_cursor_col,
-            search_query: body.search_query,
-            focused_diff: self.focused == FocusPane::Diff,
-            theme: self.theme,
+        let content = if body.visible_lines.is_empty() {
+            vec![Line::from(Span::styled(
+                body.empty_state_message
+                    .unwrap_or("No selected commits or no textual diff for this range"),
+                Style::default().fg(self.theme.muted),
+            ))]
+        } else {
+            body.visible_lines.to_vec()
         };
-        for (row, sticky_idx) in body
-            .sticky_banner_indexes
-            .iter()
-            .take(sticky_rows)
-            .enumerate()
-        {
-            let sticky_line = body
-                .rendered_diff
-                .get(*sticky_idx)
-                .map(|line| {
-                    display_line_with_selection(
-                        line,
-                        body.line_overrides.get(sticky_idx),
-                        *sticky_idx,
-                        inner.width,
-                        selection,
-                    )
-                })
-                .unwrap_or_else(|| Line::from(""));
-            frame.render_widget(
-                Paragraph::new(vec![sticky_line]),
-                ratatui::layout::Rect {
-                    x: inner.x,
-                    y: inner.y + row as u16,
-                    width: inner.width,
-                    height: 1,
-                },
-            );
-        }
-
-        let body_height = inner.height.saturating_sub(sticky_rows as u16);
-        if body_height > 0 {
-            let mut body_lines = Vec::with_capacity(body_height as usize);
-            let mut line_idx = body.diff_position.scroll;
-            while body_lines.len() < body_height as usize {
-                let Some(line) = body.rendered_diff.get(line_idx) else {
-                    break;
-                };
-                let display_line = display_line_with_selection(
-                    line,
-                    body.line_overrides.get(&line_idx),
-                    line_idx,
-                    inner.width,
-                    selection,
-                );
-                for wrapped in hard_wrap_line(&display_line, inner.width as usize) {
-                    body_lines.push(wrapped);
-                    if body_lines.len() >= body_height as usize {
-                        break;
-                    }
-                }
-                line_idx += 1;
-            }
-
-            if body_lines.is_empty() {
-                let empty_state = body
-                    .empty_state_message
-                    .unwrap_or("No selected commits or no textual diff for this range");
-                body_lines.push(Line::from(Span::styled(
-                    empty_state,
-                    Style::default().fg(self.theme.muted),
-                )));
-            }
-
-            frame.render_widget(
-                Paragraph::new(body_lines),
-                ratatui::layout::Rect {
-                    x: inner.x,
-                    y: inner.y + sticky_rows as u16,
-                    width: inner.width,
-                    height: body_height,
-                },
-            );
-        }
+        frame.render_widget(Paragraph::new(content), inner);
 
         self.render_diff_scrollbar(
             frame,
             rect,
-            body.rendered_diff.len(),
-            body.diff_position.scroll,
-            sticky_rows,
+            body.rendered_len,
+            body.scroll,
+            body.sticky_rows,
         );
     }
 
@@ -478,14 +505,12 @@ fn find_index_for_raw_text_occurrence_in_candidates(
 
 fn display_line_with_selection(
     rendered: &RenderedDiffLine,
-    override_line: Option<&Line<'static>>,
+    override_line: Option<Line<'static>>,
     idx: usize,
     line_width: u16,
     selection: SelectionRenderContext<'_>,
 ) -> Line<'static> {
-    let line = override_line
-        .cloned()
-        .unwrap_or_else(|| render_diff_line(rendered, selection.theme));
+    let line = override_line.unwrap_or_else(|| render_diff_line(rendered, selection.theme));
     let display_text = line
         .spans
         .iter()
@@ -880,8 +905,13 @@ fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{SelectionRenderContext, display_line_with_selection, patch_line_byte_range};
-    use crate::app::{RenderedDiffLine, ThemeMode, UiTheme, blend_colors};
+    use super::{
+        DiffViewportBuildInput, SelectionRenderContext, build_diff_viewport_rows,
+        display_line_with_selection, patch_line_byte_range,
+    };
+    use crate::app::{
+        DiffPosition, DiffVisibleRow, RenderedDiffLine, ThemeMode, UiTheme, blend_colors,
+    };
     use crate::model::DiffLineAnchor;
     use ratatui::{
         style::{Color, Style},
@@ -1065,6 +1095,182 @@ mod tests {
         assert_eq!(
             cursor_cells, 1,
             "block cursor should render as one cell on context-line prefix",
+        );
+    }
+
+    #[test]
+    fn viewport_builder_materializes_only_rows_in_view() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = vec![
+            RenderedDiffLine {
+                line: Line::from("aaaaaaaaaa"),
+                raw_text: "aaaaaaaaaa".to_owned(),
+                anchor: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("bbbbbbbbbb"),
+                raw_text: "bbbbbbbbbb".to_owned(),
+                anchor: None,
+            },
+        ];
+        let mut built_indexes = Vec::new();
+        let viewport = build_diff_viewport_rows(
+            DiffViewportBuildInput {
+                rendered_diff: &rendered,
+                diff_position: DiffPosition::default(),
+                block_cursor_col: 0,
+                search_query: None,
+                visual_range: None,
+                sticky_banner_indexes: &[],
+                viewport_rows: 3,
+                inner_width: 4,
+                focused_diff: false,
+            },
+            &theme,
+            |idx, _| {
+                built_indexes.push(idx);
+                None
+            },
+        );
+
+        assert_eq!(built_indexes, vec![0]);
+        assert_eq!(
+            viewport.visible_rows,
+            vec![
+                DiffVisibleRow {
+                    line_index: 0,
+                    wrapped_row_offset: 0,
+                },
+                DiffVisibleRow {
+                    line_index: 0,
+                    wrapped_row_offset: 1,
+                },
+                DiffVisibleRow {
+                    line_index: 0,
+                    wrapped_row_offset: 2,
+                },
+            ],
+        );
+        assert_eq!(viewport.lines.len(), 3);
+    }
+
+    #[test]
+    fn viewport_builder_keeps_sticky_rows_and_wrap_offsets() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = vec![
+            RenderedDiffLine {
+                line: Line::from("==== file 1/1: src/main.rs ===="),
+                raw_text: "==== file 1/1: src/main.rs ====".to_owned(),
+                anchor: None,
+            },
+            RenderedDiffLine {
+                line: Line::from("123456789"),
+                raw_text: "123456789".to_owned(),
+                anchor: None,
+            },
+        ];
+
+        let viewport = build_diff_viewport_rows(
+            DiffViewportBuildInput {
+                rendered_diff: &rendered,
+                diff_position: DiffPosition {
+                    scroll: 1,
+                    cursor: 1,
+                },
+                block_cursor_col: 0,
+                search_query: None,
+                visual_range: None,
+                sticky_banner_indexes: &[0],
+                viewport_rows: 4,
+                inner_width: 3,
+                focused_diff: false,
+            },
+            &theme,
+            |_, _| None,
+        );
+
+        assert_eq!(viewport.sticky_rows, 1);
+        assert_eq!(
+            viewport.visible_rows,
+            vec![
+                DiffVisibleRow {
+                    line_index: 0,
+                    wrapped_row_offset: 0,
+                },
+                DiffVisibleRow {
+                    line_index: 1,
+                    wrapped_row_offset: 0,
+                },
+                DiffVisibleRow {
+                    line_index: 1,
+                    wrapped_row_offset: 1,
+                },
+                DiffVisibleRow {
+                    line_index: 1,
+                    wrapped_row_offset: 2,
+                },
+            ],
+        );
+        assert_eq!(viewport.lines.len(), 4);
+    }
+
+    #[test]
+    fn viewport_builder_composes_search_cursor_and_visual_styles() {
+        let theme = UiTheme::from_mode(ThemeMode::Dark);
+        let rendered = vec![RenderedDiffLine {
+            line: Line::from(vec![
+                Span::styled("   9    9 ", Style::default()),
+                Span::styled("+", Style::default()),
+                Span::raw(" "),
+                Span::styled("alpha target omega", Style::default()),
+            ]),
+            raw_text: "+ alpha target omega".to_owned(),
+            anchor: Some(DiffLineAnchor {
+                commit_id: "head".into(),
+                commit_summary: "summary".into(),
+                file_path: "src/main.rs".into(),
+                hunk_header: "@@ -1,1 +1,1 @@".into(),
+                old_lineno: Some(9),
+                new_lineno: Some(9),
+            }),
+        }];
+
+        let viewport = build_diff_viewport_rows(
+            DiffViewportBuildInput {
+                rendered_diff: &rendered,
+                diff_position: DiffPosition::default(),
+                block_cursor_col: 8,
+                search_query: Some("target"),
+                visual_range: Some((0, 0)),
+                sticky_banner_indexes: &[],
+                viewport_rows: 1,
+                inner_width: 80,
+                focused_diff: true,
+            },
+            &theme,
+            |_, _| None,
+        );
+
+        let line = &viewport.lines[0];
+        let layered_bg = blend_colors(
+            theme.focused_cursor_bg,
+            theme.visual_bg,
+            theme.cursor_visual_overlap_weight,
+        );
+        assert!(
+            line.spans.iter().any(|span| {
+                matches!(
+                    span.style.bg,
+                    Some(color) if color == theme.search_match_bg || color == theme.search_current_bg
+                )
+            }),
+            "search highlight should be present in virtualized viewport rows",
+        );
+        assert!(
+            line.spans
+                .iter()
+                .any(|span| span.style.bg == Some(layered_bg)),
+            "cursor+visual blended tint should survive virtualization path",
         );
     }
 }
