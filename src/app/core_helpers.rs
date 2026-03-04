@@ -125,25 +125,10 @@ pub(super) fn diff_column_at_for_rendered_line(
     mouse_x: u16,
     rect: ratatui::layout::Rect,
     wrapped_row_offset: usize,
-    rendered_line: Option<&RenderedDiffLine>,
+    _rendered_line: Option<&RenderedDiffLine>,
 ) -> usize {
     let content_width = rect.width.saturating_sub(2).max(1) as usize;
-    let display_col = diff_column_at(mouse_x, rect)
-        .saturating_add(wrapped_row_offset.saturating_mul(content_width));
-    let Some(prefix_cells) = diff_code_padding_cells(rendered_line) else {
-        return display_col;
-    };
-
-    display_col.saturating_sub(prefix_cells)
-}
-
-pub(super) fn diff_code_padding_cells(
-    rendered_line: Option<&RenderedDiffLine>,
-) -> Option<usize> {
-    if !is_diff_code_line(rendered_line) {
-        return None;
-    }
-    Some(2)
+    diff_column_at(mouse_x, rect).saturating_add(wrapped_row_offset.saturating_mul(content_width))
 }
 
 pub(super) fn diff_line_coord_text(rendered_line: &RenderedDiffLine) -> &str {
@@ -157,7 +142,9 @@ pub(super) fn is_diff_code_line(rendered_line: Option<&RenderedDiffLine>) -> boo
     let Some(line) = rendered_line else {
         return false;
     };
-    line.anchor.as_ref().is_some_and(|anchor| !is_commit_line_anchor(anchor))
+    line.anchor
+        .as_ref()
+        .is_some_and(|anchor| !is_commit_line_anchor(anchor))
         && matches!(
             line.raw_text.chars().next(),
             Some('+') | Some('-') | Some(' ') | Some('~')
@@ -229,7 +216,9 @@ fn render_code_line_from_raw(
     };
 
     let code_text = diff_line_coord_text(rendered).to_owned();
-    let mut spans = vec![Span::raw("  ")];
+    // Keep a leading span (empty content) so diff selection/highlight code paths can
+    // treat code rows uniformly without rendering visible left padding.
+    let mut spans = vec![Span::raw("")];
 
     let mut text_style = Style::default();
     if let Some(fg_color) = fg {

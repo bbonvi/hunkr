@@ -652,10 +652,10 @@ fn diff_column_maps_mouse_to_inner_content_column() {
 }
 
 #[test]
-fn diff_column_for_rendered_code_line_skips_two_space_padding() {
+fn diff_column_for_rendered_code_line_has_no_hidden_left_padding() {
     let rect = ratatui::layout::Rect::new(10, 5, 60, 6);
     let line = RenderedDiffLine {
-        line: Line::from(vec![Span::raw("  "), Span::raw("target")]),
+        line: Line::from(vec![Span::raw(""), Span::raw("target")]),
         raw_text: "+target".to_owned().into(),
         anchor: Some(DiffLineAnchor::new(
             "abc",
@@ -669,14 +669,14 @@ fn diff_column_for_rendered_code_line_skips_two_space_padding() {
     let content_left = rect.x + 1;
 
     assert_eq!(
-        diff_column_at_for_rendered_line(content_left + 1, rect, 0, Some(&line)),
+        diff_column_at_for_rendered_line(content_left, rect, 0, Some(&line)),
         0,
-        "left padding should clamp to the start of payload text",
+        "first visible cell should map to payload column zero",
     );
     assert_eq!(
-        diff_column_at_for_rendered_line(content_left + 3, rect, 0, Some(&line)),
+        diff_column_at_for_rendered_line(content_left + 1, rect, 0, Some(&line)),
         1,
-        "first payload cell after padding should map to payload index 1",
+        "next visible cell should map to payload column one",
     );
 }
 
@@ -699,7 +699,7 @@ fn diff_column_for_rendered_non_code_line_uses_display_column() {
 fn diff_column_for_wrapped_row_applies_row_offset_before_raw_mapping() {
     let rect = ratatui::layout::Rect::new(10, 5, 60, 6);
     let line = RenderedDiffLine {
-        line: Line::from(vec![Span::raw("  "), Span::raw("target")]),
+        line: Line::from(vec![Span::raw(""), Span::raw("target")]),
         raw_text: "+target".to_owned().into(),
         anchor: Some(DiffLineAnchor::new(
             "abc",
@@ -714,7 +714,7 @@ fn diff_column_for_wrapped_row_applies_row_offset_before_raw_mapping() {
     let wrapped_row_offset = 1;
     assert_eq!(
         diff_column_at_for_rendered_line(rect.x + 1, rect, wrapped_row_offset, Some(&line)),
-        56,
+        58,
     );
 }
 
