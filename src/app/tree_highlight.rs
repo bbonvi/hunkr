@@ -2,6 +2,23 @@
 use crate::app::*;
 use std::path::Path;
 
+const JS_FALLBACK_TOKENS: &[&str] = &["javascript", "js"];
+const TS_FALLBACK_TOKENS: &[&str] = &["typescript", "tsx", "jsx", "javascript", "js"];
+const TEMPLATE_FALLBACK_TOKENS: &[&str] = &["vue", "svelte", "astro", "html", "xml", "js"];
+const MDX_FALLBACK_TOKENS: &[&str] = &["mdx", "markdown", "md", "jsx", "js"];
+const JSON_FALLBACK_TOKENS: &[&str] = &["json", "js"];
+const YAML_FALLBACK_TOKENS: &[&str] = &["yaml", "yml"];
+const GRAPHQL_FALLBACK_TOKENS: &[&str] = &["graphql", "gql", "js"];
+const TERRAFORM_FALLBACK_TOKENS: &[&str] = &["terraform", "hcl", "tf", "cfg", "ini"];
+const DOCKER_FALLBACK_TOKENS: &[&str] = &["dockerfile", "docker", "sh", "shell", "bash"];
+const MAKE_FALLBACK_TOKENS: &[&str] = &["makefile", "make", "mk", "sh"];
+const SHELL_FALLBACK_TOKENS: &[&str] = &["bash", "zsh", "sh", "shell"];
+const RUBY_FALLBACK_TOKENS: &[&str] = &["ruby", "rb"];
+const IGNORE_FALLBACK_TOKENS: &[&str] = &["gitignore", "ignore", "conf", "cfg", "txt"];
+const ENV_FALLBACK_TOKENS: &[&str] = &["dotenv", "sh", "bash", "conf", "ini"];
+const CMAKE_FALLBACK_TOKENS: &[&str] = &["cmake", "make"];
+const JENKINS_FALLBACK_TOKENS: &[&str] = &["groovy", "java"];
+
 #[derive(Default)]
 pub(super) struct FileTree {
     dirs: BTreeMap<String, FileTree>,
@@ -149,6 +166,19 @@ impl DiffSyntaxHighlighter {
     }
 
     fn syntax_for_path(&self, path: &str) -> &SyntaxReference {
+        let file_name = Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if !file_name.is_empty() {
+            if let Some(syntax) = self.syntaxes.find_syntax_by_token(file_name) {
+                return syntax;
+            }
+            if let Some(syntax) = self.syntax_for_filename_alias(file_name) {
+                return syntax;
+            }
+        }
+
         if let Some(ext) = Path::new(path).extension().and_then(|ext| ext.to_str())
             && let Some(syntax) = self.syntax_for_extension(ext)
         {
@@ -167,13 +197,56 @@ impl DiffSyntaxHighlighter {
             let lower = ext.to_ascii_lowercase();
             self.syntaxes
                 .find_syntax_by_extension(&lower)
-                .or_else(|| match lower.as_str() {
-                    // Built-in syntect defaults in this binary omit explicit TS/JSX grammars.
-                    // JS fallback keeps React/TypeScript diffs highlighted instead of plain text.
-                    "ts" | "tsx" | "jsx" => self.syntaxes.find_syntax_by_extension("js"),
-                    _ => None,
+                .or_else(|| self.syntaxes.find_syntax_by_token(&lower))
+                .or_else(|| {
+                    extension_alias_tokens(&lower)
+                        .and_then(|tokens| self.syntax_for_alias_tokens(tokens))
                 })
         })
+    }
+
+    fn syntax_for_filename_alias(&self, file_name: &str) -> Option<&SyntaxReference> {
+        let lower = file_name.to_ascii_lowercase();
+        if lower == ".env" || lower.starts_with(".env.") {
+            return self.syntax_for_alias_tokens(ENV_FALLBACK_TOKENS);
+        }
+        if matches!(
+            lower.as_str(),
+            ".bashrc"
+                | ".bash_profile"
+                | ".bash_aliases"
+                | ".bash_logout"
+                | ".profile"
+                | ".zshrc"
+                | ".zprofile"
+                | ".zshenv"
+                | ".zlogin"
+                | ".kshrc"
+                | ".tcshrc"
+        ) {
+            return self.syntax_for_alias_tokens(SHELL_FALLBACK_TOKENS);
+        }
+
+        let tokens = match lower.as_str() {
+            "dockerfile" | "containerfile" => Some(DOCKER_FALLBACK_TOKENS),
+            "makefile" | "gnumakefile" | "justfile" => Some(MAKE_FALLBACK_TOKENS),
+            "cmakelists.txt" => Some(CMAKE_FALLBACK_TOKENS),
+            "jenkinsfile" => Some(JENKINS_FALLBACK_TOKENS),
+            "vagrantfile" | "gemfile" | "rakefile" | "podfile" | "fastfile" | "brewfile" => {
+                Some(RUBY_FALLBACK_TOKENS)
+            }
+            ".gitignore" | ".dockerignore" | ".ignore" | ".npmignore" => {
+                Some(IGNORE_FALLBACK_TOKENS)
+            }
+            _ => None,
+        }?;
+        self.syntax_for_alias_tokens(tokens)
+    }
+
+    fn syntax_for_alias_tokens(&self, tokens: &[&str]) -> Option<&SyntaxReference> {
+        tokens
+            .iter()
+            .find_map(|token| self.syntaxes.find_syntax_by_token(token))
     }
 
     fn theme_for_mode(&self, mode: ThemeMode) -> &Theme {
@@ -233,6 +306,20 @@ fn syntect_to_ratatui(style: syntect::highlighting::Style) -> Style {
     ))
 }
 
+fn extension_alias_tokens(ext: &str) -> Option<&'static [&'static str]> {
+    Some(match ext {
+        "ts" | "tsx" | "jsx" | "mts" | "cts" => TS_FALLBACK_TOKENS,
+        "mjs" | "cjs" => JS_FALLBACK_TOKENS,
+        "vue" | "svelte" | "astro" => TEMPLATE_FALLBACK_TOKENS,
+        "mdx" => MDX_FALLBACK_TOKENS,
+        "jsonc" | "json5" => JSON_FALLBACK_TOKENS,
+        "yaml" => YAML_FALLBACK_TOKENS,
+        "gql" | "graphql" => GRAPHQL_FALLBACK_TOKENS,
+        "tf" | "tfvars" | "hcl" => TERRAFORM_FALLBACK_TOKENS,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::DiffSyntaxHighlighter;
@@ -241,9 +328,8 @@ mod tests {
     fn syntax_for_missing_react_path_prefers_extension_lookup() {
         let highlighter = DiffSyntaxHighlighter::new();
         let expected = highlighter
-            .syntaxes
-            .find_syntax_by_extension("js")
-            .expect("js syntax");
+            .syntax_for_alias_tokens(super::TS_FALLBACK_TOKENS)
+            .expect("ts/js fallback syntax");
         let actual = highlighter.syntax_for_path("missing/path/component.tsx");
         assert_eq!(actual.name, expected.name);
     }
@@ -252,10 +338,39 @@ mod tests {
     fn syntax_for_missing_typescript_path_prefers_extension_lookup() {
         let highlighter = DiffSyntaxHighlighter::new();
         let expected = highlighter
-            .syntaxes
-            .find_syntax_by_extension("js")
-            .expect("js syntax");
+            .syntax_for_alias_tokens(super::TS_FALLBACK_TOKENS)
+            .expect("ts/js fallback syntax");
         let actual = highlighter.syntax_for_path("missing/path/service.ts");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_missing_vue_path_uses_template_fallback() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntax_for_alias_tokens(super::TEMPLATE_FALLBACK_TOKENS)
+            .expect("template fallback syntax");
+        let actual = highlighter.syntax_for_path("missing/path/App.vue");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_missing_svelte_path_uses_template_fallback() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntax_for_alias_tokens(super::TEMPLATE_FALLBACK_TOKENS)
+            .expect("template fallback syntax");
+        let actual = highlighter.syntax_for_path("missing/path/Component.svelte");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_dockerfile_name_uses_filename_fallback() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntax_for_alias_tokens(super::DOCKER_FALLBACK_TOKENS)
+            .expect("docker fallback syntax");
+        let actual = highlighter.syntax_for_path("missing/path/Dockerfile");
         assert_eq!(actual.name, expected.name);
     }
 }
