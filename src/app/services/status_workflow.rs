@@ -15,12 +15,24 @@ pub(in crate::app) fn set_status_for_ids(
     );
 
     apply_status_transition(&mut app.domain.commits, ids, status);
-    app.sync_commit_cursor_for_filters(None, app.ui.commit_ui.list_state.selected());
-
-    let save_result = app.deps.store.save(&app.domain.review_state);
+    let save_result = app
+        .deps
+        .store
+        .save_statuses_merged(&mut app.domain.review_state);
     let mut status_message = if let Err(err) = save_result {
         format!("failed to persist status change: {err:#}")
     } else {
+        for row in &mut app.domain.commits {
+            if row.is_uncommitted {
+                row.status = ReviewStatus::Unreviewed;
+            } else {
+                row.status = app
+                    .deps
+                    .store
+                    .commit_status(&app.domain.review_state, &row.info.id);
+            }
+        }
+        app.sync_commit_cursor_for_filters(None, app.ui.commit_ui.list_state.selected());
         format!(
             "{} commit(s) -> {}",
             ids.len(),

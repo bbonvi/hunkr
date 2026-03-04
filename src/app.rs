@@ -78,7 +78,7 @@ use crate::{
         FileChangeSummary, FilePatch, HunkLine, ReviewState, ReviewStatus, UNCOMMITTED_COMMIT_ID,
         UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
     },
-    store::{InstanceLock, StateStore},
+    store::StateStore,
 };
 
 const HISTORY_LIMIT: usize = 400;
@@ -577,7 +577,6 @@ struct DrawPerfState {
 struct AppDependencies {
     git: GitService,
     store: StateStore,
-    instance_lock: Option<InstanceLock>,
     clock: Arc<dyn AppClock>,
     runtime_ports: Arc<dyn AppRuntimePorts>,
 }

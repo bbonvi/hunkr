@@ -39,6 +39,9 @@ fn reconcile_repository_context(app: &mut App, target: &Path) -> anyhow::Result<
 }
 
 fn reload_commits_inner(app: &mut App, preserve_manual_selection: bool) -> anyhow::Result<()> {
+    app.deps
+        .store
+        .sync_statuses_from_disk(&mut app.domain.review_state)?;
     let history = app.deps.git.load_first_parent_history(HISTORY_LIMIT)?;
     let prior_cursor_idx = app.ui.commit_ui.list_state.selected();
     let prior_cursor_commit_id = app.selected_commit_id();
@@ -269,6 +272,7 @@ pub(in crate::app) fn apply_startup_starter_selection(app: &mut App) -> anyhow::
 #[cfg(test)]
 mod tests {
     use std::{
+        collections::BTreeSet,
         path::{Path, PathBuf},
         process::Command,
         sync::{
@@ -438,5 +442,169 @@ mod tests {
         super::reload_commits(&mut app, true).expect("reload commits");
 
         assert_eq!(calls.open_git_at.load(Ordering::Relaxed), before_git + 1);
+    }
+
+    #[test]
+    fn reload_commits_syncs_external_status_updates_from_disk() {
+        let repo = init_test_repo();
+        let store = StateStore::for_project(repo.path());
+        store
+            .save(&ReviewState::default())
+            .expect("seed persisted state to bypass onboarding");
+
+        let calls = Arc::new(RuntimePortCalls::default());
+        let runtime_ports = Arc::new(TestRuntimePorts {
+            calls: Arc::clone(&calls),
+        });
+        let ports = TestBootstrapPorts {
+            repo_root: repo.path().to_path_buf(),
+            runtime_ports,
+        };
+        let mut app = App::bootstrap_with(&ports).expect("bootstrap app");
+        let commit_id = app
+            .domain
+            .commits
+            .iter()
+            .find(|row| !row.is_uncommitted)
+            .map(|row| row.info.id.clone())
+            .expect("committed row");
+
+        let mut external_state = store.load().expect("load external state");
+        store.set_status(
+            &mut external_state,
+            &commit_id,
+            ReviewStatus::IssueFound,
+            app.deps.git.branch_name(),
+        );
+        store
+            .save(&external_state)
+            .expect("persist external status change");
+
+        let before_status = app
+            .domain
+            .commits
+            .iter()
+            .find(|row| row.info.id == commit_id)
+            .map(|row| row.status)
+            .expect("status before reload");
+        assert_ne!(before_status, ReviewStatus::IssueFound);
+
+        super::reload_commits(&mut app, true).expect("reload commits");
+
+        let after_status = app
+            .domain
+            .commits
+            .iter()
+            .find(|row| row.info.id == commit_id)
+            .map(|row| row.status)
+            .expect("status after reload");
+        assert_eq!(after_status, ReviewStatus::IssueFound);
+    }
+
+    #[test]
+    fn bootstrap_allows_multiple_instances_for_same_project() {
+        let repo = init_test_repo();
+        let store = StateStore::for_project(repo.path());
+        store
+            .save(&ReviewState::default())
+            .expect("seed persisted state to bypass onboarding");
+
+        let calls = Arc::new(RuntimePortCalls::default());
+        let runtime_ports = Arc::new(TestRuntimePorts {
+            calls: Arc::clone(&calls),
+        });
+        let ports = TestBootstrapPorts {
+            repo_root: repo.path().to_path_buf(),
+            runtime_ports,
+        };
+        let mut app_a = App::bootstrap_with(&ports).expect("bootstrap first app");
+        let mut app_b = App::bootstrap_with(&ports).expect("bootstrap second app");
+
+        let commit_id = app_a
+            .domain
+            .commits
+            .iter()
+            .find(|row| !row.is_uncommitted)
+            .map(|row| row.info.id.clone())
+            .expect("committed row");
+
+        app_a.deps.store.set_status(
+            &mut app_a.domain.review_state,
+            &commit_id,
+            ReviewStatus::IssueFound,
+            app_a.deps.git.branch_name(),
+        );
+        app_a
+            .deps
+            .store
+            .save_statuses_merged(&mut app_a.domain.review_state)
+            .expect("save status from first app");
+
+        super::reload_commits(&mut app_b, true).expect("reload second app");
+        let synced_status = app_b
+            .domain
+            .commits
+            .iter()
+            .find(|row| row.info.id == commit_id)
+            .map(|row| row.status)
+            .expect("status after sync");
+        assert_eq!(synced_status, ReviewStatus::IssueFound);
+    }
+
+    #[test]
+    fn status_action_reconciles_commit_rows_after_concurrent_override() {
+        let repo = init_test_repo();
+        let store = StateStore::for_project(repo.path());
+        store
+            .save(&ReviewState::default())
+            .expect("seed persisted state to bypass onboarding");
+
+        let calls = Arc::new(RuntimePortCalls::default());
+        let runtime_ports = Arc::new(TestRuntimePorts {
+            calls: Arc::clone(&calls),
+        });
+        let ports = TestBootstrapPorts {
+            repo_root: repo.path().to_path_buf(),
+            runtime_ports,
+        };
+        let mut app_a = App::bootstrap_with(&ports).expect("bootstrap first app");
+        let mut app_b = App::bootstrap_with(&ports).expect("bootstrap second app");
+
+        let commit_id = app_a
+            .domain
+            .commits
+            .iter()
+            .find(|row| !row.is_uncommitted)
+            .map(|row| row.info.id.clone())
+            .expect("committed row");
+
+        app_b.deps.store.set_status(
+            &mut app_b.domain.review_state,
+            &commit_id,
+            ReviewStatus::IssueFound,
+            app_b.deps.git.branch_name(),
+        );
+        app_b
+            .domain
+            .review_state
+            .statuses
+            .get_mut(&commit_id)
+            .expect("status entry")
+            .updated_at = "9999-12-31T23:59:59Z".to_owned();
+        app_b
+            .deps
+            .store
+            .save_statuses_merged(&mut app_b.domain.review_state)
+            .expect("save external status");
+
+        app_a.set_status_for_ids(&BTreeSet::from([commit_id.clone()]), ReviewStatus::Reviewed);
+        let status_after_action = app_a
+            .domain
+            .commits
+            .iter()
+            .find(|row| row.info.id == commit_id)
+            .map(|row| row.status)
+            .expect("status after action");
+        assert_eq!(status_after_action, ReviewStatus::IssueFound);
     }
 }

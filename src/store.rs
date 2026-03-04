@@ -1,12 +1,13 @@
 use std::{
+    cmp::Ordering,
+    collections::BTreeMap,
     fs,
-    fs::OpenOptions,
-    io::{ErrorKind, Write},
     path::{Path, PathBuf},
 };
 
 use anyhow::Context;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+use fs2::FileExt;
 use serde::Deserialize;
 
 use crate::atomic_write::atomic_write_text;
@@ -15,8 +16,6 @@ use crate::model::{CommitStatusEntry, ReviewState, ReviewStatus};
 pub const PROJECT_DATA_DIR: &str = ".hunkr";
 const STATE_FILE: &str = "state.json";
 const SHELL_HISTORY_FILE: &str = "shell-history.json";
-const INSTANCE_LOCK_FILE: &str = "instance.lock";
-const INSTANCE_LOCK_REL_PATH: &str = ".hunkr/instance.lock";
 
 /// Project-local persistence manager for review state.
 #[derive(Debug, Clone)]
@@ -26,20 +25,10 @@ pub struct StateStore {
     shell_history_path: PathBuf,
 }
 
-/// Process-lifetime lock guard used to block concurrent hunkr instances in one repo.
-#[derive(Debug)]
-pub struct InstanceLock {
-    path: PathBuf,
-    file: Option<fs::File>,
-}
-
-impl Drop for InstanceLock {
-    fn drop(&mut self) {
-        if let Some(file) = self.file.take() {
-            drop(file);
-        }
-        let _ = fs::remove_file(&self.path);
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiSessionMergePolicy {
+    PreserveDisk,
+    PreferMemory,
 }
 
 impl StateStore {
@@ -58,54 +47,16 @@ impl StateStore {
         &self.root
     }
 
-    pub fn instance_lock_rel_path(&self) -> &'static str {
-        INSTANCE_LOCK_REL_PATH
-    }
-
-    pub fn try_acquire_instance_lock(&self) -> anyhow::Result<Option<InstanceLock>> {
-        if !self.root.exists() {
-            return Ok(None);
-        }
-        self.acquire_instance_lock().map(Some)
-    }
-
-    pub fn acquire_instance_lock(&self) -> anyhow::Result<InstanceLock> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("failed to create {}", self.root.display()))?;
-        let lock_path = self.root.join(INSTANCE_LOCK_FILE);
-        let mut file = match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(file) => file,
-            Err(err) if err.kind() == ErrorKind::AlreadyExists => {
-                return Err(anyhow::anyhow!(
-                    "another hunkr instance is active ({INSTANCE_LOCK_REL_PATH} exists). If stale, remove {INSTANCE_LOCK_REL_PATH} and retry."
-                ));
-            }
-            Err(err) => {
-                return Err(err)
-                    .with_context(|| format!("failed to create {}", lock_path.display()));
-            }
-        };
-
-        if let Err(err) = writeln!(file, "pid={}", std::process::id()) {
-            let _ = fs::remove_file(&lock_path);
-            return Err(err).with_context(|| format!("failed to write {}", lock_path.display()));
-        }
-        if let Err(err) = file.sync_all() {
-            let _ = fs::remove_file(&lock_path);
-            return Err(err).with_context(|| format!("failed to sync {}", lock_path.display()));
-        }
-        Ok(InstanceLock {
-            path: lock_path,
-            file: Some(file),
-        })
-    }
-
     pub fn has_state_file(&self) -> bool {
         self.state_path.exists()
+    }
+
+    /// Merges persisted status updates from disk into the in-memory review state.
+    pub fn sync_statuses_from_disk(&self, state: &mut ReviewState) -> anyhow::Result<()> {
+        let persisted = self.load()?;
+        state.version = state.version.max(persisted.version);
+        state.statuses = merge_status_maps(&state.statuses, &persisted.statuses);
+        Ok(())
     }
 
     pub fn load(&self) -> anyhow::Result<ReviewState> {
@@ -117,11 +68,8 @@ impl StateStore {
             .with_context(|| format!("failed to read {}", self.state_path.display()))?;
 
         if let Ok(mut parsed_json) = serde_json::from_str::<serde_json::Value>(&raw) {
-            let migrated = migrate_resolved_status_tokens(&mut parsed_json);
+            migrate_resolved_status_tokens(&mut parsed_json);
             if let Ok(parsed) = serde_json::from_value::<ReviewState>(parsed_json) {
-                if migrated {
-                    self.save(&parsed)?;
-                }
                 return Ok(parsed);
             }
         }
@@ -152,6 +100,63 @@ impl StateStore {
         atomic_write_text(&self.state_path, &payload)
             .with_context(|| format!("failed to write {}", self.state_path.display()))?;
         Ok(())
+    }
+
+    /// Persists status changes while preserving the latest UI session state on disk.
+    pub fn save_statuses_merged(&self, state: &mut ReviewState) -> anyhow::Result<()> {
+        self.merge_and_save_state(state, UiSessionMergePolicy::PreserveDisk)
+    }
+
+    /// Persists the full review state while merging status updates from disk.
+    pub fn save_state_merged(&self, state: &mut ReviewState) -> anyhow::Result<()> {
+        self.merge_and_save_state(state, UiSessionMergePolicy::PreferMemory)
+    }
+
+    fn merge_and_save_state(
+        &self,
+        state: &mut ReviewState,
+        ui_session_policy: UiSessionMergePolicy,
+    ) -> anyhow::Result<()> {
+        let merged = self.with_state_write_lock(|| {
+            let persisted = self.load()?;
+            let merged = ReviewState {
+                version: persisted.version.max(state.version),
+                statuses: merge_status_maps(&persisted.statuses, &state.statuses),
+                ui_session: match ui_session_policy {
+                    UiSessionMergePolicy::PreserveDisk => persisted.ui_session,
+                    UiSessionMergePolicy::PreferMemory => state.ui_session.clone(),
+                },
+            };
+            self.save(&merged)?;
+            Ok(merged)
+        })?;
+        state.version = merged.version;
+        state.statuses = merged.statuses;
+        Ok(())
+    }
+
+    fn with_state_write_lock<T>(
+        &self,
+        operation: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("failed to create {}", self.root.display()))?;
+        let lock_handle = fs::File::open(&self.root)
+            .with_context(|| format!("failed to open {}", self.root.display()))?;
+        lock_handle
+            .lock_exclusive()
+            .with_context(|| format!("failed to lock {}", self.root.display()))?;
+
+        let operation_result = operation();
+        let unlock_result = lock_handle
+            .unlock()
+            .with_context(|| format!("failed to unlock {}", self.root.display()));
+        match (operation_result, unlock_result) {
+            (Ok(value), Ok(())) => Ok(value),
+            (Err(err), Ok(())) => Err(err),
+            (Ok(_), Err(unlock_err)) => Err(unlock_err),
+            (Err(err), Err(unlock_err)) => Err(err.context(unlock_err)),
+        }
     }
 
     pub fn load_shell_history(&self) -> anyhow::Result<Vec<String>> {
@@ -269,6 +274,58 @@ fn migrate_resolved_status_tokens(value: &mut serde_json::Value) -> bool {
     migrated
 }
 
+fn merge_status_maps(
+    left: &BTreeMap<String, CommitStatusEntry>,
+    right: &BTreeMap<String, CommitStatusEntry>,
+) -> BTreeMap<String, CommitStatusEntry> {
+    let mut merged = left.clone();
+    for (commit_id, candidate) in right {
+        match merged.get(commit_id) {
+            Some(current) if !candidate_is_newer(candidate, current) => {}
+            _ => {
+                merged.insert(commit_id.clone(), candidate.clone());
+            }
+        }
+    }
+    merged
+}
+
+fn candidate_is_newer(candidate: &CommitStatusEntry, current: &CommitStatusEntry) -> bool {
+    match compare_updated_at(candidate, current) {
+        Ordering::Greater => true,
+        Ordering::Less => false,
+        Ordering::Equal => {
+            (
+                candidate.updated_at.as_str(),
+                candidate.status.as_str(),
+                candidate.branch.as_str(),
+            ) > (
+                current.updated_at.as_str(),
+                current.status.as_str(),
+                current.branch.as_str(),
+            )
+        }
+    }
+}
+
+fn compare_updated_at(left: &CommitStatusEntry, right: &CommitStatusEntry) -> Ordering {
+    match (
+        parse_rfc3339_utc(&left.updated_at),
+        parse_rfc3339_utc(&right.updated_at),
+    ) {
+        (Some(left_ts), Some(right_ts)) => left_ts.cmp(&right_ts),
+        (Some(_), None) => Ordering::Greater,
+        (None, Some(_)) => Ordering::Less,
+        (None, None) => left.updated_at.cmp(&right.updated_at),
+    }
+}
+
+fn parse_rfc3339_utc(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|parsed| parsed.with_timezone(&Utc))
+}
+
 #[derive(Debug, Deserialize)]
 struct LegacyApprovalEntry {
     branch: String,
@@ -277,7 +334,7 @@ struct LegacyApprovalEntry {
 
 #[derive(Debug, Deserialize)]
 struct LegacyReviewState {
-    approvals: std::collections::BTreeMap<String, LegacyApprovalEntry>,
+    approvals: BTreeMap<String, LegacyApprovalEntry>,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]

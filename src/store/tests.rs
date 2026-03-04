@@ -1,11 +1,14 @@
 //! Unit tests for review state persistence and legacy-upgrade behavior.
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Barrier};
+use std::thread;
 
 use tempfile::tempdir;
 
 use super::*;
 use crate::model::{
-    UiSessionCommitStatusFilter, UiSessionDiffPosition, UiSessionFocusPane, UiSessionState,
+    CommitStatusEntry, UiSessionCommitStatusFilter, UiSessionDiffPosition, UiSessionFocusPane,
+    UiSessionState,
 };
 
 #[test]
@@ -119,10 +122,6 @@ fn load_migrates_resolved_tokens_to_reviewed() {
         loaded.ui_session.commit_status_filter,
         Some(UiSessionCommitStatusFilter::Reviewed)
     );
-
-    let persisted = fs::read_to_string(store.state_path.clone()).expect("read migrated state");
-    assert!(!persisted.contains("RESOLVED"));
-    assert!(!persisted.contains("REVIEWED_OR_RESOLVED"));
 }
 
 #[test]
@@ -222,29 +221,195 @@ fn load_ignores_legacy_ui_session_theme_mode_field() {
 }
 
 #[test]
-fn acquire_instance_lock_creates_and_releases_lock_file() {
+fn save_statuses_merged_preserves_concurrent_status_updates() {
     let tmp = tempdir().expect("tempdir");
-    let project_root = tmp.path().join("repo");
-    let store = StateStore::for_project(&project_root);
-    let lock_path = project_root.join(".hunkr").join("instance.lock");
+    let store_a = StateStore::for_project(tmp.path());
+    let store_b = StateStore::for_project(tmp.path());
+    let mut state_a = ReviewState::default();
+    let mut state_b = ReviewState::default();
 
-    let lock = store.acquire_instance_lock().expect("acquire lock");
-    assert!(lock_path.exists());
-    drop(lock);
-    assert!(!lock_path.exists());
+    state_a.statuses.insert(
+        "commit-a".to_owned(),
+        status_entry(ReviewStatus::Reviewed, "main", "2026-01-01T00:00:00Z"),
+    );
+    store_a
+        .save_statuses_merged(&mut state_a)
+        .expect("save state a");
+
+    state_b.statuses.insert(
+        "commit-b".to_owned(),
+        status_entry(ReviewStatus::IssueFound, "main", "2026-01-01T00:00:01Z"),
+    );
+    store_b
+        .save_statuses_merged(&mut state_b)
+        .expect("save state b");
+
+    let loaded = store_a.load().expect("load merged state");
+    assert_eq!(loaded.statuses.len(), 2);
+    assert_eq!(
+        loaded.statuses.get("commit-a").expect("commit-a").status,
+        ReviewStatus::Reviewed
+    );
+    assert_eq!(
+        loaded.statuses.get("commit-b").expect("commit-b").status,
+        ReviewStatus::IssueFound
+    );
 }
 
 #[test]
-fn acquire_instance_lock_hard_stops_when_lock_file_exists() {
+fn save_statuses_merged_preserves_disk_ui_session() {
     let tmp = tempdir().expect("tempdir");
-    let project_root = tmp.path().join("repo");
-    let store = StateStore::for_project(&project_root);
+    let store = StateStore::for_project(tmp.path());
+    let disk_state = ReviewState {
+        version: 2,
+        statuses: BTreeMap::new(),
+        ui_session: UiSessionState {
+            selected_commit_ids: BTreeSet::from(["disk-selection".to_owned()]),
+            ..UiSessionState::default()
+        },
+    };
+    store.save(&disk_state).expect("seed disk state");
 
-    let lock = store.acquire_instance_lock().expect("acquire first lock");
-    let err = store
-        .acquire_instance_lock()
-        .expect_err("second lock should fail");
-    let message = err.to_string();
-    assert!(message.contains(".hunkr/instance.lock"));
-    drop(lock);
+    let mut in_memory = ReviewState {
+        version: 2,
+        statuses: BTreeMap::from([(
+            "commit-a".to_owned(),
+            status_entry(ReviewStatus::Reviewed, "main", "2026-01-01T00:00:00Z"),
+        )]),
+        ui_session: UiSessionState {
+            selected_commit_ids: BTreeSet::from(["local-selection".to_owned()]),
+            ..UiSessionState::default()
+        },
+    };
+
+    store
+        .save_statuses_merged(&mut in_memory)
+        .expect("save statuses");
+
+    let loaded = store.load().expect("load merged state");
+    assert_eq!(
+        loaded.ui_session.selected_commit_ids,
+        BTreeSet::from(["disk-selection".to_owned()])
+    );
+}
+
+#[test]
+fn save_state_merged_preserves_local_ui_session_and_external_statuses() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+    let disk_state = ReviewState {
+        version: 2,
+        statuses: BTreeMap::from([(
+            "commit-disk".to_owned(),
+            status_entry(ReviewStatus::IssueFound, "main", "2026-01-01T00:00:01Z"),
+        )]),
+        ui_session: UiSessionState {
+            selected_commit_ids: BTreeSet::from(["disk-selection".to_owned()]),
+            ..UiSessionState::default()
+        },
+    };
+    store.save(&disk_state).expect("seed disk state");
+
+    let mut in_memory = ReviewState {
+        version: 2,
+        statuses: BTreeMap::from([(
+            "commit-local".to_owned(),
+            status_entry(ReviewStatus::Reviewed, "main", "2026-01-01T00:00:02Z"),
+        )]),
+        ui_session: UiSessionState {
+            selected_commit_ids: BTreeSet::from(["local-selection".to_owned()]),
+            ..UiSessionState::default()
+        },
+    };
+
+    store
+        .save_state_merged(&mut in_memory)
+        .expect("save merged state");
+
+    let loaded = store.load().expect("load merged state");
+    assert_eq!(loaded.statuses.len(), 2);
+    assert_eq!(
+        loaded.ui_session.selected_commit_ids,
+        BTreeSet::from(["local-selection".to_owned()])
+    );
+}
+
+#[test]
+fn sync_statuses_from_disk_prefers_newer_timestamp_per_commit() {
+    let tmp = tempdir().expect("tempdir");
+    let store = StateStore::for_project(tmp.path());
+    let disk_state = ReviewState {
+        version: 2,
+        statuses: BTreeMap::from([(
+            "commit-1".to_owned(),
+            status_entry(ReviewStatus::IssueFound, "main", "2026-01-01T00:00:02Z"),
+        )]),
+        ui_session: UiSessionState::default(),
+    };
+    store.save(&disk_state).expect("seed disk state");
+
+    let mut in_memory = ReviewState {
+        version: 2,
+        statuses: BTreeMap::from([(
+            "commit-1".to_owned(),
+            status_entry(ReviewStatus::Reviewed, "main", "2026-01-01T00:00:01Z"),
+        )]),
+        ui_session: UiSessionState::default(),
+    };
+    store
+        .sync_statuses_from_disk(&mut in_memory)
+        .expect("sync statuses");
+
+    assert_eq!(
+        in_memory.statuses.get("commit-1").expect("commit-1").status,
+        ReviewStatus::IssueFound
+    );
+}
+
+#[test]
+fn concurrent_save_statuses_merged_keeps_all_commit_updates() {
+    let tmp = tempdir().expect("tempdir");
+    let project_root = tmp.path().to_path_buf();
+    let workers = 12usize;
+    let barrier = Arc::new(Barrier::new(workers));
+    let mut handles = Vec::new();
+
+    for idx in 0..workers {
+        let barrier = Arc::clone(&barrier);
+        let project_root = project_root.clone();
+        handles.push(thread::spawn(move || {
+            let store = StateStore::for_project(&project_root);
+            let mut state = ReviewState::default();
+            state.statuses.insert(
+                format!("commit-{idx}"),
+                status_entry(
+                    ReviewStatus::Reviewed,
+                    "main",
+                    &format!("2026-01-01T00:00:{idx:02}Z"),
+                ),
+            );
+
+            barrier.wait();
+            store
+                .save_statuses_merged(&mut state)
+                .expect("save merged status");
+        }));
+    }
+
+    for handle in handles {
+        handle.join().expect("join writer");
+    }
+
+    let loaded = StateStore::for_project(tmp.path())
+        .load()
+        .expect("load merged state");
+    assert_eq!(loaded.statuses.len(), workers);
+}
+
+fn status_entry(status: ReviewStatus, branch: &str, updated_at: &str) -> CommitStatusEntry {
+    CommitStatusEntry {
+        status,
+        branch: branch.to_owned(),
+        updated_at: updated_at.to_owned(),
+    }
 }

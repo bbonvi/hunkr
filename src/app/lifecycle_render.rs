@@ -9,7 +9,6 @@ use crate::config::{AppConfig, config_path};
 struct BootstrapDeps {
     git: GitService,
     store: StateStore,
-    instance_lock: Option<InstanceLock>,
     clock: Arc<dyn AppClock>,
     runtime_ports: Arc<dyn AppRuntimePorts>,
     review_state: ReviewState,
@@ -25,13 +24,11 @@ impl App {
         let git = ports.open_current_git()?;
         let config = ports.load_config()?;
         let store = ports.state_store_for_repo(git.root());
-        let instance_lock = store.try_acquire_instance_lock()?;
         let first_open = !store.has_state_file();
         let review_state = store.load()?;
         let deps = BootstrapDeps {
             git,
             store,
-            instance_lock,
             clock: ports.clock(),
             runtime_ports: ports.runtime_ports(),
             review_state,
@@ -77,7 +74,6 @@ impl App {
             deps: AppDependencies {
                 git: deps.git,
                 store: deps.store,
-                instance_lock: deps.instance_lock,
                 clock: deps.clock,
                 runtime_ports: deps.runtime_ports,
             },
@@ -203,7 +199,9 @@ impl App {
                 self.deps.git.branch_name(),
             );
         }
-        self.deps.store.save(&self.domain.review_state)?;
+        self.deps
+            .store
+            .save_statuses_merged(&mut self.domain.review_state)?;
         Ok(())
     }
 
@@ -278,16 +276,6 @@ impl App {
                         self.deps.store.root_dir().display()
                     );
                     return;
-                }
-                if self.deps.instance_lock.is_none() {
-                    match self.deps.store.acquire_instance_lock() {
-                        Ok(lock) => self.deps.instance_lock = Some(lock),
-                        Err(err) => {
-                            self.runtime.status = format!("setup failed: {err:#}");
-                            self.runtime.should_quit = true;
-                            return;
-                        }
-                    }
                 }
                 self.runtime.onboarding_step = Some(OnboardingStep::GitignoreChoice);
                 self.runtime.status.clear();

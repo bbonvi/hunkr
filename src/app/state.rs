@@ -97,7 +97,9 @@ impl App {
         }
         self.flush_pending_selection_rebuild();
         self.snapshot_ui_session_state();
-        self.deps.store.save(&self.domain.review_state)
+        self.deps
+            .store
+            .save_state_merged(&mut self.domain.review_state)
     }
 
     pub(super) fn rebuild_selection_dependent_views(&mut self) -> anyhow::Result<()> {
