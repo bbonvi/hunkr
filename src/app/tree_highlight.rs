@@ -4,7 +4,8 @@ use std::path::Path;
 
 const JS_FALLBACK_TOKENS: &[&str] = &["javascript", "js"];
 const TS_FALLBACK_TOKENS: &[&str] = &["typescript", "tsx", "jsx", "javascript", "js"];
-const TEMPLATE_FALLBACK_TOKENS: &[&str] = &["vue", "svelte", "astro", "html", "xml", "js"];
+const COMPONENT_TEMPLATE_FALLBACK_TOKENS: &[&str] =
+    &["vue", "svelte", "astro", "javascript", "js", "html", "xml"];
 const MDX_FALLBACK_TOKENS: &[&str] = &["mdx", "markdown", "md", "jsx", "js"];
 const JSON_FALLBACK_TOKENS: &[&str] = &["json", "js"];
 const YAML_FALLBACK_TOKENS: &[&str] = &["yaml", "yml"];
@@ -310,7 +311,7 @@ fn extension_alias_tokens(ext: &str) -> Option<&'static [&'static str]> {
     Some(match ext {
         "ts" | "tsx" | "jsx" | "mts" | "cts" => TS_FALLBACK_TOKENS,
         "mjs" | "cjs" => JS_FALLBACK_TOKENS,
-        "vue" | "svelte" | "astro" => TEMPLATE_FALLBACK_TOKENS,
+        "vue" | "svelte" | "astro" => COMPONENT_TEMPLATE_FALLBACK_TOKENS,
         "mdx" => MDX_FALLBACK_TOKENS,
         "jsonc" | "json5" => JSON_FALLBACK_TOKENS,
         "yaml" => YAML_FALLBACK_TOKENS,
@@ -345,20 +346,20 @@ mod tests {
     }
 
     #[test]
-    fn syntax_for_missing_vue_path_uses_template_fallback() {
+    fn syntax_for_missing_vue_path_prefers_javascript_fallback() {
         let highlighter = DiffSyntaxHighlighter::new();
         let expected = highlighter
-            .syntax_for_alias_tokens(super::TEMPLATE_FALLBACK_TOKENS)
+            .syntax_for_alias_tokens(super::COMPONENT_TEMPLATE_FALLBACK_TOKENS)
             .expect("template fallback syntax");
         let actual = highlighter.syntax_for_path("missing/path/App.vue");
         assert_eq!(actual.name, expected.name);
     }
 
     #[test]
-    fn syntax_for_missing_svelte_path_uses_template_fallback() {
+    fn syntax_for_missing_svelte_path_prefers_javascript_fallback() {
         let highlighter = DiffSyntaxHighlighter::new();
         let expected = highlighter
-            .syntax_for_alias_tokens(super::TEMPLATE_FALLBACK_TOKENS)
+            .syntax_for_alias_tokens(super::COMPONENT_TEMPLATE_FALLBACK_TOKENS)
             .expect("template fallback syntax");
         let actual = highlighter.syntax_for_path("missing/path/Component.svelte");
         assert_eq!(actual.name, expected.name);
