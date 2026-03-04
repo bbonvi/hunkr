@@ -14,7 +14,7 @@ nerd_fonts: true
 # history_limit: number of commits loaded for review history (must be >= 1).
 history_limit: 400
 # auto_refresh_every_secs: refresh commit+diff data cadence (must be >= 1).
-auto_refresh_every_secs: 4
+auto_refresh_every_secs: 2
 # relative_time_redraw_every_secs: age-label redraw cadence when auto-refresh is not sooner (must be >= 1).
 relative_time_redraw_every_secs: 30
 # theme_reload_poll_every_ms: how often to check theme.yaml for changes (must be >= 1).

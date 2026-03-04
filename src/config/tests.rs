@@ -12,7 +12,7 @@ fn config_defaults_when_file_missing() {
     assert_eq!(loaded.list_wheel_coalesce_ms, 28);
     assert!(loaded.nerd_fonts);
     assert_eq!(loaded.history_limit, 400);
-    assert_eq!(loaded.auto_refresh_every_secs, 4);
+    assert_eq!(loaded.auto_refresh_every_secs, 2);
     assert_eq!(loaded.relative_time_redraw_every_secs, 30);
     assert_eq!(loaded.theme_reload_poll_every_ms, 250);
     assert_eq!(loaded.selection_rebuild_debounce_ms, 120);
@@ -77,7 +77,7 @@ fn config_clamps_zero_runtime_tuning_values() {
 
     let loaded = AppConfig::load_from_path(&path).expect("load");
     assert_eq!(loaded.history_limit, 400);
-    assert_eq!(loaded.auto_refresh_every_secs, 4);
+    assert_eq!(loaded.auto_refresh_every_secs, 2);
     assert_eq!(loaded.relative_time_redraw_every_secs, 30);
     assert_eq!(loaded.theme_reload_poll_every_ms, 250);
     assert_eq!(loaded.selection_rebuild_debounce_ms, 120);
