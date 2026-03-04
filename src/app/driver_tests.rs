@@ -723,10 +723,12 @@ fn sticky_hunk_header_switch_keeps_hunk_sticky_row_stable() {
     let sticky_hunk_at_second = sticky_at_second
         .iter()
         .copied()
+        .rev()
         .find(|idx| is_hunk_header_line(&app.domain.rendered_diff[*idx]));
     let sticky_hunk_after_second = sticky_after_second
         .iter()
         .copied()
+        .rev()
         .find(|idx| is_hunk_header_line(&app.domain.rendered_diff[*idx]));
     assert_eq!(
         sticky_hunk_at_second,
@@ -736,7 +738,7 @@ fn sticky_hunk_header_switch_keeps_hunk_sticky_row_stable() {
     assert_eq!(
         sticky_hunk_after_second,
         Some(second_hunk),
-        "sticky hunk should switch once the new hunk body scrolls under the top edge",
+        "latest sticky hunk should switch once the new hunk body scrolls under the top edge",
     );
 }
 
@@ -790,7 +792,7 @@ fn sticky_file_header_switch_keeps_file_sticky_row_stable() {
 }
 
 #[test]
-fn sticky_file_boundary_does_not_carry_previous_hunk_header() {
+fn sticky_file_boundary_pushes_previous_hunk_until_next_hunk_enters_stack() {
     let (_repo, app) = bootstrap_two_file_boundary_fixture();
     let second_file = app
         .domain
@@ -799,6 +801,18 @@ fn sticky_file_boundary_does_not_carry_previous_hunk_header() {
         .enumerate()
         .find_map(|(idx, line)| line.raw_text.starts_with("==== file 2/").then_some(idx))
         .expect("second file header");
+    let hunk_headers = app
+        .domain
+        .rendered_diff
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| is_hunk_header_line(line).then_some(idx))
+        .collect::<Vec<_>>();
+    assert!(
+        hunk_headers.len() >= 2,
+        "fixture should produce at least two hunk headers",
+    );
+    let second_hunk = hunk_headers[1];
 
     let viewport_rows = app
         .ui
@@ -808,19 +822,33 @@ fn sticky_file_boundary_does_not_carry_previous_hunk_header() {
         .height
         .saturating_sub(2)
         .max(1) as usize;
-    let sticky = app.sticky_banner_indexes_for_scroll(second_file, viewport_rows);
+    let sticky_at_file_boundary = app.sticky_banner_indexes_for_scroll(second_file, viewport_rows);
+    let sticky_after_second_hunk =
+        app.sticky_banner_indexes_for_scroll(second_hunk.saturating_add(1), viewport_rows);
 
+    let latest_hunk_at_boundary = sticky_at_file_boundary
+        .iter()
+        .copied()
+        .rev()
+        .find(|idx| is_hunk_header_line(&app.domain.rendered_diff[*idx]));
+    let latest_hunk_after_second = sticky_after_second_hunk
+        .iter()
+        .copied()
+        .rev()
+        .find(|idx| is_hunk_header_line(&app.domain.rendered_diff[*idx]));
     assert!(
-        !sticky
-            .iter()
-            .copied()
-            .any(|idx| is_hunk_header_line(&app.domain.rendered_diff[idx])),
-        "file-header boundary should not keep previous-file hunk sticky row",
+        latest_hunk_at_boundary.is_some_and(|idx| idx < second_file),
+        "at a file boundary, sticky stack should keep the previous hunk until a newer one enters",
+    );
+    assert_eq!(
+        latest_hunk_after_second,
+        Some(second_hunk),
+        "once the next file hunk crosses the top edge it should become the latest sticky hunk",
     );
 }
 
 #[test]
-fn sticky_commit_header_switch_is_scoped_to_current_file() {
+fn sticky_commit_header_pushes_previous_commit_until_next_commit_enters_stack() {
     let (_repo, app) = bootstrap_two_file_boundary_fixture();
 
     let commit_headers = app
@@ -853,13 +881,13 @@ fn sticky_commit_header_switch_is_scoped_to_current_file() {
     let sticky_after_second =
         app.sticky_banner_indexes_for_scroll(second_commit + 1, viewport_rows);
 
-    let sticky_commit_at_second = sticky_at_second.iter().copied().find(|idx| {
+    let sticky_commit_at_second = sticky_at_second.iter().copied().rev().find(|idx| {
         app.domain.rendered_diff[*idx]
             .anchor
             .as_ref()
             .is_some_and(is_commit_line_anchor)
     });
-    let sticky_commit_after_second = sticky_after_second.iter().copied().find(|idx| {
+    let sticky_commit_after_second = sticky_after_second.iter().copied().rev().find(|idx| {
         app.domain.rendered_diff[*idx]
             .anchor
             .as_ref()
@@ -867,14 +895,79 @@ fn sticky_commit_header_switch_is_scoped_to_current_file() {
     });
     assert_eq!(
         sticky_commit_at_second,
-        None,
-        "commit sticky should not leak from previous file into next file header boundary",
+        Some(commit_headers[0]),
+        "at the incoming commit boundary, previous commit should remain until replacement reaches sticky stack",
     );
     assert_eq!(
         sticky_commit_after_second,
         Some(second_commit),
-        "commit sticky should appear after scrolling past current-file commit banner",
+        "latest sticky commit should switch after scrolling past next commit banner",
     );
+}
+
+#[test]
+fn sticky_banner_stack_is_bounded_to_three_rows() {
+    let (_repo, app) = bootstrap_two_file_boundary_fixture();
+    let viewport_rows = app
+        .ui
+        .diff_ui
+        .pane_rects
+        .diff
+        .height
+        .saturating_sub(2)
+        .max(1) as usize;
+
+    for scroll in 0..app.domain.rendered_diff.len() {
+        let sticky = app.sticky_banner_indexes_for_scroll(scroll, viewport_rows);
+        assert!(
+            sticky.len() <= 3,
+            "sticky banner stack must be capped to three rows at scroll={scroll}",
+        );
+        assert!(
+            sticky.windows(2).all(|pair| pair[0] < pair[1]),
+            "sticky indexes should remain in draw order at scroll={scroll}",
+        );
+        assert!(
+            sticky.iter().all(|idx| {
+                let line = &app.domain.rendered_diff[*idx];
+                line.raw_text.starts_with("==== file ")
+                    || line.anchor.as_ref().is_some_and(is_commit_line_anchor)
+                    || is_hunk_header_line(line)
+            }),
+            "sticky rows should only include banner lines at scroll={scroll}",
+        );
+        if scroll > 0 {
+            assert!(
+                sticky.iter().all(|idx| *idx < scroll),
+                "sticky rows should only include lines above the viewport top at scroll={scroll}",
+            );
+        }
+    }
+}
+
+#[test]
+fn sticky_banner_stack_moves_at_most_one_banner_per_scroll_step() {
+    let (_repo, app) = bootstrap_two_file_boundary_fixture();
+    let viewport_rows = app
+        .ui
+        .diff_ui
+        .pane_rects
+        .diff
+        .height
+        .saturating_sub(2)
+        .max(1) as usize;
+
+    let mut prior = app.sticky_banner_indexes_for_scroll(0, viewport_rows);
+    for scroll in 1..app.domain.rendered_diff.len() {
+        let current = app.sticky_banner_indexes_for_scroll(scroll, viewport_rows);
+        let shared = prior.iter().filter(|idx| current.contains(idx)).count();
+        let min_shared = prior.len().saturating_sub(1).min(current.len());
+        assert!(
+            shared >= min_shared,
+            "adjacent scroll positions should change sticky stack by at most one row (scroll={scroll})",
+        );
+        prior = current;
+    }
 }
 
 #[test]
@@ -896,6 +989,48 @@ fn diff_viewport_scroll_moves_exactly_requested_delta_without_scrolloff_correcti
         app.domain.diff_position.scroll,
         expected_scroll,
         "viewport scroll should move by exactly requested delta even with non-zero scrolloff",
+    );
+}
+
+#[test]
+fn diff_viewport_scroll_applies_multi_line_delta_stepwise() {
+    let (repo, mut app) = bootstrap_two_file_boundary_fixture();
+    let mut stepwise_app = bootstrap_driver(repo.path()).into_app();
+    draw_app(&mut app, 120, 10);
+    draw_app(&mut stepwise_app, 120, 10);
+
+    let second_file = app
+        .domain
+        .rendered_diff
+        .iter()
+        .enumerate()
+        .find_map(|(idx, line)| line.raw_text.starts_with("==== file 2/").then_some(idx))
+        .expect("second file header");
+    let start_scroll = second_file.saturating_sub(1).min(app.max_diff_scroll());
+    app.set_diff_scroll(start_scroll);
+    app.domain.diff_position.cursor = start_scroll
+        .saturating_add(app.visible_diff_rows_for_scroll(start_scroll).saturating_sub(1))
+        .min(app.domain.rendered_diff.len().saturating_sub(1));
+    stepwise_app.set_diff_scroll(start_scroll);
+    stepwise_app.domain.diff_position.cursor = start_scroll
+        .saturating_add(
+            stepwise_app
+                .visible_diff_rows_for_scroll(start_scroll)
+                .saturating_sub(1),
+        )
+        .min(stepwise_app.domain.rendered_diff.len().saturating_sub(1));
+
+    stepwise_app.scroll_diff_viewport(1);
+    stepwise_app.scroll_diff_viewport(1);
+
+    app.scroll_diff_viewport(2);
+    assert_eq!(
+        app.domain.diff_position.scroll, stepwise_app.domain.diff_position.scroll,
+        "multi-line viewport scroll should be equivalent to two single-line steps"
+    );
+    assert_eq!(
+        app.domain.diff_position.cursor, stepwise_app.domain.diff_position.cursor,
+        "cursor projection should match stepwise scrolling semantics"
     );
 }
 
