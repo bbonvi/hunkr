@@ -3,19 +3,27 @@ use crate::app::*;
 
 impl App {
     pub(super) fn scroll_diff_viewport(&mut self, delta: isize) {
-        if self.domain.rendered_diff.is_empty() {
+        if self.domain.rendered_diff.is_empty() || delta == 0 {
             return;
         }
 
         let max_idx = self.domain.rendered_diff.len() - 1;
-        let next = scrolled_diff_position_preserving_offset(
-            self.domain.diff_position,
-            delta,
-            self.max_diff_scroll(),
-            max_idx,
-        );
-        self.set_diff_scroll(next.scroll);
-        self.domain.diff_position.cursor = next.cursor.min(max_idx);
+        let step = if delta.is_positive() { 1 } else { -1 };
+        for _ in 0..delta.saturating_abs() as usize {
+            let next = scrolled_diff_position_preserving_offset(
+                self.domain.diff_position,
+                step,
+                self.max_diff_scroll(),
+                max_idx,
+            );
+            if next.scroll == self.domain.diff_position.scroll
+                && next.cursor == self.domain.diff_position.cursor
+            {
+                break;
+            }
+            self.set_diff_scroll(next.scroll);
+            self.domain.diff_position.cursor = next.cursor.min(max_idx);
+        }
         self.sync_diff_visual_bounds();
         self.sync_diff_block_cursor_to_cursor_line();
         self.sync_selected_file_to_cursor();
@@ -490,62 +498,39 @@ impl App {
         self.runtime.status = format!("hunk {}", idx.saturating_add(1));
     }
 
-    pub(super) fn sticky_commit_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
-        let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
-        let file_range_idx = self.file_range_index_for_line(lookup)?;
-        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
-        (file_range.start..=lookup).rev().find(|&idx| {
-            self.domain.rendered_diff[idx]
-                .anchor
-                .as_ref()
-                .is_some_and(is_commit_line_anchor)
-        })
-    }
-
-    pub(super) fn sticky_file_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
-        let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
-        let file_range_idx = self.file_range_index_for_line(lookup)?;
-        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
-        Some(file_range.start)
-    }
-
-    pub(super) fn sticky_hunk_header_index_for_scroll(&self, scroll: usize) -> Option<usize> {
-        let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
-        let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
-        if self
-            .domain
-            .rendered_diff
-            .get(top)
-            .is_some_and(|line| line.raw_text.starts_with("==== file "))
-        {
-            return None;
-        }
-        let file_range_idx = self.file_range_index_for_line(lookup)?;
-        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
-        (file_range.start..=lookup)
-            .rev()
-            .find(|&idx| is_hunk_header_line(&self.domain.rendered_diff[idx]))
-    }
-
-    fn sticky_lookup_line_for_scroll(&self, scroll: usize) -> Option<usize> {
-        if scroll == 0 || self.domain.rendered_diff.is_empty() {
-            return None;
-        }
-        let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
-        top.checked_sub(1)
-    }
-
     pub(super) fn sticky_banner_indexes_for_scroll(
         &self,
         scroll: usize,
         viewport_rows: usize,
     ) -> Vec<usize> {
-        compose_sticky_banner_indexes(
-            self.sticky_file_banner_index_for_scroll(scroll),
-            self.sticky_commit_banner_index_for_scroll(scroll),
-            self.sticky_hunk_header_index_for_scroll(scroll),
-            viewport_rows,
-        )
+        if scroll == 0 || self.domain.rendered_diff.is_empty() {
+            return Vec::new();
+        }
+
+        let max_sticky = viewport_rows.saturating_sub(1).min(3);
+        if max_sticky == 0 {
+            return Vec::new();
+        }
+
+        let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
+        let Some(lookup) = top.checked_sub(1) else {
+            return Vec::new();
+        };
+        let mut sticky_rev = Vec::with_capacity(max_sticky);
+        for idx in (0..=lookup).rev() {
+            let line = &self.domain.rendered_diff[idx];
+            let is_banner = line.raw_text.starts_with("==== file ")
+                || line.anchor.as_ref().is_some_and(is_commit_line_anchor)
+                || is_hunk_header_line(line);
+            if is_banner {
+                sticky_rev.push(idx);
+                if sticky_rev.len() >= max_sticky {
+                    break;
+                }
+            }
+        }
+        sticky_rev.reverse();
+        sticky_rev
     }
 
     pub(super) fn visible_diff_rows_for_scroll(&self, scroll: usize) -> usize {
