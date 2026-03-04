@@ -12,14 +12,12 @@ use anyhow::{Context, anyhow};
 use chrono::Utc;
 use git2::{BranchType, DiffOptions, ErrorCode, Oid, Repository, Sort};
 
+use crate::config::{DEFAULT_DIFF_CONTEXT_LINES, DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES};
 use crate::model::{
     AggregatedDiff, CommitDecoration, CommitDecorationKind, CommitInfo, DiffLineKind,
     FileChangeKind, FileChangeSummary, FilePatch, Hunk, HunkLine, UNCOMMITTED_COMMIT_ID,
     UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
 };
-
-const DEFAULT_DIFF_CONTEXT_LINES: u32 = 3;
-const DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES: u32 = 15;
 
 /// Read-only git access tailored for multi-commit review workflows.
 pub struct GitService {

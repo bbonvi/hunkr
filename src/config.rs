@@ -17,8 +17,8 @@ const DEFAULT_THEME_RELOAD_POLL_EVERY_MS: u64 = 1_000;
 const DEFAULT_SELECTION_REBUILD_DEBOUNCE_MS: u64 = 120;
 const DEFAULT_TERMINAL_CLEAR_EVERY_SECS: u64 = 120;
 const DEFAULT_DIFF_CURSOR_SCROLL_OFF_LINES: usize = 3;
-const DEFAULT_DIFF_CONTEXT_LINES: u32 = 3;
-const DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES: u32 = 15;
+pub(crate) const DEFAULT_DIFF_CONTEXT_LINES: u32 = 3;
+pub(crate) const DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES: u32 = 15;
 
 /// Startup UI theme name from config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
