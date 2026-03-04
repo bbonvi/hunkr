@@ -6,19 +6,30 @@ const JS_FALLBACK_TOKENS: &[&str] = &["javascript", "js"];
 const TS_FALLBACK_TOKENS: &[&str] = &["typescript", "tsx", "jsx", "javascript", "js"];
 const COMPONENT_TEMPLATE_FALLBACK_TOKENS: &[&str] =
     &["vue", "svelte", "astro", "javascript", "js", "html", "xml"];
+const HTML_TEMPLATE_FALLBACK_TOKENS: &[&str] = &["html", "xml", "javascript", "js"];
+const CSS_FALLBACK_TOKENS: &[&str] = &["css", "scss", "sass", "less"];
 const MDX_FALLBACK_TOKENS: &[&str] = &["mdx", "markdown", "md", "jsx", "js"];
+const MARKDOWN_FALLBACK_TOKENS: &[&str] = &["markdown", "md", "txt"];
 const JSON_FALLBACK_TOKENS: &[&str] = &["json", "js"];
 const YAML_FALLBACK_TOKENS: &[&str] = &["yaml", "yml"];
 const GRAPHQL_FALLBACK_TOKENS: &[&str] = &["graphql", "gql", "js"];
 const TERRAFORM_FALLBACK_TOKENS: &[&str] = &["terraform", "hcl", "tf", "cfg", "ini"];
+const SQL_FALLBACK_TOKENS: &[&str] = &["sql", "pgsql", "plsql"];
+const PRISMA_FALLBACK_TOKENS: &[&str] = &["prisma", "sql", "js"];
+const PROTO_FALLBACK_TOKENS: &[&str] = &["proto", "protobuf", "conf", "txt"];
 const DOCKER_FALLBACK_TOKENS: &[&str] = &["dockerfile", "docker", "sh", "shell", "bash"];
 const MAKE_FALLBACK_TOKENS: &[&str] = &["makefile", "make", "mk", "sh"];
 const SHELL_FALLBACK_TOKENS: &[&str] = &["bash", "zsh", "sh", "shell"];
+const POWERSHELL_FALLBACK_TOKENS: &[&str] = &["powershell", "ps1", "shell", "bash"];
+const JVM_SCRIPT_FALLBACK_TOKENS: &[&str] = &["kotlin", "groovy", "java"];
+const INI_FALLBACK_TOKENS: &[&str] = &["ini", "conf", "cfg", "txt"];
 const RUBY_FALLBACK_TOKENS: &[&str] = &["ruby", "rb"];
 const IGNORE_FALLBACK_TOKENS: &[&str] = &["gitignore", "ignore", "conf", "cfg", "txt"];
 const ENV_FALLBACK_TOKENS: &[&str] = &["dotenv", "sh", "bash", "conf", "ini"];
+const TOOLING_CONFIG_FALLBACK_TOKENS: &[&str] = &["json", "yaml", "yml", "javascript", "js"];
 const CMAKE_FALLBACK_TOKENS: &[&str] = &["cmake", "make"];
 const JENKINS_FALLBACK_TOKENS: &[&str] = &["groovy", "java"];
+const BAZEL_FALLBACK_TOKENS: &[&str] = &["python", "sh"];
 
 #[derive(Default)]
 pub(super) struct FileTree {
@@ -233,9 +244,17 @@ impl DiffSyntaxHighlighter {
             "makefile" | "gnumakefile" | "justfile" => Some(MAKE_FALLBACK_TOKENS),
             "cmakelists.txt" => Some(CMAKE_FALLBACK_TOKENS),
             "jenkinsfile" => Some(JENKINS_FALLBACK_TOKENS),
+            "procfile" => Some(SHELL_FALLBACK_TOKENS),
+            "build" | "workspace" | "module.bazel" | "build.bazel" => Some(BAZEL_FALLBACK_TOKENS),
             "vagrantfile" | "gemfile" | "rakefile" | "podfile" | "fastfile" | "brewfile" => {
                 Some(RUBY_FALLBACK_TOKENS)
             }
+            ".editorconfig" => Some(INI_FALLBACK_TOKENS),
+            ".prettierrc" | ".eslintrc" | ".stylelintrc" | ".babelrc" | ".swcrc"
+            | ".babelrc.json" | ".eslintrc.json" | ".prettierrc.json" => {
+                Some(TOOLING_CONFIG_FALLBACK_TOKENS)
+            }
+            ".npmrc" | ".yarnrc" | ".pnpmrc" => Some(INI_FALLBACK_TOKENS),
             ".gitignore" | ".dockerignore" | ".ignore" | ".npmignore" => {
                 Some(IGNORE_FALLBACK_TOKENS)
             }
@@ -310,13 +329,26 @@ fn syntect_to_ratatui(style: syntect::highlighting::Style) -> Style {
 fn extension_alias_tokens(ext: &str) -> Option<&'static [&'static str]> {
     Some(match ext {
         "ts" | "tsx" | "jsx" | "mts" | "cts" => TS_FALLBACK_TOKENS,
-        "mjs" | "cjs" => JS_FALLBACK_TOKENS,
-        "vue" | "svelte" | "astro" => COMPONENT_TEMPLATE_FALLBACK_TOKENS,
+        "mjs" | "cjs" | "es" | "es6" | "jse" => JS_FALLBACK_TOKENS,
+        "vue" | "svelte" | "astro" | "svx" => COMPONENT_TEMPLATE_FALLBACK_TOKENS,
+        "hbs" | "mustache" | "liquid" | "twig" | "ejs" | "erb" | "njk" => {
+            HTML_TEMPLATE_FALLBACK_TOKENS
+        }
+        "scss" | "sass" | "less" | "pcss" | "postcss" => CSS_FALLBACK_TOKENS,
+        "md" | "markdown" => MARKDOWN_FALLBACK_TOKENS,
         "mdx" => MDX_FALLBACK_TOKENS,
         "jsonc" | "json5" => JSON_FALLBACK_TOKENS,
-        "yaml" => YAML_FALLBACK_TOKENS,
-        "gql" | "graphql" => GRAPHQL_FALLBACK_TOKENS,
+        "yaml" | "yml" => YAML_FALLBACK_TOKENS,
+        "gql" | "graphql" | "graphqls" => GRAPHQL_FALLBACK_TOKENS,
         "tf" | "tfvars" | "hcl" => TERRAFORM_FALLBACK_TOKENS,
+        "sql" | "pgsql" | "psql" => SQL_FALLBACK_TOKENS,
+        "prisma" => PRISMA_FALLBACK_TOKENS,
+        "proto" => PROTO_FALLBACK_TOKENS,
+        "zsh" | "bash" | "fish" | "ksh" => SHELL_FALLBACK_TOKENS,
+        "ps1" | "psm1" | "psd1" => POWERSHELL_FALLBACK_TOKENS,
+        "kts" | "gradle" => JVM_SCRIPT_FALLBACK_TOKENS,
+        "ini" | "cfg" | "conf" | "editorconfig" => INI_FALLBACK_TOKENS,
+        "env" | "envrc" => ENV_FALLBACK_TOKENS,
         _ => return None,
     })
 }
@@ -372,6 +404,46 @@ mod tests {
             .syntax_for_alias_tokens(super::DOCKER_FALLBACK_TOKENS)
             .expect("docker fallback syntax");
         let actual = highlighter.syntax_for_path("missing/path/Dockerfile");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_missing_postcss_path_uses_css_fallback() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntax_for_alias_tokens(super::CSS_FALLBACK_TOKENS)
+            .expect("css fallback syntax");
+        let actual = highlighter.syntax_for_path("missing/path/styles.pcss");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_missing_graphql_schema_path_uses_graphql_fallback() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntax_for_alias_tokens(super::GRAPHQL_FALLBACK_TOKENS)
+            .expect("graphql fallback syntax");
+        let actual = highlighter.syntax_for_path("missing/path/schema.graphqls");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_prettierrc_name_uses_tooling_config_fallback() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntax_for_alias_tokens(super::TOOLING_CONFIG_FALLBACK_TOKENS)
+            .expect("tooling config fallback syntax");
+        let actual = highlighter.syntax_for_path("missing/path/.prettierrc");
+        assert_eq!(actual.name, expected.name);
+    }
+
+    #[test]
+    fn syntax_for_procfile_name_uses_shell_fallback() {
+        let highlighter = DiffSyntaxHighlighter::new();
+        let expected = highlighter
+            .syntax_for_alias_tokens(super::SHELL_FALLBACK_TOKENS)
+            .expect("shell fallback syntax");
+        let actual = highlighter.syntax_for_path("missing/path/Procfile");
         assert_eq!(actual.name, expected.name);
     }
 }
