@@ -53,8 +53,8 @@ use self::core_helpers::*;
 use self::nerd_fonts::{
     CommitPushChainMarkerKind, NerdFontTheme, app_title_label, branch_label_prefix,
     commit_push_chain_marker, commit_selection_marker, commit_status_badge,
-    commit_status_filter_label_prefix, file_change_kind_symbol, format_file_change_badge,
-    format_path_with_icon, format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
+    commit_status_filter_label_prefix, format_file_change_badge, format_path_with_icon,
+    format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
     list_highlight_symbol_width, uncommitted_badge, worktree_label_prefix,
 };
 use self::ports::{AppBootstrapPorts, AppClock, AppRuntimePorts, SystemBootstrapPorts};
@@ -340,6 +340,8 @@ struct PaneRects {
 
 #[derive(Debug, Clone)]
 struct RenderedDiffLine {
+    /// Prebuilt display line for special/test rows. Runtime rows keep this empty
+    /// and render from compact metadata on demand.
     line: Line<'static>,
     raw_text: String,
     anchor: Option<DiffLineAnchor>,

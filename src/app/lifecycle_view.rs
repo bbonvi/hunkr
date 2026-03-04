@@ -159,9 +159,13 @@ impl App {
                 line_overrides.insert(line_idx, line);
             }
 
-            let display_line = line_overrides
-                .get(&line_idx)
-                .unwrap_or(&self.domain.rendered_diff[line_idx].line);
+            let fallback_line;
+            let display_line = if let Some(override_line) = line_overrides.get(&line_idx) {
+                override_line
+            } else {
+                fallback_line = render_diff_line(&self.domain.rendered_diff[line_idx], theme);
+                &fallback_line
+            };
             let wrapped_rows = wrapped_line_rows(display_line, inner_width).max(1);
             for wrapped_row_offset in 0..wrapped_rows {
                 if visible_rows.len() >= target_rows {
@@ -223,15 +227,16 @@ impl App {
         if !matches!(prefix, '+' | '-' | ' ') {
             return None;
         }
-        if rendered.line.spans.len() < 4 {
+        let base_line = render_diff_line(rendered, theme);
+        if base_line.spans.len() < 4 {
             return None;
         }
 
         let code_text = chars.as_str();
         let mut spans = vec![
-            rendered.line.spans[0].clone(),
-            rendered.line.spans[1].clone(),
-            rendered.line.spans[2].clone(),
+            base_line.spans[0].clone(),
+            base_line.spans[1].clone(),
+            base_line.spans[2].clone(),
         ];
         let mut highlighted = self.ui.diff_cache.highlighter.highlight_single_line(
             self.ui.preferences.theme_mode,

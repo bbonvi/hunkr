@@ -364,10 +364,7 @@ impl App {
             let hunk_header = sanitize_terminal_text(&hunk.header);
             let hunk_label = format!("@@ {hunk_header}");
             rendered.push(RenderedDiffLine {
-                line: Line::from(vec![
-                    Span::styled("@@ ", Style::default().fg(theme.muted)),
-                    Span::styled(hunk_header.clone(), Style::default().fg(theme.diff_header)),
-                ]),
+                line: Line::from(""),
                 raw_text: hunk_label,
                 anchor: Some(DiffLineAnchor {
                     commit_id: hunk.commit_id.clone(),
@@ -389,7 +386,7 @@ impl App {
                     new_lineno: line.new_lineno,
                 };
                 rendered.push(RenderedDiffLine {
-                    line: self.render_code_line(line, &theme),
+                    line: Line::from(""),
                     raw_text: raw_diff_text(line),
                     anchor: Some(anchor),
                 });
@@ -406,44 +403,6 @@ impl App {
         }
 
         rendered
-    }
-
-    pub(super) fn render_code_line(&self, line: &HunkLine, theme: &UiTheme) -> Line<'static> {
-        let (prefix, accent, bg) = match line.kind {
-            DiffLineKind::Add => ('+', theme.diff_add, Some(theme.diff_add_bg)),
-            DiffLineKind::Remove => ('-', theme.diff_remove, Some(theme.diff_remove_bg)),
-            DiffLineKind::Context => (' ', theme.dimmed, None),
-            DiffLineKind::Meta => ('~', theme.diff_meta, None),
-        };
-
-        let old_col = line
-            .old_lineno
-            .map(|n| format!("{:>4}", n))
-            .unwrap_or_else(|| "    ".to_owned());
-        let new_col = line
-            .new_lineno
-            .map(|n| format!("{:>4}", n))
-            .unwrap_or_else(|| "    ".to_owned());
-
-        let mut spans = vec![
-            Span::styled(
-                format!("{} {} ", old_col, new_col),
-                Style::default().fg(theme.dimmed),
-            ),
-            Span::styled(
-                prefix.to_string(),
-                Style::default().fg(accent).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-        ];
-
-        let mut text_style = Style::default();
-        if let Some(bg_color) = bg {
-            text_style = text_style.bg(bg_color);
-        }
-        spans.push(sanitized_span(&line.text, Some(text_style)));
-
-        Line::from(spans)
     }
 
     pub(super) fn rebuild_file_tree(&mut self) {
@@ -773,7 +732,7 @@ fn diff_viewport_layout_ready(rects: &PaneRects) -> bool {
 fn rendered_commit_banner_line(
     patch_path: &str,
     hunk: &crate::model::Hunk,
-    theme: &UiTheme,
+    _theme: &UiTheme,
     now_ts: i64,
 ) -> RenderedDiffLine {
     let commit_anchor = DiffLineAnchor {
@@ -786,68 +745,28 @@ fn rendered_commit_banner_line(
     };
     let age = format_relative_time(hunk.commit_timestamp, now_ts);
     let commit_summary = sanitize_terminal_text(&hunk.commit_summary);
-    let (commit_line, line) = if hunk.commit_short.is_empty() {
-        (
-            format!("---- {commit_summary} ({age})"),
-            Line::from(vec![
-                Span::styled("---- ", Style::default().fg(theme.dimmed)),
-                Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
-                Span::raw(" "),
-                Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
-            ]),
-        )
+    let commit_line = if hunk.commit_short.is_empty() {
+        format!("---- {commit_summary} ({age})")
     } else {
-        (
-            format!(
-                "---- commit {} {} ({})",
-                hunk.commit_short, commit_summary, age
-            ),
-            Line::from(vec![
-                Span::styled("---- ", Style::default().fg(theme.dimmed)),
-                Span::styled("commit ", Style::default().fg(theme.muted)),
-                Span::styled(
-                    hunk.commit_short.clone(),
-                    Style::default()
-                        .fg(theme.focus_border)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" "),
-                Span::styled(commit_summary.clone(), Style::default().fg(theme.text)),
-                Span::raw(" "),
-                Span::styled(format!("({})", age), Style::default().fg(theme.dimmed)),
-            ]),
+        format!(
+            "---- commit {} {} ({})",
+            hunk.commit_short, commit_summary, age
         )
     };
     RenderedDiffLine {
-        line,
+        line: Line::from(""),
         raw_text: commit_line,
         anchor: Some(commit_anchor),
     }
 }
 
-fn deleted_file_toggle_line(expanded: bool, nerd_fonts: bool, theme: &UiTheme) -> RenderedDiffLine {
-    let (action, caret) = if expanded {
-        ("Hide content", if nerd_fonts { "" } else { ">" })
-    } else {
-        ("Show hidden content", if nerd_fonts { "" } else { "v" })
-    };
+fn deleted_file_toggle_line(
+    _expanded: bool,
+    _nerd_fonts: bool,
+    _theme: &UiTheme,
+) -> RenderedDiffLine {
     RenderedDiffLine {
-        line: Line::from(vec![
-            Span::styled(
-                "File removed. ",
-                Style::default()
-                    .fg(theme.issue)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                action,
-                Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(caret, Style::default().fg(theme.muted)),
-        ]),
+        line: Line::from(""),
         raw_text: DELETED_FILE_TOGGLE_RAW_TEXT.to_owned(),
         anchor: None,
     }
@@ -943,11 +862,10 @@ pub(super) fn rendered_file_header_line(
     file_index: usize,
     total_files: usize,
     file_change: Option<&FileChangeSummary>,
-    theme: &UiTheme,
+    _theme: &UiTheme,
     nerd_fonts: bool,
-    nerd_font_theme: &NerdFontTheme,
+    _nerd_font_theme: &NerdFontTheme,
 ) -> RenderedDiffLine {
-    let display_path = format_path_with_icon(path, nerd_fonts, nerd_font_theme);
     let sanitized_path = sanitize_terminal_text(path);
     let raw_change_suffix = file_change
         .map(|change| format!(" · {}", format_file_change_badge(change, nerd_fonts)))
@@ -959,69 +877,10 @@ pub(super) fn rendered_file_header_line(
     let raw_text = format!(
         "==== file {file_index}/{total_files}: {sanitized_path}{rename_from}{raw_change_suffix} ===="
     );
-    let mut spans = vec![
-        Span::styled("==== ", Style::default().fg(theme.dimmed)),
-        Span::styled(
-            format!("file {file_index}/{total_files}"),
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(": ", Style::default().fg(theme.dimmed)),
-        sanitized_span(&display_path, Some(Style::default().fg(theme.text))),
-    ];
-    if let Some(change) = file_change {
-        if let Some(from) = change.old_path.as_ref() {
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!("(from {})", sanitize_terminal_text(from)),
-                Style::default().fg(theme.muted),
-            ));
-        }
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled("·", Style::default().fg(theme.dimmed)));
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(
-            file_change_kind_symbol(change.kind, nerd_fonts),
-            file_change_kind_style(change.kind, theme).add_modifier(Modifier::BOLD),
-        ));
-        if change.additions > 0 {
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!("+{}", change.additions),
-                Style::default()
-                    .fg(theme.diff_add)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-        if change.deletions > 0 {
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!("-{}", change.deletions),
-                Style::default()
-                    .fg(theme.diff_remove)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-    }
-    spans.push(Span::styled(" ====", Style::default().fg(theme.dimmed)));
     RenderedDiffLine {
-        line: Line::from(spans),
+        line: Line::from(""),
         raw_text,
         anchor: None,
-    }
-}
-
-fn file_change_kind_style(kind: FileChangeKind, theme: &UiTheme) -> Style {
-    match kind {
-        FileChangeKind::Added => Style::default().fg(theme.diff_add),
-        FileChangeKind::Deleted => Style::default().fg(theme.diff_remove),
-        FileChangeKind::Modified => Style::default().fg(theme.accent),
-        FileChangeKind::Renamed | FileChangeKind::Copied => Style::default().fg(theme.focus_border),
-        FileChangeKind::Unmerged => Style::default().fg(theme.issue),
-        FileChangeKind::TypeChanged => Style::default().fg(theme.diff_meta),
-        FileChangeKind::Untracked => Style::default().fg(theme.unreviewed),
-        FileChangeKind::Unknown => Style::default().fg(theme.muted),
     }
 }
 

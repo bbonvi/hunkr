@@ -509,8 +509,7 @@ fn rendered_file_banner_sanitizes_untrusted_path_text() {
         false,
         &nerd_theme,
     );
-    let flattened = rendered
-        .line
+    let flattened = render_diff_line(&rendered, &theme)
         .spans
         .iter()
         .map(|span| span.content.to_string())

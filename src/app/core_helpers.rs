@@ -138,25 +138,133 @@ pub(super) fn diff_column_at_for_rendered_line(
     display_col.saturating_sub(prefix_cells.saturating_add(1))
 }
 
-fn code_line_number_prefix_cells(rendered_line: Option<&RenderedDiffLine>) -> Option<usize> {
+pub(super) fn code_line_number_prefix_cells(
+    rendered_line: Option<&RenderedDiffLine>,
+) -> Option<usize> {
     let line = rendered_line?;
-    let is_numbered_code_line = line
-        .anchor
-        .as_ref()
-        .is_some_and(|anchor| !is_commit_line_anchor(anchor))
-        && line.line.spans.len() >= 4
-        && matches!(
+    if line.anchor.as_ref().is_none_or(is_commit_line_anchor)
+        || !matches!(
             line.raw_text.chars().next(),
             Some('+') | Some('-') | Some(' ') | Some('~')
-        );
-    if !is_numbered_code_line {
+        )
+    {
         return None;
     }
 
-    line.line
-        .spans
-        .first()
-        .map(|span| display_width(span.content.as_ref()))
+    let anchor = line.anchor.as_ref()?;
+    let old_col = anchor
+        .old_lineno
+        .map(|n| format!("{:>4}", n))
+        .unwrap_or_else(|| "    ".to_owned());
+    let new_col = anchor
+        .new_lineno
+        .map(|n| format!("{:>4}", n))
+        .unwrap_or_else(|| "    ".to_owned());
+    Some(display_width(&format!("{old_col} {new_col} ")))
+}
+
+/// Builds one styled diff row from compact persisted row metadata.
+pub(super) fn render_diff_line(rendered: &RenderedDiffLine, theme: &UiTheme) -> Line<'static> {
+    if !rendered.line.spans.is_empty() {
+        return rendered.line.clone();
+    }
+
+    if rendered.raw_text == DELETED_FILE_TOGGLE_RAW_TEXT {
+        return Line::from(vec![Span::styled(
+            "File removed",
+            Style::default()
+                .fg(theme.issue)
+                .add_modifier(Modifier::BOLD),
+        )]);
+    }
+
+    let is_numbered_code_line = rendered
+        .anchor
+        .as_ref()
+        .is_some_and(|anchor| !is_commit_line_anchor(anchor))
+        && matches!(
+            rendered.raw_text.chars().next(),
+            Some('+') | Some('-') | Some(' ') | Some('~')
+        );
+    if is_numbered_code_line {
+        let kind = match rendered.raw_text.chars().next().unwrap_or(' ') {
+            '+' => DiffLineKind::Add,
+            '-' => DiffLineKind::Remove,
+            ' ' => DiffLineKind::Context,
+            '~' => DiffLineKind::Meta,
+            _ => DiffLineKind::Context,
+        };
+        return render_code_line_from_raw(rendered, kind, theme);
+    }
+
+    if rendered.raw_text.is_empty() {
+        return Line::from("");
+    }
+    if let Some(header) = rendered.raw_text.strip_prefix("@@ ") {
+        return Line::from(vec![
+            Span::styled("@@ ", Style::default().fg(theme.muted)),
+            Span::styled(header.to_owned(), Style::default().fg(theme.diff_header)),
+        ]);
+    }
+    if let Some(rest) = rendered.raw_text.strip_prefix("---- ") {
+        return Line::from(vec![
+            Span::styled("---- ", Style::default().fg(theme.dimmed)),
+            Span::styled(rest.to_owned(), Style::default().fg(theme.text)),
+        ]);
+    }
+    if rendered.raw_text.starts_with("==== ") {
+        return Line::from(vec![Span::styled(
+            rendered.raw_text.clone(),
+            Style::default().fg(theme.text),
+        )]);
+    }
+
+    Line::from(vec![Span::raw(rendered.raw_text.clone())])
+}
+
+fn render_code_line_from_raw(
+    rendered: &RenderedDiffLine,
+    kind: DiffLineKind,
+    theme: &UiTheme,
+) -> Line<'static> {
+    let (prefix, accent, bg) = match kind {
+        DiffLineKind::Add => ('+', theme.diff_add, Some(theme.diff_add_bg)),
+        DiffLineKind::Remove => ('-', theme.diff_remove, Some(theme.diff_remove_bg)),
+        DiffLineKind::Context => (' ', theme.dimmed, None),
+        DiffLineKind::Meta => ('~', theme.diff_meta, None),
+    };
+
+    let (old_lineno, new_lineno) = rendered
+        .anchor
+        .as_ref()
+        .map(|anchor| (anchor.old_lineno, anchor.new_lineno))
+        .unwrap_or((None, None));
+    let old_col = old_lineno
+        .map(|n| format!("{:>4}", n))
+        .unwrap_or_else(|| "    ".to_owned());
+    let new_col = new_lineno
+        .map(|n| format!("{:>4}", n))
+        .unwrap_or_else(|| "    ".to_owned());
+
+    let code_text = rendered.raw_text.chars().skip(1).collect::<String>();
+    let mut spans = vec![
+        Span::styled(
+            format!("{old_col} {new_col} "),
+            Style::default().fg(theme.dimmed),
+        ),
+        Span::styled(
+            prefix.to_string(),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+    ];
+
+    let mut text_style = Style::default();
+    if let Some(bg_color) = bg {
+        text_style = text_style.bg(bg_color);
+    }
+    spans.push(Span::styled(code_text, text_style));
+    Line::from(spans)
 }
 
 pub(super) fn diff_visual_from_drag_anchor(

@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthChar;
 use super::super::{
     DiffLineAnchor, DiffPosition, FocusPane, NerdFontTheme, RenderedDiffLine, UiTheme,
     blend_colors, diff_line_anchor_matches, format_path_with_icon, is_commit_line_anchor,
-    sanitized_span,
+    render_diff_line, sanitized_span,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
 
@@ -485,7 +485,7 @@ fn display_line_with_selection(
 ) -> Line<'static> {
     let line = override_line
         .cloned()
-        .unwrap_or_else(|| rendered.line.clone());
+        .unwrap_or_else(|| render_diff_line(rendered, selection.theme));
     let display_text = line
         .spans
         .iter()
