@@ -201,23 +201,19 @@ impl App {
             return None;
         }
         let base_line = render_diff_line(rendered, theme);
-        if base_line.spans.len() < 4 {
+        if base_line.spans.len() < 2 {
             return None;
         }
 
-        let code_text = chars.as_str();
-        let mut spans = vec![
-            base_line.spans[0].clone(),
-            base_line.spans[1].clone(),
-            base_line.spans[2].clone(),
-        ];
+        let code_text = diff_line_coord_text(rendered);
+        let mut spans = vec![base_line.spans[0].clone()];
         let mut highlighted = self.ui.diff_cache.highlighter.highlight_single_line(
             self.ui.preferences.theme_mode,
             anchor.file_path(),
             code_text,
         );
         if highlighted.is_empty() {
-            highlighted.push(Span::raw(code_text.to_owned()));
+            highlighted.push(Span::styled(code_text.to_owned(), base_line.spans[1].style));
         }
 
         let bg = match prefix {

@@ -8,8 +8,9 @@ use unicode_width::UnicodeWidthChar;
 
 use super::super::{
     DiffLineAnchor, DiffPosition, DiffVisibleRow, FocusPane, NerdFontTheme, RenderedDiffLine,
-    UiTheme, blend_colors, diff_line_anchor_matches, format_path_with_icon, is_commit_line_anchor,
-    render_diff_line, sanitized_span,
+    UiTheme, blend_colors, diff_line_anchor_matches, diff_line_coord_text,
+    format_path_with_icon, is_commit_line_anchor, is_diff_code_line, render_diff_line,
+    sanitized_span,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
 
@@ -351,10 +352,11 @@ pub(in crate::app) struct DiffSearchMatch {
 fn collect_diff_search_matches(lines: &[RenderedDiffLine], query: &str) -> Vec<DiffSearchMatch> {
     let mut matches = Vec::new();
     for (line_index, line) in lines.iter().enumerate() {
-        for (start, _) in find_case_insensitive_ranges(&line.raw_text, query) {
+        let coord_text = diff_line_coord_text(line);
+        for (start, _) in find_case_insensitive_ranges(coord_text, query) {
             matches.push(DiffSearchMatch {
                 line_index,
-                char_col: line.raw_text[..start].chars().count(),
+                char_col: coord_text[..start].chars().count(),
             });
         }
     }
@@ -518,7 +520,7 @@ fn display_line_with_selection(
         .collect::<String>();
     let layout = diff_payload_layout(rendered, &line);
     let coord_text = if layout.highlight_without_line_numbers {
-        rendered.raw_text.as_ref()
+        diff_line_coord_text(rendered)
     } else {
         display_text.as_str()
     };
@@ -571,24 +573,14 @@ fn display_line_with_selection(
 #[derive(Debug, Clone, Copy)]
 struct DiffPayloadLayout {
     display_byte_offset: usize,
-    insert_space_after_prefix: bool,
     highlight_without_line_numbers: bool,
 }
 
 fn diff_payload_layout(rendered: &RenderedDiffLine, line: &Line<'static>) -> DiffPayloadLayout {
-    let looks_like_code_line = rendered
-        .anchor
-        .as_ref()
-        .is_some_and(|anchor| !is_commit_line_anchor(anchor))
-        && line.spans.len() >= 4
-        && matches!(
-            rendered.raw_text.chars().next(),
-            Some('+') | Some('-') | Some(' ') | Some('~')
-        );
+    let looks_like_code_line = is_diff_code_line(Some(rendered)) && line.spans.len() >= 2;
     if !looks_like_code_line {
         return DiffPayloadLayout {
             display_byte_offset: 0,
-            insert_space_after_prefix: false,
             highlight_without_line_numbers: false,
         };
     }
@@ -600,7 +592,6 @@ fn diff_payload_layout(rendered: &RenderedDiffLine, line: &Line<'static>) -> Dif
         .unwrap_or("");
     DiffPayloadLayout {
         display_byte_offset: prefix.len(),
-        insert_space_after_prefix: true,
         highlight_without_line_numbers: true,
     }
 }
@@ -724,7 +715,7 @@ fn apply_search_highlights(
                 .fg(theme.search_match_fg)
                 .bg(theme.search_match_bg)
         };
-        let (display_start, display_end) = map_raw_range_to_display((start, end), layout);
+        let (display_start, display_end) = map_coord_range_to_display((start, end), layout);
         patched = patch_line_byte_range(&patched, display_start, display_end, style);
     }
     patched
@@ -740,7 +731,7 @@ fn apply_block_cursor_highlight(
     let Some((start, end)) = byte_range_for_char_column(coord_text, char_col) else {
         return line.clone();
     };
-    let (display_start, display_end) = map_raw_range_to_display((start, end), layout);
+    let (display_start, display_end) = map_coord_range_to_display((start, end), layout);
 
     patch_line_byte_range(
         line,
@@ -753,14 +744,11 @@ fn apply_block_cursor_highlight(
     )
 }
 
-fn map_raw_range_to_display(range: (usize, usize), layout: DiffPayloadLayout) -> (usize, usize) {
-    let map_start = |idx: usize| {
-        layout.display_byte_offset + idx + usize::from(layout.insert_space_after_prefix && idx >= 1)
-    };
-    let map_end = |idx: usize| {
-        layout.display_byte_offset + idx + usize::from(layout.insert_space_after_prefix && idx >= 2)
-    };
-    (map_start(range.0), map_end(range.1))
+fn map_coord_range_to_display(range: (usize, usize), layout: DiffPayloadLayout) -> (usize, usize) {
+    (
+        layout.display_byte_offset + range.0,
+        layout.display_byte_offset + range.1,
+    )
 }
 
 fn find_case_insensitive_ranges(text: &str, query: &str) -> Vec<(usize, usize)> {

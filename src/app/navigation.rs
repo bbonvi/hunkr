@@ -927,7 +927,7 @@ impl App {
         self.domain
             .rendered_diff
             .get(self.domain.diff_position.cursor)
-            .map(|line| line.raw_text.as_ref())
+            .map(diff_line_coord_text)
     }
 
     fn next_diff_row_with_content(&self, current_row: usize) -> Option<usize> {

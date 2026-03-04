@@ -120,7 +120,7 @@ pub(super) fn wrapped_line_rows(line: &Line<'_>, max_width: usize) -> usize {
     }
 }
 
-/// Maps mouse x-position in the diff pane to the raw diff-text char column for the target row.
+/// Maps mouse x-position in the diff pane to the diff-cursor text column for the target row.
 pub(super) fn diff_column_at_for_rendered_line(
     mouse_x: u16,
     rect: ratatui::layout::Rect,
@@ -130,38 +130,38 @@ pub(super) fn diff_column_at_for_rendered_line(
     let content_width = rect.width.saturating_sub(2).max(1) as usize;
     let display_col = diff_column_at(mouse_x, rect)
         .saturating_add(wrapped_row_offset.saturating_mul(content_width));
-    let Some(prefix_cells) = code_line_number_prefix_cells(rendered_line) else {
+    let Some(prefix_cells) = diff_code_padding_cells(rendered_line) else {
         return display_col;
     };
 
-    // Numbered code rows render "old new {+|-| |~} " before payload; raw diff text stores only
-    // the marker (`+/-/ /~`) directly adjacent to payload.
-    display_col.saturating_sub(prefix_cells.saturating_add(1))
+    display_col.saturating_sub(prefix_cells)
 }
 
-pub(super) fn code_line_number_prefix_cells(
+pub(super) fn diff_code_padding_cells(
     rendered_line: Option<&RenderedDiffLine>,
 ) -> Option<usize> {
-    let line = rendered_line?;
-    if line.anchor.as_ref().is_none_or(is_commit_line_anchor)
-        || !matches!(
+    if !is_diff_code_line(rendered_line) {
+        return None;
+    }
+    Some(2)
+}
+
+pub(super) fn diff_line_coord_text(rendered_line: &RenderedDiffLine) -> &str {
+    if is_diff_code_line(Some(rendered_line)) {
+        return rendered_line.raw_text.get(1..).unwrap_or("");
+    }
+    rendered_line.raw_text.as_ref()
+}
+
+pub(super) fn is_diff_code_line(rendered_line: Option<&RenderedDiffLine>) -> bool {
+    let Some(line) = rendered_line else {
+        return false;
+    };
+    line.anchor.as_ref().is_some_and(|anchor| !is_commit_line_anchor(anchor))
+        && matches!(
             line.raw_text.chars().next(),
             Some('+') | Some('-') | Some(' ') | Some('~')
         )
-    {
-        return None;
-    }
-
-    let anchor = line.anchor.as_ref()?;
-    let old_col = anchor
-        .old_lineno
-        .map(|n| format!("{:>4}", n))
-        .unwrap_or_else(|| "    ".to_owned());
-    let new_col = anchor
-        .new_lineno
-        .map(|n| format!("{:>4}", n))
-        .unwrap_or_else(|| "    ".to_owned());
-    Some(display_width(&format!("{old_col} {new_col} ")))
 }
 
 /// Builds one styled diff row from compact persisted row metadata.
@@ -180,15 +180,7 @@ pub(super) fn render_diff_line(rendered: &RenderedDiffLine, theme: &UiTheme) -> 
         )]);
     }
 
-    let is_numbered_code_line = rendered
-        .anchor
-        .as_ref()
-        .is_some_and(|anchor| !is_commit_line_anchor(anchor))
-        && matches!(
-            rendered.raw_text.chars().next(),
-            Some('+') | Some('-') | Some(' ') | Some('~')
-        );
-    if is_numbered_code_line {
+    if is_diff_code_line(Some(rendered)) {
         let kind = match rendered.raw_text.chars().next().unwrap_or(' ') {
             '+' => DiffLineKind::Add,
             '-' => DiffLineKind::Remove,
@@ -229,39 +221,20 @@ fn render_code_line_from_raw(
     kind: DiffLineKind,
     theme: &UiTheme,
 ) -> Line<'static> {
-    let (prefix, accent, bg) = match kind {
-        DiffLineKind::Add => ('+', theme.diff_add, Some(theme.diff_add_bg)),
-        DiffLineKind::Remove => ('-', theme.diff_remove, Some(theme.diff_remove_bg)),
-        DiffLineKind::Context => (' ', theme.dimmed, None),
-        DiffLineKind::Meta => ('~', theme.diff_meta, None),
+    let (fg, bg) = match kind {
+        DiffLineKind::Add => (Some(theme.diff_add), Some(theme.diff_add_bg)),
+        DiffLineKind::Remove => (Some(theme.diff_remove), Some(theme.diff_remove_bg)),
+        DiffLineKind::Context => (None, None),
+        DiffLineKind::Meta => (Some(theme.diff_meta), None),
     };
 
-    let (old_lineno, new_lineno) = rendered
-        .anchor
-        .as_ref()
-        .map(|anchor| (anchor.old_lineno, anchor.new_lineno))
-        .unwrap_or((None, None));
-    let old_col = old_lineno
-        .map(|n| format!("{:>4}", n))
-        .unwrap_or_else(|| "    ".to_owned());
-    let new_col = new_lineno
-        .map(|n| format!("{:>4}", n))
-        .unwrap_or_else(|| "    ".to_owned());
-
-    let code_text = rendered.raw_text.chars().skip(1).collect::<String>();
-    let mut spans = vec![
-        Span::styled(
-            format!("{old_col} {new_col} "),
-            Style::default().fg(theme.dimmed),
-        ),
-        Span::styled(
-            prefix.to_string(),
-            Style::default().fg(accent).add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-    ];
+    let code_text = diff_line_coord_text(rendered).to_owned();
+    let mut spans = vec![Span::raw("  ")];
 
     let mut text_style = Style::default();
+    if let Some(fg_color) = fg {
+        text_style = text_style.fg(fg_color);
+    }
     if let Some(bg_color) = bg {
         text_style = text_style.bg(bg_color);
     }
