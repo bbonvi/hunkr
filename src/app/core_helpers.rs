@@ -288,6 +288,7 @@ where
 pub(super) fn compose_sticky_banner_indexes(
     sticky_file_idx: Option<usize>,
     sticky_commit_idx: Option<usize>,
+    sticky_hunk_idx: Option<usize>,
     viewport_rows: usize,
 ) -> Vec<usize> {
     let max_sticky = viewport_rows.saturating_sub(1);
@@ -295,14 +296,17 @@ pub(super) fn compose_sticky_banner_indexes(
         return Vec::new();
     }
 
-    let mut sticky = Vec::with_capacity(2);
-    if let Some(file_idx) = sticky_file_idx {
-        sticky.push(file_idx);
-    }
-    if sticky.len() < max_sticky
-        && let Some(commit_idx) = sticky_commit_idx
+    let mut sticky = Vec::with_capacity(3);
+    for idx in [sticky_file_idx, sticky_commit_idx, sticky_hunk_idx]
+        .into_iter()
+        .flatten()
     {
-        sticky.push(commit_idx);
+        if sticky.len() >= max_sticky {
+            break;
+        }
+        if !sticky.contains(&idx) {
+            sticky.push(idx);
+        }
     }
     sticky
 }

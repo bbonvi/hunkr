@@ -518,6 +518,21 @@ impl App {
         (file_range.start < top).then_some(file_range.start)
     }
 
+    pub(super) fn sticky_hunk_header_index_for_scroll(&self, scroll: usize) -> Option<usize> {
+        if scroll == 0 || self.domain.rendered_diff.is_empty() {
+            return None;
+        }
+        let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
+        let file_range_idx = self.file_range_index_for_line(top)?;
+        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
+        for idx in (file_range.start..=top).rev() {
+            if is_hunk_header_line(&self.domain.rendered_diff[idx]) {
+                return (idx < top).then_some(idx);
+            }
+        }
+        None
+    }
+
     pub(super) fn sticky_banner_indexes_for_scroll(
         &self,
         scroll: usize,
@@ -526,6 +541,7 @@ impl App {
         compose_sticky_banner_indexes(
             self.sticky_file_banner_index_for_scroll(scroll),
             self.sticky_commit_banner_index_for_scroll(scroll),
+            self.sticky_hunk_header_index_for_scroll(scroll),
             viewport_rows,
         )
     }

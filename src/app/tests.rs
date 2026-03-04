@@ -636,6 +636,21 @@ fn diff_index_matches_list_behavior_without_sticky_banner() {
 }
 
 #[test]
+fn compose_sticky_banner_indexes_orders_file_commit_hunk() {
+    let sticky = compose_sticky_banner_indexes(Some(3), Some(7), Some(12), 8);
+    assert_eq!(sticky, vec![3, 7, 12]);
+}
+
+#[test]
+fn compose_sticky_banner_indexes_dedupes_and_honors_viewport_budget() {
+    let deduped = compose_sticky_banner_indexes(Some(3), Some(3), Some(9), 3);
+    assert_eq!(deduped, vec![3, 9]);
+
+    let capped = compose_sticky_banner_indexes(Some(3), Some(7), Some(12), 2);
+    assert_eq!(capped, vec![3]);
+}
+
+#[test]
 fn wrapped_line_rows_counts_soft_wrapped_height() {
     let line = Line::from(vec![Span::raw("123456789")]);
     assert_eq!(wrapped_line_rows(&line, 4), 3);

@@ -626,6 +626,12 @@ fn draw_virtualized_diff_rows_keep_sticky_and_wrapped_mapping() {
         .max(1) as usize;
     let sticky_indexes = app.sticky_banner_indexes_for_scroll(code_idx, viewport_rows);
     let sticky_rows = sticky_indexes.len().min(viewport_rows.saturating_sub(1));
+    assert!(
+        sticky_indexes
+            .iter()
+            .any(|idx| is_hunk_header_line(&app.domain.rendered_diff[*idx])),
+        "scrolling inside a hunk should include the active hunk header in sticky rows",
+    );
 
     assert!(
         app.ui.diff_ui.visible_rows.len() <= viewport_rows,
