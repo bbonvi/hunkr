@@ -656,17 +656,20 @@ pub(super) fn diff_empty_state_message(
 pub(super) fn next_poll_timeout(
     auto_refresh_every: Duration,
     relative_time_redraw_every: Duration,
-    theme_reload_poll_every: Duration,
     refresh_elapsed: Duration,
     relative_elapsed: Duration,
-    theme_reload_elapsed: Duration,
     selection_rebuild_in: Option<Duration>,
+    theme_reload_fallback_poll_in: Option<Duration>,
 ) -> Duration {
     // Sleep until the earliest maintenance deadline: git auto-refresh or coarse age-label repaint.
     let timeout = auto_refresh_every
         .saturating_sub(refresh_elapsed)
-        .min(relative_time_redraw_every.saturating_sub(relative_elapsed))
-        .min(theme_reload_poll_every.saturating_sub(theme_reload_elapsed));
+        .min(relative_time_redraw_every.saturating_sub(relative_elapsed));
+    let timeout = if let Some(fallback_theme_poll_in) = theme_reload_fallback_poll_in {
+        timeout.min(fallback_theme_poll_in)
+    } else {
+        timeout
+    };
     if let Some(selection_timeout) = selection_rebuild_in {
         timeout.min(selection_timeout)
     } else {

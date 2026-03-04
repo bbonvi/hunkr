@@ -65,6 +65,7 @@ Optional theme palette file (live-reloaded while app runs):
 - `$XDG_CONFIG_HOME/hunkr/theme.yaml`
 - `~/.config/hunkr/theme.yaml`
 
+Theme reload uses filesystem events on the config directory, with interval polling fallback only when watching is unavailable.
 Start from [`theme.example.yaml`](./theme.example.yaml).
 
 ## Quality Checks

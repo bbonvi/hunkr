@@ -17,7 +17,7 @@ history_limit: 400
 auto_refresh_every_secs: 2
 # relative_time_redraw_every_secs: age-label redraw cadence when auto-refresh is not sooner (must be >= 1).
 relative_time_redraw_every_secs: 30
-# theme_reload_poll_every_ms: how often to check theme.yaml for changes (must be >= 1).
+# theme_reload_poll_every_ms: fallback poll cadence when filesystem watching is unavailable (must be >= 1).
 theme_reload_poll_every_ms: 250
 # selection_rebuild_debounce_ms: debounce for range-selection rebuilds (must be >= 1).
 selection_rebuild_debounce_ms: 120

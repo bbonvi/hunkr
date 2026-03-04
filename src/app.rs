@@ -45,6 +45,7 @@ mod shell_command;
 mod state;
 mod text_edit;
 mod theme_palette;
+mod theme_reload_driver;
 mod tree_highlight;
 mod ui;
 mod worktree_switcher;
@@ -60,6 +61,7 @@ use self::ports::{AppBootstrapPorts, AppClock, AppRuntimePorts, SystemBootstrapP
 use self::selection_helpers::*;
 use self::text_edit::*;
 use self::theme_palette::ThemeRuntimeState;
+use self::theme_reload_driver::ThemeReloadDriver;
 use self::tree_highlight::*;
 use self::ui::diff_pane::{
     DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, PendingDiffViewAnchor,
@@ -550,7 +552,6 @@ struct RuntimeState {
     onboarding_step: Option<OnboardingStep>,
     last_refresh: Instant,
     last_relative_time_redraw: Instant,
-    last_theme_reload_check: Instant,
     last_terminal_clear: Instant,
     terminal_clear_requested: bool,
     needs_redraw: bool,
@@ -630,6 +631,7 @@ pub struct App {
     domain: AppDomainState,
     ui: AppUiState,
     theme: ThemeRuntimeState,
+    theme_reload_driver: ThemeReloadDriver,
     runtime: RuntimeState,
     tuning: RuntimeTuning,
 }

@@ -62,6 +62,10 @@ impl App {
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
         let now = deps.clock.now_instant();
         let theme_path = config_path().with_file_name(THEME_FILE_NAME);
+        let theme_watch_dir = theme_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
         let tuning = RuntimeTuning::from_config(config);
         let shell_history = deps
             .store
@@ -168,6 +172,11 @@ impl App {
                 helper_click_hitboxes: Vec::new(),
             },
             theme: ThemeRuntimeState::new(theme_path),
+            theme_reload_driver: ThemeReloadDriver::new(
+                &theme_watch_dir,
+                tuning.theme_reload_poll_every,
+                now,
+            ),
             runtime: RuntimeState {
                 status: String::new(),
                 selection_rebuild_due: None,
@@ -175,7 +184,6 @@ impl App {
                 onboarding_step: first_open.then_some(OnboardingStep::ConsentProjectDataDir),
                 last_refresh: now,
                 last_relative_time_redraw: now,
-                last_theme_reload_check: now,
                 last_terminal_clear: now,
                 terminal_clear_requested: false,
                 needs_redraw: true,
@@ -341,16 +349,16 @@ impl App {
     }
 
     pub fn poll_timeout(&self) -> Duration {
+        let now = self.now_instant();
         tick_scheduler::compute_poll_timeout(PollTimeoutInputs {
             onboarding_active: self.onboarding_active(),
             selection_rebuild_due: self.runtime.selection_rebuild_due,
-            now: self.now_instant(),
+            now,
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
-            last_theme_reload_elapsed: self.runtime.last_theme_reload_check.elapsed(),
+            theme_reload_fallback_poll_in: self.theme_reload_driver.fallback_poll_in(now),
             auto_refresh_every: self.tuning.auto_refresh_every,
             relative_time_redraw_every: self.tuning.relative_time_redraw_every,
-            theme_reload_poll_every: self.tuning.theme_reload_poll_every,
             shell_running: self.ui.shell_command.running.is_some(),
             shell_flash_timeout: self.shell_output_flash_timeout(),
         })
@@ -431,7 +439,7 @@ impl App {
     }
 
     pub(in crate::app) fn run_tick_cycle(&mut self, now: Instant) {
-        let tasks = tick_scheduler::plan_tick(TickPlanInputs {
+        let mut tasks = tick_scheduler::plan_tick(TickPlanInputs {
             onboarding_active: self.onboarding_active(),
             now,
             terminal_clear_elapsed: self.runtime.last_terminal_clear.elapsed(),
@@ -439,20 +447,18 @@ impl App {
             selection_rebuild_due: self.runtime.selection_rebuild_due,
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
-            last_theme_reload_elapsed: self.runtime.last_theme_reload_check.elapsed(),
             auto_refresh_every: self.tuning.auto_refresh_every,
             relative_time_redraw_every: self.tuning.relative_time_redraw_every,
-            theme_reload_poll_every: self.tuning.theme_reload_poll_every,
         });
+        if self.theme_reload_driver.should_reload(now) {
+            tasks.push(TickTask::ReloadTheme);
+        }
         for task in tasks {
             match task {
                 TickTask::PollShellStream => self.poll_shell_command_stream(),
                 TickTask::PollShellFlash => self.poll_shell_output_flash(),
                 TickTask::RequestTerminalClear => self.request_terminal_clear(),
-                TickTask::ReloadTheme => {
-                    self.reload_theme_from_disk(false);
-                    self.runtime.last_theme_reload_check = self.now_instant();
-                }
+                TickTask::ReloadTheme => self.reload_theme_from_disk(false),
                 TickTask::FlushSelectionRebuild => {
                     self.flush_pending_selection_rebuild();
                     self.runtime.needs_redraw = true;
@@ -461,7 +467,6 @@ impl App {
                     if let Err(err) = self.reload_commits(true) {
                         self.runtime.status = format!("refresh failed: {err:#}");
                     }
-                    self.reload_theme_from_disk(false);
                     let refreshed_at = self.now_instant();
                     self.runtime.last_refresh = refreshed_at;
                     self.runtime.last_relative_time_redraw = refreshed_at;
@@ -527,7 +532,6 @@ impl App {
         let now = self.now_instant();
         self.runtime.last_refresh = now;
         self.runtime.last_relative_time_redraw = now;
-        self.runtime.last_theme_reload_check = now;
     }
 
     pub(super) fn reload_theme_from_disk(&mut self, force: bool) {
