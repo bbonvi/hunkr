@@ -341,6 +341,7 @@ impl App {
         }
         let mut last_commit_banner: Option<String> = None;
         let mut rendered_deleted_toggle = false;
+        let shared_file_path: Arc<str> = Arc::from(patch.path.as_str());
 
         for hunk in &patch.hunks {
             if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
@@ -360,6 +361,9 @@ impl App {
                 }
             }
             last_commit_banner = Some(hunk.commit_id.clone());
+            let shared_commit_id: Arc<str> = Arc::from(hunk.commit_id.as_str());
+            let shared_commit_summary: Arc<str> = Arc::from(hunk.commit_summary.as_str());
+            let shared_hunk_header: Arc<str> = Arc::from(hunk.header.as_str());
 
             let hunk_header = sanitize_terminal_text(&hunk.header);
             let hunk_label = format!("@@ {hunk_header}");
@@ -367,10 +371,10 @@ impl App {
                 line: Line::from(""),
                 raw_text: hunk_label,
                 anchor: Some(DiffLineAnchor {
-                    commit_id: hunk.commit_id.clone(),
-                    commit_summary: hunk.commit_summary.clone(),
-                    file_path: patch.path.clone(),
-                    hunk_header: hunk.header.clone(),
+                    commit_id: shared_commit_id.clone(),
+                    commit_summary: shared_commit_summary.clone(),
+                    file_path: shared_file_path.clone(),
+                    hunk_header: shared_hunk_header.clone(),
                     old_lineno: Some(hunk.old_start),
                     new_lineno: Some(hunk.new_start),
                 }),
@@ -378,10 +382,10 @@ impl App {
 
             for line in &hunk.lines {
                 let anchor = DiffLineAnchor {
-                    commit_id: hunk.commit_id.clone(),
-                    commit_summary: hunk.commit_summary.clone(),
-                    file_path: patch.path.clone(),
-                    hunk_header: hunk.header.clone(),
+                    commit_id: shared_commit_id.clone(),
+                    commit_summary: shared_commit_summary.clone(),
+                    file_path: shared_file_path.clone(),
+                    hunk_header: shared_hunk_header.clone(),
                     old_lineno: line.old_lineno,
                     new_lineno: line.new_lineno,
                 };
@@ -736,10 +740,10 @@ fn rendered_commit_banner_line(
     now_ts: i64,
 ) -> RenderedDiffLine {
     let commit_anchor = DiffLineAnchor {
-        commit_id: hunk.commit_id.clone(),
-        commit_summary: hunk.commit_summary.clone(),
-        file_path: patch_path.to_owned(),
-        hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+        commit_id: Arc::from(hunk.commit_id.as_str()),
+        commit_summary: Arc::from(hunk.commit_summary.as_str()),
+        file_path: Arc::from(patch_path),
+        hunk_header: Arc::from(COMMIT_ANCHOR_HEADER),
         old_lineno: None,
         new_lineno: None,
     };

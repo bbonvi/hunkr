@@ -663,10 +663,10 @@ fn diff_column_for_rendered_code_line_skips_line_number_gutter() {
         ]),
         raw_text: "+target".to_owned(),
         anchor: Some(DiffLineAnchor {
-            commit_id: "abc".to_owned(),
-            commit_summary: "summary".to_owned(),
-            file_path: "src/main.rs".to_owned(),
-            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            commit_id: "abc".into(),
+            commit_summary: "summary".into(),
+            file_path: "src/main.rs".into(),
+            hunk_header: "@@ -1,1 +1,1 @@".into(),
             old_lineno: Some(12),
             new_lineno: Some(12345),
         }),
@@ -712,10 +712,10 @@ fn diff_column_for_wrapped_row_applies_row_offset_before_raw_mapping() {
         ]),
         raw_text: "+target".to_owned(),
         anchor: Some(DiffLineAnchor {
-            commit_id: "abc".to_owned(),
-            commit_summary: "summary".to_owned(),
-            file_path: "src/main.rs".to_owned(),
-            hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+            commit_id: "abc".into(),
+            commit_summary: "summary".into(),
+            file_path: "src/main.rs".into(),
+            hunk_header: "@@ -1,1 +1,1 @@".into(),
             old_lineno: Some(12),
             new_lineno: Some(12345),
         }),
@@ -981,10 +981,10 @@ fn prune_diff_positions_keeps_existing_paths_even_if_content_changed() {
 #[test]
 fn pending_anchor_resolves_cursor_and_top_after_insertions() {
     let anchor = DiffLineAnchor {
-        commit_id: "abc123".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+        commit_id: "abc123".into(),
+        commit_summary: "summary".into(),
+        file_path: "src/lib.rs".into(),
+        hunk_header: "@@ -1,1 +1,1 @@".into(),
         old_lineno: Some(1),
         new_lineno: Some(1),
     };
@@ -1092,10 +1092,10 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
 #[test]
 fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
     let anchor = DiffLineAnchor {
-        commit_id: "abc123".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+        commit_id: "abc123".into(),
+        commit_summary: "summary".into(),
+        file_path: "src/lib.rs".into(),
+        hunk_header: "@@ -1,1 +1,1 @@".into(),
         old_lineno: Some(1),
         new_lineno: Some(1),
     };
@@ -1914,15 +1914,15 @@ fn commit_banner_renders_only_when_commit_changes() {
 #[test]
 fn commit_anchor_marker_is_detected() {
     let commit_anchor = DiffLineAnchor {
-        commit_id: "abc1234".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+        commit_id: "abc1234".into(),
+        commit_summary: "summary".into(),
+        file_path: "src/lib.rs".into(),
+        hunk_header: COMMIT_ANCHOR_HEADER.into(),
         old_lineno: None,
         new_lineno: None,
     };
     let hunk_anchor = DiffLineAnchor {
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+        hunk_header: "@@ -1,1 +1,1 @@".into(),
         old_lineno: Some(1),
         new_lineno: Some(1),
         ..commit_anchor.clone()
@@ -1935,10 +1935,10 @@ fn commit_anchor_marker_is_detected() {
 #[test]
 fn diff_line_anchor_match_requires_exact_line_mapping() {
     let base = DiffLineAnchor {
-        commit_id: "abc".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+        commit_id: "abc".into(),
+        commit_summary: "summary".into(),
+        file_path: "src/lib.rs".into(),
+        hunk_header: "@@ -1,1 +1,1 @@".into(),
         old_lineno: Some(1),
         new_lineno: Some(1),
     };
@@ -2043,15 +2043,15 @@ fn diff_search_steps_backward_between_occurrences_on_same_line() {
 #[test]
 fn hunk_header_detection_ignores_commit_banner() {
     let commit_anchor = DiffLineAnchor {
-        commit_id: "abc1234".to_owned(),
-        commit_summary: "summary".to_owned(),
-        file_path: "src/lib.rs".to_owned(),
-        hunk_header: COMMIT_ANCHOR_HEADER.to_owned(),
+        commit_id: "abc1234".into(),
+        commit_summary: "summary".into(),
+        file_path: "src/lib.rs".into(),
+        hunk_header: COMMIT_ANCHOR_HEADER.into(),
         old_lineno: None,
         new_lineno: None,
     };
     let hunk_anchor = DiffLineAnchor {
-        hunk_header: "@@ -1,1 +1,1 @@".to_owned(),
+        hunk_header: "@@ -1,1 +1,1 @@".into(),
         old_lineno: Some(1),
         new_lineno: Some(1),
         ..commit_anchor.clone()

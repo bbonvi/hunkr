@@ -715,7 +715,7 @@ pub(super) fn diff_line_anchor_matches(actual: &DiffLineAnchor, expected: &DiffL
 }
 
 pub(super) fn is_commit_line_anchor(anchor: &DiffLineAnchor) -> bool {
-    anchor.hunk_header == COMMIT_ANCHOR_HEADER
+    anchor.hunk_header.as_ref() == COMMIT_ANCHOR_HEADER
         && anchor.old_lineno.is_none()
         && anchor.new_lineno.is_none()
 }

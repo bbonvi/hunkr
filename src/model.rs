@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -203,10 +206,10 @@ impl AggregatedDiff {
 /// Stable metadata for one rendered diff position.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffLineAnchor {
-    pub commit_id: String,
-    pub commit_summary: String,
-    pub file_path: String,
-    pub hunk_header: String,
+    pub commit_id: Arc<str>,
+    pub commit_summary: Arc<str>,
+    pub file_path: Arc<str>,
+    pub hunk_header: Arc<str>,
     pub old_lineno: Option<u32>,
     pub new_lineno: Option<u32>,
 }
