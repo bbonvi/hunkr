@@ -127,6 +127,25 @@ fn draw_app(app: &mut App, width: u16, height: u16) {
         .expect("draw test frame");
 }
 
+fn bootstrap_two_file_boundary_fixture() -> (TempDir, App) {
+    let repo = init_test_repo();
+    let alpha = repo.path().join("alpha.txt");
+    let beta = repo.path().join("beta.txt");
+    std::fs::write(&alpha, "one\ntwo\nthree\n").expect("write alpha baseline");
+    std::fs::write(&beta, "red\ngreen\nblue\n").expect("write beta baseline");
+    run_git(repo.path(), &["add", "alpha.txt", "beta.txt"]);
+    run_git(repo.path(), &["commit", "-m", "seed two files", "-q"]);
+
+    std::fs::write(&alpha, "one\ntwo changed\nthree\n").expect("write alpha update");
+    std::fs::write(&beta, "red\ngreen changed\nblue\n").expect("write beta update");
+    run_git(repo.path(), &["add", "alpha.txt", "beta.txt"]);
+    run_git(repo.path(), &["commit", "-m", "touch both files", "-q"]);
+
+    let mut app = bootstrap_driver(repo.path()).into_app();
+    draw_app(&mut app, 120, 22);
+    (repo, app)
+}
+
 fn git_stdout(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
@@ -718,6 +737,114 @@ fn sticky_hunk_header_switch_keeps_hunk_sticky_row_stable() {
         sticky_hunk_after_second,
         Some(second_hunk),
         "sticky hunk should switch once the new hunk body scrolls under the top edge",
+    );
+}
+
+#[test]
+fn sticky_file_header_switch_keeps_file_sticky_row_stable() {
+    let (_repo, app) = bootstrap_two_file_boundary_fixture();
+
+    let file_headers = app
+        .domain
+        .rendered_diff
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| line.raw_text.starts_with("==== file ").then_some(idx))
+        .collect::<Vec<_>>();
+    assert!(
+        file_headers.len() >= 2,
+        "fixture should produce at least two file headers",
+    );
+    let first_file = file_headers[0];
+    let second_file = file_headers[1];
+
+    let viewport_rows = app
+        .ui
+        .diff_ui
+        .pane_rects
+        .diff
+        .height
+        .saturating_sub(2)
+        .max(1) as usize;
+    let sticky_at_second = app.sticky_banner_indexes_for_scroll(second_file, viewport_rows);
+    let sticky_after_second = app.sticky_banner_indexes_for_scroll(second_file + 1, viewport_rows);
+
+    let sticky_file_at_second = sticky_at_second
+        .iter()
+        .copied()
+        .find(|idx| app.domain.rendered_diff[*idx].raw_text.starts_with("==== file "));
+    let sticky_file_after_second = sticky_after_second
+        .iter()
+        .copied()
+        .find(|idx| app.domain.rendered_diff[*idx].raw_text.starts_with("==== file "));
+    assert_eq!(
+        sticky_file_at_second,
+        Some(first_file),
+        "previous file banner should stay sticky while the next file banner is the top body row",
+    );
+    assert_eq!(
+        sticky_file_after_second,
+        Some(second_file),
+        "file sticky should switch only after scrolling past the next file banner",
+    );
+}
+
+#[test]
+fn sticky_commit_header_switch_keeps_commit_sticky_row_stable() {
+    let (_repo, app) = bootstrap_two_file_boundary_fixture();
+
+    let commit_headers = app
+        .domain
+        .rendered_diff
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            line.anchor
+                .as_ref()
+                .is_some_and(is_commit_line_anchor)
+                .then_some(idx)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        commit_headers.len() >= 2,
+        "fixture should produce at least two commit headers",
+    );
+    let first_commit = commit_headers[0];
+    let second_commit = commit_headers[1];
+
+    let viewport_rows = app
+        .ui
+        .diff_ui
+        .pane_rects
+        .diff
+        .height
+        .saturating_sub(2)
+        .max(1) as usize;
+    let sticky_at_second = app.sticky_banner_indexes_for_scroll(second_commit, viewport_rows);
+    let sticky_after_second =
+        app.sticky_banner_indexes_for_scroll(second_commit + 1, viewport_rows);
+
+    let sticky_commit_at_second = sticky_at_second.iter().copied().find(|idx| {
+        app.domain.rendered_diff[*idx]
+            .anchor
+            .as_ref()
+            .is_some_and(is_commit_line_anchor)
+    });
+    let sticky_commit_after_second = sticky_after_second.iter().copied().find(|idx| {
+        app.domain.rendered_diff[*idx]
+            .anchor
+            .as_ref()
+            .is_some_and(is_commit_line_anchor)
+    });
+    assert_eq!(
+        sticky_commit_at_second,
+        Some(first_commit),
+        "previous commit banner should stay sticky while the next commit banner is top body row",
+    );
+    assert_eq!(
+        sticky_commit_after_second,
+        Some(second_commit),
+        "commit sticky should switch only after scrolling past the next commit banner",
     );
 }
 

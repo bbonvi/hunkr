@@ -490,44 +490,37 @@ impl App {
     }
 
     pub(super) fn sticky_commit_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
-        if scroll == 0 || self.domain.rendered_diff.is_empty() {
-            return None;
-        }
-        let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
-        let file_range_idx = self.file_range_index_for_line(top)?;
-        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
-        for idx in (file_range.start..=top).rev() {
-            let is_commit_banner = self.domain.rendered_diff[idx]
+        let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
+        (0..=lookup).rev().find(|&idx| {
+            self.domain.rendered_diff[idx]
                 .anchor
                 .as_ref()
-                .is_some_and(is_commit_line_anchor);
-            if is_commit_banner {
-                return (idx < top).then_some(idx);
-            }
-        }
-        None
+                .is_some_and(is_commit_line_anchor)
+        })
     }
 
     pub(super) fn sticky_file_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
-        if scroll == 0 || self.domain.rendered_diff.is_empty() {
-            return None;
-        }
-        let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
-        let file_range_idx = self.file_range_index_for_line(top)?;
+        let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
+        let file_range_idx = self.file_range_index_for_line(lookup)?;
         let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
-        (file_range.start < top).then_some(file_range.start)
+        Some(file_range.start)
     }
 
     pub(super) fn sticky_hunk_header_index_for_scroll(&self, scroll: usize) -> Option<usize> {
+        let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
+        let file_range_idx = self.file_range_index_for_line(lookup)?;
+        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
+        (file_range.start..=lookup)
+            .rev()
+            .find(|&idx| is_hunk_header_line(&self.domain.rendered_diff[idx]))
+    }
+
+    fn sticky_lookup_line_for_scroll(&self, scroll: usize) -> Option<usize> {
         if scroll == 0 || self.domain.rendered_diff.is_empty() {
             return None;
         }
         let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
-        let file_range_idx = self.file_range_index_for_line(top)?;
-        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
-        (file_range.start..top)
-            .rev()
-            .find(|&idx| is_hunk_header_line(&self.domain.rendered_diff[idx]))
+        top.checked_sub(1)
     }
 
     pub(super) fn sticky_banner_indexes_for_scroll(
