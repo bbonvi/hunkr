@@ -17,7 +17,8 @@ impl App {
         self.set_diff_scroll(next.scroll);
         self.domain.diff_position.cursor = next.cursor.min(max_idx);
         self.sync_diff_visual_bounds();
-        self.ensure_cursor_visible();
+        self.sync_diff_block_cursor_to_cursor_line();
+        self.sync_selected_file_to_cursor();
     }
 
     pub(super) fn move_file_cursor(&mut self, delta: isize) {
@@ -491,7 +492,9 @@ impl App {
 
     pub(super) fn sticky_commit_banner_index_for_scroll(&self, scroll: usize) -> Option<usize> {
         let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
-        (0..=lookup).rev().find(|&idx| {
+        let file_range_idx = self.file_range_index_for_line(lookup)?;
+        let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
+        (file_range.start..=lookup).rev().find(|&idx| {
             self.domain.rendered_diff[idx]
                 .anchor
                 .as_ref()
@@ -508,6 +511,15 @@ impl App {
 
     pub(super) fn sticky_hunk_header_index_for_scroll(&self, scroll: usize) -> Option<usize> {
         let lookup = self.sticky_lookup_line_for_scroll(scroll)?;
+        let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
+        if self
+            .domain
+            .rendered_diff
+            .get(top)
+            .is_some_and(|line| line.raw_text.starts_with("==== file "))
+        {
+            return None;
+        }
         let file_range_idx = self.file_range_index_for_line(lookup)?;
         let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
         (file_range.start..=lookup)

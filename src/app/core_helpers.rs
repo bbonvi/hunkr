@@ -684,17 +684,25 @@ pub(super) fn scrolled_diff_position_preserving_offset(
     max_index: usize,
 ) -> DiffPosition {
     let offset = current.cursor.saturating_sub(current.scroll);
-    let delta_abs = delta.saturating_abs() as usize;
-    let next_scroll = if delta >= 0 {
-        current.scroll.saturating_add(delta_abs)
-    } else {
-        current.scroll.saturating_sub(delta_abs)
-    }
-    .min(max_scroll);
+    let next_scroll = scrolled_diff_scroll_target(current.scroll, delta, max_scroll);
 
     DiffPosition {
         scroll: next_scroll,
         cursor: next_scroll.saturating_add(offset).min(max_index),
+    }
+}
+
+/// Computes the scroll target after applying `delta`, clamped to `max_scroll`.
+pub(super) fn scrolled_diff_scroll_target(
+    current_scroll: usize,
+    delta: isize,
+    max_scroll: usize,
+) -> usize {
+    let delta_abs = delta.saturating_abs() as usize;
+    if delta >= 0 {
+        current_scroll.saturating_add(delta_abs).min(max_scroll)
+    } else {
+        current_scroll.saturating_sub(delta_abs).min(max_scroll)
     }
 }
 

@@ -790,7 +790,37 @@ fn sticky_file_header_switch_keeps_file_sticky_row_stable() {
 }
 
 #[test]
-fn sticky_commit_header_switch_keeps_commit_sticky_row_stable() {
+fn sticky_file_boundary_does_not_carry_previous_hunk_header() {
+    let (_repo, app) = bootstrap_two_file_boundary_fixture();
+    let second_file = app
+        .domain
+        .rendered_diff
+        .iter()
+        .enumerate()
+        .find_map(|(idx, line)| line.raw_text.starts_with("==== file 2/").then_some(idx))
+        .expect("second file header");
+
+    let viewport_rows = app
+        .ui
+        .diff_ui
+        .pane_rects
+        .diff
+        .height
+        .saturating_sub(2)
+        .max(1) as usize;
+    let sticky = app.sticky_banner_indexes_for_scroll(second_file, viewport_rows);
+
+    assert!(
+        !sticky
+            .iter()
+            .copied()
+            .any(|idx| is_hunk_header_line(&app.domain.rendered_diff[idx])),
+        "file-header boundary should not keep previous-file hunk sticky row",
+    );
+}
+
+#[test]
+fn sticky_commit_header_switch_is_scoped_to_current_file() {
     let (_repo, app) = bootstrap_two_file_boundary_fixture();
 
     let commit_headers = app
@@ -809,7 +839,6 @@ fn sticky_commit_header_switch_keeps_commit_sticky_row_stable() {
         commit_headers.len() >= 2,
         "fixture should produce at least two commit headers",
     );
-    let first_commit = commit_headers[0];
     let second_commit = commit_headers[1];
 
     let viewport_rows = app
@@ -838,13 +867,35 @@ fn sticky_commit_header_switch_keeps_commit_sticky_row_stable() {
     });
     assert_eq!(
         sticky_commit_at_second,
-        Some(first_commit),
-        "previous commit banner should stay sticky while the next commit banner is top body row",
+        None,
+        "commit sticky should not leak from previous file into next file header boundary",
     );
     assert_eq!(
         sticky_commit_after_second,
         Some(second_commit),
-        "commit sticky should switch only after scrolling past the next commit banner",
+        "commit sticky should appear after scrolling past current-file commit banner",
+    );
+}
+
+#[test]
+fn diff_viewport_scroll_moves_exactly_requested_delta_without_scrolloff_correction() {
+    let (_repo, mut app) = bootstrap_two_file_boundary_fixture();
+    draw_app(&mut app, 120, 10);
+    let start_scroll = app.max_diff_scroll().saturating_sub(2);
+    app.set_diff_scroll(start_scroll);
+
+    let visible = app.visible_diff_rows_for_scroll(start_scroll);
+    app.domain.diff_position.cursor = start_scroll
+        .saturating_add(visible.saturating_sub(1))
+        .min(app.domain.rendered_diff.len().saturating_sub(1));
+    app.tuning.diff_cursor_scroll_off_lines = 6;
+
+    let expected_scroll = start_scroll.saturating_add(1).min(app.max_diff_scroll());
+    app.scroll_diff_viewport(1);
+    assert_eq!(
+        app.domain.diff_position.scroll,
+        expected_scroll,
+        "viewport scroll should move by exactly requested delta even with non-zero scrolloff",
     );
 }
 
