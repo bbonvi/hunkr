@@ -48,6 +48,8 @@ fn reload_commits_inner(app: &mut App, preserve_manual_selection: bool) -> anyho
         .load_first_parent_history(app.tuning.history_limit)?;
     let prior_cursor_idx = app.ui.commit_ui.list_state.selected();
     let prior_cursor_commit_id = app.selected_commit_id();
+    let prior_selected_commits = selected_ids_oldest_first(&app.domain.commits);
+    let prior_uncommitted_selected = app.uncommitted_selected();
     let prior_visual_anchor_commit_id = app
         .ui
         .commit_ui
@@ -139,8 +141,40 @@ fn reload_commits_inner(app: &mut App, preserve_manual_selection: bool) -> anyho
         app.runtime.status = format!("{new_commits} new unreviewed {noun} detected");
     }
 
-    rebuild_selection_dependent_views(app)?;
+    let selected_commits_after_reload = selected_ids_oldest_first(&app.domain.commits);
+    let uncommitted_selected_after_reload = app.uncommitted_selected();
+    let should_rebuild_selection_views = should_rebuild_selection_views_after_reload(
+        preserve_manual_selection,
+        &prior_selected_commits,
+        &selected_commits_after_reload,
+        prior_uncommitted_selected,
+        uncommitted_selected_after_reload,
+        !app.domain.aggregate.files.is_empty(),
+    );
+    if should_rebuild_selection_views {
+        rebuild_selection_dependent_views(app)?;
+    }
     Ok(())
+}
+
+fn should_rebuild_selection_views_after_reload(
+    preserve_manual_selection: bool,
+    prior_selected_commits: &[String],
+    selected_commits_after_reload: &[String],
+    prior_uncommitted_selected: bool,
+    uncommitted_selected_after_reload: bool,
+    had_aggregate_diff: bool,
+) -> bool {
+    if !preserve_manual_selection {
+        return true;
+    }
+    if prior_uncommitted_selected || uncommitted_selected_after_reload {
+        return true;
+    }
+    if prior_selected_commits != selected_commits_after_reload {
+        return true;
+    }
+    selected_commits_after_reload.is_empty() && had_aggregate_diff
 }
 
 /// Rebuilds aggregate diff + file/diff projections for current commit selection.
@@ -605,5 +639,36 @@ mod tests {
             .map(|row| row.status)
             .expect("status after action");
         assert_eq!(status_after_action, ReviewStatus::IssueFound);
+    }
+
+    #[test]
+    fn reload_policy_skips_selection_rebuild_for_stable_committed_selection() {
+        let selected = vec!["a".to_owned(), "b".to_owned()];
+        assert!(!super::should_rebuild_selection_views_after_reload(
+            true, &selected, &selected, false, false, true,
+        ));
+    }
+
+    #[test]
+    fn reload_policy_rebuilds_when_uncommitted_was_or_is_selected() {
+        let selected = vec!["a".to_owned()];
+        assert!(super::should_rebuild_selection_views_after_reload(
+            true, &selected, &selected, true, false, true,
+        ));
+        assert!(super::should_rebuild_selection_views_after_reload(
+            true, &selected, &selected, false, true, true,
+        ));
+    }
+
+    #[test]
+    fn reload_policy_rebuilds_when_selected_commits_change() {
+        assert!(super::should_rebuild_selection_views_after_reload(
+            true,
+            &["a".to_owned()],
+            &["b".to_owned()],
+            false,
+            false,
+            true,
+        ));
     }
 }
