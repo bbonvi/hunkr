@@ -14,7 +14,7 @@ fn config_defaults_when_file_missing() {
     assert_eq!(loaded.history_limit, 400);
     assert_eq!(loaded.auto_refresh_every_secs, 2);
     assert_eq!(loaded.relative_time_redraw_every_secs, 30);
-    assert_eq!(loaded.theme_reload_poll_every_ms, 250);
+    assert_eq!(loaded.theme_reload_poll_every_ms, 1_000);
     assert_eq!(loaded.selection_rebuild_debounce_ms, 120);
     assert_eq!(loaded.terminal_clear_every_secs, 120);
     assert_eq!(loaded.diff_cursor_scroll_off_lines, 3);
@@ -79,7 +79,7 @@ fn config_clamps_zero_runtime_tuning_values() {
     assert_eq!(loaded.history_limit, 400);
     assert_eq!(loaded.auto_refresh_every_secs, 2);
     assert_eq!(loaded.relative_time_redraw_every_secs, 30);
-    assert_eq!(loaded.theme_reload_poll_every_ms, 250);
+    assert_eq!(loaded.theme_reload_poll_every_ms, 1_000);
     assert_eq!(loaded.selection_rebuild_debounce_ms, 120);
     assert_eq!(loaded.terminal_clear_every_secs, 120);
     assert_eq!(loaded.diff_cursor_scroll_off_lines, 3);
