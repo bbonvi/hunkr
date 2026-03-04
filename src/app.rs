@@ -76,9 +76,9 @@ use crate::{
     config::{AppConfig, StartupTheme},
     git_data::{GitService, WorktreeInfo},
     model::{
-        AggregatedDiff, CommitInfo, DiffLineAnchor, DiffLineKind, FileChangeKind,
-        FileChangeSummary, FilePatch, HunkLine, ReviewState, ReviewStatus, UNCOMMITTED_COMMIT_ID,
-        UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
+        AggregatedDiff, CommitInfo, DiffLineAnchor, DiffLineAnchorMeta, DiffLineKind,
+        FileChangeKind, FileChangeSummary, FilePatch, ReviewState, ReviewStatus,
+        UNCOMMITTED_COMMIT_ID, UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
     },
     store::StateStore,
 };
@@ -340,10 +340,10 @@ struct PaneRects {
 
 #[derive(Debug, Clone)]
 struct RenderedDiffLine {
-    /// Prebuilt display line for special/test rows. Runtime rows keep this empty
-    /// and render from compact metadata on demand.
+    #[cfg(test)]
+    /// Test-only escape hatch for unit tests that inject prebuilt display rows.
     line: Line<'static>,
-    raw_text: String,
+    raw_text: Arc<str>,
     anchor: Option<DiffLineAnchor>,
 }
 

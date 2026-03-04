@@ -448,7 +448,7 @@ fn diff_line_locator_for_index(lines: &[RenderedDiffLine], idx: usize) -> DiffLi
     let line = &lines[idx];
     DiffLineLocator {
         anchor: line.anchor.clone(),
-        raw_text: line.raw_text.clone(),
+        raw_text: line.raw_text.to_string(),
         raw_text_occurrence: raw_text_occurrence_at_index(lines, idx, &line.raw_text),
     }
 }
@@ -456,7 +456,7 @@ fn diff_line_locator_for_index(lines: &[RenderedDiffLine], idx: usize) -> DiffLi
 fn raw_text_occurrence_at_index(lines: &[RenderedDiffLine], idx: usize, raw_text: &str) -> usize {
     lines[..=idx]
         .iter()
-        .filter(|line| line.raw_text == raw_text)
+        .filter(|line| line.raw_text.as_ref() == raw_text)
         .count()
         .saturating_sub(1)
 }
@@ -469,7 +469,7 @@ fn find_index_for_raw_text_occurrence(
     let mut seen = 0usize;
     let mut last_match = None;
     for (idx, line) in lines.iter().enumerate() {
-        if line.raw_text == raw_text {
+        if line.raw_text.as_ref() == raw_text {
             if seen == occurrence {
                 return Some(idx);
             }
@@ -492,7 +492,7 @@ fn find_index_for_raw_text_occurrence_in_candidates(
         let Some(line) = lines.get(*idx) else {
             continue;
         };
-        if line.raw_text == raw_text {
+        if line.raw_text.as_ref() == raw_text {
             if seen == occurrence {
                 return Some(*idx);
             }
@@ -518,7 +518,7 @@ fn display_line_with_selection(
         .collect::<String>();
     let layout = diff_payload_layout(rendered, &line);
     let coord_text = if layout.highlight_without_line_numbers {
-        rendered.raw_text.as_str()
+        rendered.raw_text.as_ref()
     } else {
         display_text.as_str()
     };
@@ -931,7 +931,9 @@ mod tests {
         let theme = UiTheme::from_mode(ThemeMode::Dark);
         let rendered = RenderedDiffLine {
             line: Line::from("==== file 1/12: src/app/ui/diff_pane.rs ===="),
-            raw_text: "==== file 1/12: src/app/ui/diff_pane.rs ====".to_owned(),
+            raw_text: "==== file 1/12: src/app/ui/diff_pane.rs ===="
+                .to_owned()
+                .into(),
             anchor: None,
         };
         let selection = SelectionRenderContext {
@@ -963,15 +965,15 @@ mod tests {
                 Span::raw(" "),
                 Span::styled("pub block_cursor_col: usize,", Style::default()),
             ]),
-            raw_text: "+ pub block_cursor_col: usize,".to_owned(),
-            anchor: Some(DiffLineAnchor {
-                commit_id: "head".into(),
-                commit_summary: "summary".into(),
-                file_path: "src/app/ui/diff_pane.rs".into(),
-                hunk_header: "@@ -1,1 +1,1 @@".into(),
-                old_lineno: Some(43),
-                new_lineno: Some(43),
-            }),
+            raw_text: "+ pub block_cursor_col: usize,".to_owned().into(),
+            anchor: Some(DiffLineAnchor::new(
+                "head",
+                "summary",
+                "src/app/ui/diff_pane.rs",
+                "@@ -1,1 +1,1 @@",
+                Some(43),
+                Some(43),
+            )),
         };
         let selection = SelectionRenderContext {
             visual_range: Some((0, 0)),
@@ -1015,15 +1017,15 @@ mod tests {
                 Span::raw(" "),
                 Span::styled("pub block_cursor_col: usize,", Style::default()),
             ]),
-            raw_text: "+ pub block_cursor_col: usize,".to_owned(),
-            anchor: Some(DiffLineAnchor {
-                commit_id: "head".into(),
-                commit_summary: "summary".into(),
-                file_path: "src/app/ui/diff_pane.rs".into(),
-                hunk_header: "@@ -1,1 +1,1 @@".into(),
-                old_lineno: Some(43),
-                new_lineno: Some(43),
-            }),
+            raw_text: "+ pub block_cursor_col: usize,".to_owned().into(),
+            anchor: Some(DiffLineAnchor::new(
+                "head",
+                "summary",
+                "src/app/ui/diff_pane.rs",
+                "@@ -1,1 +1,1 @@",
+                Some(43),
+                Some(43),
+            )),
         };
         let selection = SelectionRenderContext {
             visual_range: None,
@@ -1066,15 +1068,17 @@ mod tests {
                     Style::default(),
                 ),
             ]),
-            raw_text: "   pub(in crate::app) struct DiffPaneBody<'a> {".to_owned(),
-            anchor: Some(DiffLineAnchor {
-                commit_id: "head".into(),
-                commit_summary: "summary".into(),
-                file_path: "src/app/ui/diff_pane.rs".into(),
-                hunk_header: "@@ -1,1 +1,1 @@".into(),
-                old_lineno: Some(9),
-                new_lineno: Some(9),
-            }),
+            raw_text: "   pub(in crate::app) struct DiffPaneBody<'a> {"
+                .to_owned()
+                .into(),
+            anchor: Some(DiffLineAnchor::new(
+                "head",
+                "summary",
+                "src/app/ui/diff_pane.rs",
+                "@@ -1,1 +1,1 @@",
+                Some(9),
+                Some(9),
+            )),
         };
         let selection = SelectionRenderContext {
             visual_range: None,
@@ -1104,12 +1108,12 @@ mod tests {
         let rendered = vec![
             RenderedDiffLine {
                 line: Line::from("aaaaaaaaaa"),
-                raw_text: "aaaaaaaaaa".to_owned(),
+                raw_text: "aaaaaaaaaa".to_owned().into(),
                 anchor: None,
             },
             RenderedDiffLine {
                 line: Line::from("bbbbbbbbbb"),
-                raw_text: "bbbbbbbbbb".to_owned(),
+                raw_text: "bbbbbbbbbb".to_owned().into(),
                 anchor: None,
             },
         ];
@@ -1160,12 +1164,12 @@ mod tests {
         let rendered = vec![
             RenderedDiffLine {
                 line: Line::from("==== file 1/1: src/main.rs ===="),
-                raw_text: "==== file 1/1: src/main.rs ====".to_owned(),
+                raw_text: "==== file 1/1: src/main.rs ====".to_owned().into(),
                 anchor: None,
             },
             RenderedDiffLine {
                 line: Line::from("123456789"),
-                raw_text: "123456789".to_owned(),
+                raw_text: "123456789".to_owned().into(),
                 anchor: None,
             },
         ];
@@ -1224,15 +1228,15 @@ mod tests {
                 Span::raw(" "),
                 Span::styled("alpha target omega", Style::default()),
             ]),
-            raw_text: "+ alpha target omega".to_owned(),
-            anchor: Some(DiffLineAnchor {
-                commit_id: "head".into(),
-                commit_summary: "summary".into(),
-                file_path: "src/main.rs".into(),
-                hunk_header: "@@ -1,1 +1,1 @@".into(),
-                old_lineno: Some(9),
-                new_lineno: Some(9),
-            }),
+            raw_text: "+ alpha target omega".to_owned().into(),
+            anchor: Some(DiffLineAnchor::new(
+                "head",
+                "summary",
+                "src/main.rs",
+                "@@ -1,1 +1,1 @@",
+                Some(9),
+                Some(9),
+            )),
         }];
 
         let viewport = build_diff_viewport_rows(

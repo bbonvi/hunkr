@@ -141,7 +141,7 @@ pub enum DiffLineKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HunkLine {
     pub kind: DiffLineKind,
-    pub text: String,
+    pub text: Arc<str>,
     pub old_lineno: Option<u32>,
     pub new_lineno: Option<u32>,
 }
@@ -149,11 +149,11 @@ pub struct HunkLine {
 /// One hunk associated with exactly one commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hunk {
-    pub commit_id: String,
-    pub commit_short: String,
-    pub commit_summary: String,
+    pub commit_id: Arc<str>,
+    pub commit_short: Arc<str>,
+    pub commit_summary: Arc<str>,
     pub commit_timestamp: i64,
-    pub header: String,
+    pub header: Arc<str>,
     pub old_start: u32,
     pub new_start: u32,
     pub lines: Vec<HunkLine>,
@@ -206,10 +206,77 @@ impl AggregatedDiff {
 /// Stable metadata for one rendered diff position.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffLineAnchor {
+    pub meta: Arc<DiffLineAnchorMeta>,
+    pub old_lineno: Option<u32>,
+    pub new_lineno: Option<u32>,
+}
+
+/// Shared anchor identity reused by many rows in the same hunk/commit/file context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffLineAnchorMeta {
     pub commit_id: Arc<str>,
     pub commit_summary: Arc<str>,
     pub file_path: Arc<str>,
     pub hunk_header: Arc<str>,
-    pub old_lineno: Option<u32>,
-    pub new_lineno: Option<u32>,
+}
+
+impl DiffLineAnchor {
+    pub fn with_meta(
+        meta: Arc<DiffLineAnchorMeta>,
+        old_lineno: Option<u32>,
+        new_lineno: Option<u32>,
+    ) -> Self {
+        Self {
+            meta,
+            old_lineno,
+            new_lineno,
+        }
+    }
+
+    pub fn new(
+        commit_id: impl Into<Arc<str>>,
+        commit_summary: impl Into<Arc<str>>,
+        file_path: impl Into<Arc<str>>,
+        hunk_header: impl Into<Arc<str>>,
+        old_lineno: Option<u32>,
+        new_lineno: Option<u32>,
+    ) -> Self {
+        Self::with_meta(
+            Arc::new(DiffLineAnchorMeta {
+                commit_id: commit_id.into(),
+                commit_summary: commit_summary.into(),
+                file_path: file_path.into(),
+                hunk_header: hunk_header.into(),
+            }),
+            old_lineno,
+            new_lineno,
+        )
+    }
+
+    pub fn commit_id(&self) -> &str {
+        self.meta.commit_id.as_ref()
+    }
+
+    pub fn commit_summary(&self) -> &str {
+        self.meta.commit_summary.as_ref()
+    }
+
+    pub fn file_path(&self) -> &str {
+        self.meta.file_path.as_ref()
+    }
+
+    pub fn hunk_header(&self) -> &str {
+        self.meta.hunk_header.as_ref()
+    }
+
+    pub fn with_hunk_header(
+        &self,
+        hunk_header: impl Into<Arc<str>>,
+        old_lineno: Option<u32>,
+        new_lineno: Option<u32>,
+    ) -> Self {
+        let mut meta = (*self.meta).clone();
+        meta.hunk_header = hunk_header.into();
+        Self::with_meta(Arc::new(meta), old_lineno, new_lineno)
+    }
 }

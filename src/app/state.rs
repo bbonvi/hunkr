@@ -308,10 +308,13 @@ impl App {
                 .deleted_file_content_visible
                 .contains(&patch.path);
         if deleted_file && !deleted_content_expanded {
-            let mut last_commit_banner: Option<String> = None;
+            let mut last_commit_banner: Option<Arc<str>> = None;
             let mut rendered_toggle = false;
             for hunk in &patch.hunks {
-                if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
+                if should_render_commit_banner(
+                    last_commit_banner.as_deref(),
+                    hunk.commit_id.as_ref(),
+                ) {
                     rendered.push(rendered_commit_banner_line(
                         &patch.path,
                         hunk,
@@ -339,12 +342,12 @@ impl App {
             rendered.push(rendered_separator_line(&theme));
             return rendered;
         }
-        let mut last_commit_banner: Option<String> = None;
+        let mut last_commit_banner: Option<Arc<str>> = None;
         let mut rendered_deleted_toggle = false;
         let shared_file_path: Arc<str> = Arc::from(patch.path.as_str());
 
         for hunk in &patch.hunks {
-            if should_render_commit_banner(last_commit_banner.as_deref(), &hunk.commit_id) {
+            if should_render_commit_banner(last_commit_banner.as_deref(), hunk.commit_id.as_ref()) {
                 rendered.push(rendered_commit_banner_line(
                     &patch.path,
                     hunk,
@@ -361,20 +364,21 @@ impl App {
                 }
             }
             last_commit_banner = Some(hunk.commit_id.clone());
-            let shared_commit_id: Arc<str> = Arc::from(hunk.commit_id.as_str());
-            let shared_commit_summary: Arc<str> = Arc::from(hunk.commit_summary.as_str());
-            let shared_hunk_header: Arc<str> = Arc::from(hunk.header.as_str());
+            let shared_anchor_meta = Arc::new(DiffLineAnchorMeta {
+                commit_id: hunk.commit_id.clone(),
+                commit_summary: hunk.commit_summary.clone(),
+                file_path: shared_file_path.clone(),
+                hunk_header: hunk.header.clone(),
+            });
 
             let hunk_header = sanitize_terminal_text(&hunk.header);
             let hunk_label = format!("@@ {hunk_header}");
             rendered.push(RenderedDiffLine {
+                #[cfg(test)]
                 line: Line::from(""),
-                raw_text: hunk_label,
+                raw_text: Arc::from(hunk_label),
                 anchor: Some(DiffLineAnchor {
-                    commit_id: shared_commit_id.clone(),
-                    commit_summary: shared_commit_summary.clone(),
-                    file_path: shared_file_path.clone(),
-                    hunk_header: shared_hunk_header.clone(),
+                    meta: shared_anchor_meta.clone(),
                     old_lineno: Some(hunk.old_start),
                     new_lineno: Some(hunk.new_start),
                 }),
@@ -382,16 +386,14 @@ impl App {
 
             for line in &hunk.lines {
                 let anchor = DiffLineAnchor {
-                    commit_id: shared_commit_id.clone(),
-                    commit_summary: shared_commit_summary.clone(),
-                    file_path: shared_file_path.clone(),
-                    hunk_header: shared_hunk_header.clone(),
+                    meta: shared_anchor_meta.clone(),
                     old_lineno: line.old_lineno,
                     new_lineno: line.new_lineno,
                 };
                 rendered.push(RenderedDiffLine {
+                    #[cfg(test)]
                     line: Line::from(""),
-                    raw_text: raw_diff_text(line),
+                    raw_text: line.text.clone(),
                     anchor: Some(anchor),
                 });
             }
@@ -416,7 +418,7 @@ impl App {
             if patch
                 .hunks
                 .iter()
-                .any(|hunk| hunk.commit_id == UNCOMMITTED_COMMIT_ID)
+                .any(|hunk| hunk.commit_id.as_ref() == UNCOMMITTED_COMMIT_ID)
             {
                 draft_paths.insert(path.clone());
             }
@@ -740,10 +742,12 @@ fn rendered_commit_banner_line(
     now_ts: i64,
 ) -> RenderedDiffLine {
     let commit_anchor = DiffLineAnchor {
-        commit_id: Arc::from(hunk.commit_id.as_str()),
-        commit_summary: Arc::from(hunk.commit_summary.as_str()),
-        file_path: Arc::from(patch_path),
-        hunk_header: Arc::from(COMMIT_ANCHOR_HEADER),
+        meta: Arc::new(DiffLineAnchorMeta {
+            commit_id: hunk.commit_id.clone(),
+            commit_summary: hunk.commit_summary.clone(),
+            file_path: Arc::from(patch_path),
+            hunk_header: Arc::from(COMMIT_ANCHOR_HEADER),
+        }),
         old_lineno: None,
         new_lineno: None,
     };
@@ -758,8 +762,9 @@ fn rendered_commit_banner_line(
         )
     };
     RenderedDiffLine {
+        #[cfg(test)]
         line: Line::from(""),
-        raw_text: commit_line,
+        raw_text: Arc::from(commit_line),
         anchor: Some(commit_anchor),
     }
 }
@@ -770,8 +775,9 @@ fn deleted_file_toggle_line(
     _theme: &UiTheme,
 ) -> RenderedDiffLine {
     RenderedDiffLine {
+        #[cfg(test)]
         line: Line::from(""),
-        raw_text: DELETED_FILE_TOGGLE_RAW_TEXT.to_owned(),
+        raw_text: Arc::from(DELETED_FILE_TOGGLE_RAW_TEXT),
         anchor: None,
     }
 }
@@ -882,16 +888,18 @@ pub(super) fn rendered_file_header_line(
         "==== file {file_index}/{total_files}: {sanitized_path}{rename_from}{raw_change_suffix} ===="
     );
     RenderedDiffLine {
+        #[cfg(test)]
         line: Line::from(""),
-        raw_text,
+        raw_text: Arc::from(raw_text),
         anchor: None,
     }
 }
 
 pub(super) fn rendered_separator_line(_theme: &UiTheme) -> RenderedDiffLine {
     RenderedDiffLine {
+        #[cfg(test)]
         line: Line::from(""),
-        raw_text: String::new(),
+        raw_text: Arc::from(""),
         anchor: None,
     }
 }

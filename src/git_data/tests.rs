@@ -87,7 +87,7 @@ fn aggregate_for_multiple_commits_returns_only_net_changes() {
         .hunks
         .iter()
         .flat_map(|h| h.lines.iter())
-        .any(|line| line.kind == DiffLineKind::Remove && line.text == "let a = 1;");
+        .any(|line| line.kind == DiffLineKind::Remove && line.text.as_ref() == "-let a = 1;");
     assert!(
         !has_removed_first_value,
         "net diff should not include intermediate churn"
@@ -98,23 +98,52 @@ fn aggregate_for_multiple_commits_returns_only_net_changes() {
         .iter()
         .flat_map(|h| h.lines.iter())
         .filter(|line| line.kind == DiffLineKind::Add)
-        .map(|line| line.text.as_str())
+        .map(|line| line.text.as_ref())
         .collect::<Vec<_>>();
-    assert!(added_lines.contains(&"let a = 2;"));
-    assert!(added_lines.contains(&"let b = 3;"));
+    assert!(added_lines.contains(&"+let a = 2;"));
+    assert!(added_lines.contains(&"+let b = 3;"));
 
     let newest = &first_parent_history[0];
     assert!(
         patch
             .hunks
             .iter()
-            .all(|h| h.commit_id == newest.id && h.commit_short.is_empty())
+            .all(|h| h.commit_id.as_ref() == newest.id && h.commit_short.is_empty())
     );
     assert!(
         patch
             .hunks
             .iter()
             .all(|h| h.commit_summary.contains("selection net changes ("))
+    );
+}
+
+#[test]
+fn aggregate_sanitizes_crlf_payload_without_carriage_returns() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "src.txt", "line 1\n", "first");
+    fs::write(repo_dir.path().join("src.txt"), "line 1\r\nline 2\r\n").expect("write crlf");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["add", "src.txt"]));
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["commit", "-m", "second"]));
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let history = service.load_first_parent_history(10).expect("history");
+    let selected = vec![history[0].id.clone()];
+    let aggregate = service.aggregate_for_commits(&selected).expect("aggregate");
+    let patch = aggregate.files.get("src.txt").expect("src patch");
+
+    assert!(
+        patch
+            .hunks
+            .iter()
+            .flat_map(|hunk| hunk.lines.iter())
+            .all(|line| !line.text.contains('\r')),
+        "line payload should not contain carriage returns after sanitization",
     );
 }
 

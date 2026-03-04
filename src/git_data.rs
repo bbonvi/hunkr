@@ -4,6 +4,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
     time::UNIX_EPOCH,
 };
 
@@ -273,17 +274,17 @@ impl GitService {
         detect_renames_and_copies(&mut diff)?;
 
         let source = DiffSourceMeta {
-            commit_id: newest_id.clone(),
+            commit_id: Arc::from(newest_id.as_str()),
             commit_short: if ordered_commit_ids.len() > 1 {
-                String::new()
+                Arc::from("")
             } else {
-                short_id(newest_id)
+                Arc::from(short_id(newest_id))
             },
-            commit_summary: aggregate_commit_summary(
+            commit_summary: Arc::from(aggregate_commit_summary(
                 &oldest_commit,
                 &newest_commit,
                 ordered_commit_ids.len(),
-            ),
+            )),
             commit_timestamp: newest_commit.time().seconds(),
         };
 
@@ -305,9 +306,9 @@ impl GitService {
         let mut files = BTreeMap::<String, FilePatch>::new();
         let mut file_changes = BTreeMap::<String, FileChangeSummary>::new();
         let source = DiffSourceMeta {
-            commit_id: UNCOMMITTED_COMMIT_ID.to_owned(),
-            commit_short: UNCOMMITTED_COMMIT_SHORT.to_owned(),
-            commit_summary: UNCOMMITTED_COMMIT_SUMMARY.to_owned(),
+            commit_id: Arc::from(UNCOMMITTED_COMMIT_ID),
+            commit_short: Arc::from(UNCOMMITTED_COMMIT_SHORT),
+            commit_summary: Arc::from(UNCOMMITTED_COMMIT_SUMMARY),
             commit_timestamp: Utc::now().timestamp(),
         };
         append_diff_files(&mut files, &mut file_changes, &diff, &source)
@@ -367,12 +368,14 @@ impl GitService {
             detect_renames_and_copies(&mut diff)?;
 
             let source = DiffSourceMeta {
-                commit_id: commit_id.clone(),
-                commit_short: short_id(commit_id),
-                commit_summary: commit
-                    .summary()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| "(no summary)".to_owned()),
+                commit_id: Arc::from(commit_id.as_str()),
+                commit_short: Arc::from(short_id(commit_id)),
+                commit_summary: Arc::from(
+                    commit
+                        .summary()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| "(no summary)".to_owned()),
+                ),
                 commit_timestamp: commit.time().seconds(),
             };
             let mut files = BTreeMap::<String, FilePatch>::new();
@@ -475,9 +478,9 @@ impl GitService {
 }
 
 struct DiffSourceMeta {
-    commit_id: String,
-    commit_short: String,
-    commit_summary: String,
+    commit_id: Arc<str>,
+    commit_short: Arc<str>,
+    commit_summary: Arc<str>,
     commit_timestamp: i64,
 }
 
@@ -525,9 +528,11 @@ fn append_diff_files(
                 commit_short: source.commit_short.clone(),
                 commit_summary: source.commit_summary.clone(),
                 commit_timestamp: source.commit_timestamp,
-                header: String::from_utf8_lossy(hunk.header())
-                    .trim_end_matches('\n')
-                    .to_owned(),
+                header: Arc::from(
+                    String::from_utf8_lossy(hunk.header())
+                        .trim_end_matches('\n')
+                        .to_owned(),
+                ),
                 old_start: hunk.old_start(),
                 new_start: hunk.new_start(),
                 lines: Vec::new(),
@@ -546,7 +551,7 @@ fn append_diff_files(
                     commit_short: source.commit_short.clone(),
                     commit_summary: source.commit_summary.clone(),
                     commit_timestamp: source.commit_timestamp,
-                    header: "@@ -0,0 +0,0 @@".to_owned(),
+                    header: Arc::from("@@ -0,0 +0,0 @@"),
                     old_start: 0,
                     new_start: 0,
                     lines: Vec::new(),
@@ -567,15 +572,23 @@ fn append_diff_files(
                     DiffLineKind::Context | DiffLineKind::Meta => {}
                 }
             }
-            let text = String::from_utf8_lossy(line.content())
+            let payload = String::from_utf8_lossy(line.content())
                 .trim_end_matches('\n')
                 .to_owned();
+            let mut text = String::with_capacity(payload.len().saturating_add(1));
+            text.push(match kind {
+                DiffLineKind::Add => '+',
+                DiffLineKind::Remove => '-',
+                DiffLineKind::Context => ' ',
+                DiffLineKind::Meta => '~',
+            });
+            text.push_str(&crate::text_sanitize::sanitize_terminal_text(&payload));
             let hunk = file
                 .get_mut(current_hunk_index.borrow().expect("hunk index set"))
                 .expect("hunk exists");
             hunk.lines.push(HunkLine {
                 kind,
-                text,
+                text: Arc::from(text),
                 old_lineno: line.old_lineno(),
                 new_lineno: line.new_lineno(),
             });
@@ -593,12 +606,12 @@ fn append_diff_files(
             commit_short: source.commit_short.clone(),
             commit_summary: source.commit_summary.clone(),
             commit_timestamp: source.commit_timestamp,
-            header: "@@ binary @@".to_owned(),
+            header: Arc::from("@@ binary @@"),
             old_start: 0,
             new_start: 0,
             lines: vec![HunkLine {
                 kind: DiffLineKind::Meta,
-                text: "[binary or metadata-only change]".to_owned(),
+                text: Arc::from("~[binary or metadata-only change]"),
                 old_lineno: None,
                 new_lineno: None,
             }],
@@ -865,14 +878,11 @@ fn patch_line_signatures(patch: &FilePatch) -> BTreeSet<String> {
         .hunks
         .iter()
         .flat_map(|hunk| hunk.lines.iter())
-        .filter_map(|line| {
-            let prefix = match line.kind {
-                DiffLineKind::Add => '+',
-                DiffLineKind::Remove => '-',
-                DiffLineKind::Meta => '~',
-                DiffLineKind::Context => return None,
-            };
-            Some(format!("{prefix}{}", line.text))
+        .filter_map(|line| match line.kind {
+            DiffLineKind::Add | DiffLineKind::Remove | DiffLineKind::Meta => {
+                Some(line.text.as_ref().to_owned())
+            }
+            DiffLineKind::Context => None,
         })
         .collect()
 }

@@ -213,7 +213,7 @@ impl App {
         ];
         let mut highlighted = self.ui.diff_cache.highlighter.highlight_single_line(
             self.ui.preferences.theme_mode,
-            &anchor.file_path,
+            anchor.file_path(),
             code_text,
         );
         if highlighted.is_empty() {

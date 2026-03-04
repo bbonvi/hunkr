@@ -7,3 +7,4 @@ pub mod config;
 pub mod git_data;
 pub mod model;
 pub mod store;
+pub(crate) mod text_sanitize;

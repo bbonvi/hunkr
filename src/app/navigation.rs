@@ -795,7 +795,7 @@ impl App {
         else {
             return false;
         };
-        if line.raw_text != DELETED_FILE_TOGGLE_RAW_TEXT {
+        if line.raw_text.as_ref() != DELETED_FILE_TOGGLE_RAW_TEXT {
             return false;
         }
         let Some(path) = self
@@ -847,7 +847,7 @@ impl App {
 
         let payload = self.domain.rendered_diff[start..=end]
             .iter()
-            .map(|line| line.raw_text.clone())
+            .map(|line| line.raw_text.as_ref())
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -927,7 +927,7 @@ impl App {
         self.domain
             .rendered_diff
             .get(self.domain.diff_position.cursor)
-            .map(|line| line.raw_text.as_str())
+            .map(|line| line.raw_text.as_ref())
     }
 
     fn next_diff_row_with_content(&self, current_row: usize) -> Option<usize> {

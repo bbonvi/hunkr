@@ -166,11 +166,12 @@ pub(super) fn code_line_number_prefix_cells(
 
 /// Builds one styled diff row from compact persisted row metadata.
 pub(super) fn render_diff_line(rendered: &RenderedDiffLine, theme: &UiTheme) -> Line<'static> {
+    #[cfg(test)]
     if !rendered.line.spans.is_empty() {
         return rendered.line.clone();
     }
 
-    if rendered.raw_text == DELETED_FILE_TOGGLE_RAW_TEXT {
+    if rendered.raw_text.as_ref() == DELETED_FILE_TOGGLE_RAW_TEXT {
         return Line::from(vec![Span::styled(
             "File removed",
             Style::default()
@@ -215,12 +216,12 @@ pub(super) fn render_diff_line(rendered: &RenderedDiffLine, theme: &UiTheme) -> 
     }
     if rendered.raw_text.starts_with("==== ") {
         return Line::from(vec![Span::styled(
-            rendered.raw_text.clone(),
+            rendered.raw_text.to_string(),
             Style::default().fg(theme.text),
         )]);
     }
 
-    Line::from(vec![Span::raw(rendered.raw_text.clone())])
+    Line::from(vec![Span::raw(rendered.raw_text.to_string())])
 }
 
 fn render_code_line_from_raw(
@@ -580,73 +581,7 @@ pub(super) fn format_relative_time(timestamp: i64, now: i64) -> String {
 /// Keeps normal printable text plus newlines/tabs, while removing escape-driven control flows
 /// like CSI/OSC and other control bytes.
 pub(super) fn sanitize_terminal_text(input: &str) -> String {
-    #[derive(Clone, Copy)]
-    enum SanitizeState {
-        Normal,
-        Escape,
-        Csi,
-        Osc,
-        OscEscape,
-        St,
-        StEscape,
-    }
-
-    let mut out = String::with_capacity(input.len());
-    let mut state = SanitizeState::Normal;
-
-    for ch in input.chars() {
-        state = match state {
-            SanitizeState::Normal => match ch {
-                '\u{1b}' => SanitizeState::Escape,
-                '\u{9b}' => SanitizeState::Csi,
-                '\u{9d}' => SanitizeState::Osc,
-                '\u{90}' | '\u{98}' | '\u{9e}' | '\u{9f}' => SanitizeState::St,
-                '\n' | '\t' => {
-                    out.push(ch);
-                    SanitizeState::Normal
-                }
-                _ if !ch.is_control() => {
-                    out.push(ch);
-                    SanitizeState::Normal
-                }
-                _ => SanitizeState::Normal,
-            },
-            SanitizeState::Escape => match ch {
-                '[' => SanitizeState::Csi,
-                ']' => SanitizeState::Osc,
-                'P' | 'X' | '^' | '_' => SanitizeState::St,
-                _ => SanitizeState::Normal,
-            },
-            SanitizeState::Csi => {
-                if ('@'..='~').contains(&ch) {
-                    SanitizeState::Normal
-                } else {
-                    SanitizeState::Csi
-                }
-            }
-            SanitizeState::Osc => match ch {
-                '\u{7}' => SanitizeState::Normal,
-                '\u{1b}' => SanitizeState::OscEscape,
-                _ => SanitizeState::Osc,
-            },
-            SanitizeState::OscEscape => match ch {
-                '\\' => SanitizeState::Normal,
-                '\u{1b}' => SanitizeState::OscEscape,
-                _ => SanitizeState::Osc,
-            },
-            SanitizeState::St => match ch {
-                '\u{1b}' => SanitizeState::StEscape,
-                _ => SanitizeState::St,
-            },
-            SanitizeState::StEscape => match ch {
-                '\\' => SanitizeState::Normal,
-                '\u{1b}' => SanitizeState::StEscape,
-                _ => SanitizeState::St,
-            },
-        };
-    }
-
-    out
+    crate::text_sanitize::sanitize_terminal_text(input)
 }
 
 /// Build a terminal-safe span, optionally applying style in one call.
@@ -656,16 +591,6 @@ pub(super) fn sanitized_span(text: &str, style: Option<Style>) -> Span<'static> 
         Some(style) => Span::styled(text, style),
         None => Span::raw(text),
     }
-}
-
-pub(super) fn raw_diff_text(line: &HunkLine) -> String {
-    let prefix = match line.kind {
-        DiffLineKind::Add => '+',
-        DiffLineKind::Remove => '-',
-        DiffLineKind::Context => ' ',
-        DiffLineKind::Meta => '~',
-    };
-    format!("{}{}", prefix, sanitize_terminal_text(&line.text))
 }
 
 pub(super) fn prune_diff_positions_for_missing_paths(
@@ -708,15 +633,15 @@ pub(super) fn should_render_commit_banner(
 }
 
 pub(super) fn diff_line_anchor_matches(actual: &DiffLineAnchor, expected: &DiffLineAnchor) -> bool {
-    actual.commit_id == expected.commit_id
-        && actual.file_path == expected.file_path
-        && actual.hunk_header == expected.hunk_header
+    actual.commit_id() == expected.commit_id()
+        && actual.file_path() == expected.file_path()
+        && actual.hunk_header() == expected.hunk_header()
         && actual.old_lineno == expected.old_lineno
         && actual.new_lineno == expected.new_lineno
 }
 
 pub(super) fn is_commit_line_anchor(anchor: &DiffLineAnchor) -> bool {
-    anchor.hunk_header.as_ref() == COMMIT_ANCHOR_HEADER
+    anchor.hunk_header() == COMMIT_ANCHOR_HEADER
         && anchor.old_lineno.is_none()
         && anchor.new_lineno.is_none()
 }

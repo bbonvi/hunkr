@@ -552,7 +552,7 @@ fn rendered_separator_line_keeps_empty_raw_text_without_placeholder_glyphs() {
         .map(|span| span.content.to_string())
         .collect::<String>();
 
-    assert_eq!(separator.raw_text, "");
+    assert_eq!(separator.raw_text.as_ref(), "");
     assert!(separator.anchor.is_none());
     assert_eq!(content, "");
 }
@@ -661,15 +661,15 @@ fn diff_column_for_rendered_code_line_skips_line_number_gutter() {
             Span::raw(" "),
             Span::raw("target"),
         ]),
-        raw_text: "+target".to_owned(),
-        anchor: Some(DiffLineAnchor {
-            commit_id: "abc".into(),
-            commit_summary: "summary".into(),
-            file_path: "src/main.rs".into(),
-            hunk_header: "@@ -1,1 +1,1 @@".into(),
-            old_lineno: Some(12),
-            new_lineno: Some(12345),
-        }),
+        raw_text: "+target".to_owned().into(),
+        anchor: Some(DiffLineAnchor::new(
+            "abc",
+            "summary",
+            "src/main.rs",
+            "@@ -1,1 +1,1 @@",
+            Some(12),
+            Some(12345),
+        )),
     };
     let content_left = rect.x + 1;
 
@@ -690,7 +690,7 @@ fn diff_column_for_rendered_non_code_line_uses_display_column() {
     let rect = ratatui::layout::Rect::new(10, 5, 60, 6);
     let line = RenderedDiffLine {
         line: Line::from(vec![Span::raw("@@ "), Span::raw("-1 +1 @@")]),
-        raw_text: "@@ -1 +1 @@".to_owned(),
+        raw_text: "@@ -1 +1 @@".to_owned().into(),
         anchor: None,
     };
 
@@ -710,15 +710,15 @@ fn diff_column_for_wrapped_row_applies_row_offset_before_raw_mapping() {
             Span::raw(" "),
             Span::raw("target"),
         ]),
-        raw_text: "+target".to_owned(),
-        anchor: Some(DiffLineAnchor {
-            commit_id: "abc".into(),
-            commit_summary: "summary".into(),
-            file_path: "src/main.rs".into(),
-            hunk_header: "@@ -1,1 +1,1 @@".into(),
-            old_lineno: Some(12),
-            new_lineno: Some(12345),
-        }),
+        raw_text: "+target".to_owned().into(),
+        anchor: Some(DiffLineAnchor::new(
+            "abc",
+            "summary",
+            "src/main.rs",
+            "@@ -1,1 +1,1 @@",
+            Some(12),
+            Some(12345),
+        )),
     };
 
     let wrapped_row_offset = 1;
@@ -980,28 +980,28 @@ fn prune_diff_positions_keeps_existing_paths_even_if_content_changed() {
 
 #[test]
 fn pending_anchor_resolves_cursor_and_top_after_insertions() {
-    let anchor = DiffLineAnchor {
-        commit_id: "abc123".into(),
-        commit_summary: "summary".into(),
-        file_path: "src/lib.rs".into(),
-        hunk_header: "@@ -1,1 +1,1 @@".into(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
+    let anchor = DiffLineAnchor::new(
+        "abc123",
+        "summary",
+        "src/lib.rs",
+        "@@ -1,1 +1,1 @@",
+        Some(1),
+        Some(1),
+    );
     let old_lines = vec![
         RenderedDiffLine {
             line: Line::from("context-a"),
-            raw_text: "context-a".to_owned(),
+            raw_text: "context-a".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("+target"),
-            raw_text: "+target".to_owned(),
+            raw_text: "+target".to_owned().into(),
             anchor: Some(anchor.clone()),
         },
         RenderedDiffLine {
             line: Line::from("context-b"),
-            raw_text: "context-b".to_owned(),
+            raw_text: "context-b".to_owned().into(),
             anchor: None,
         },
     ];
@@ -1017,22 +1017,22 @@ fn pending_anchor_resolves_cursor_and_top_after_insertions() {
     let new_lines = vec![
         RenderedDiffLine {
             line: Line::from("inserted"),
-            raw_text: "inserted".to_owned(),
+            raw_text: "inserted".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("context-a"),
-            raw_text: "context-a".to_owned(),
+            raw_text: "context-a".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("+target"),
-            raw_text: "+target".to_owned(),
+            raw_text: "+target".to_owned().into(),
             anchor: Some(anchor),
         },
         RenderedDiffLine {
             line: Line::from("context-b"),
-            raw_text: "context-b".to_owned(),
+            raw_text: "context-b".to_owned().into(),
             anchor: None,
         },
     ];
@@ -1048,12 +1048,12 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
     let old_lines = vec![
         RenderedDiffLine {
             line: Line::from("repeat"),
-            raw_text: "repeat".to_owned(),
+            raw_text: "repeat".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("repeat"),
-            raw_text: "repeat".to_owned(),
+            raw_text: "repeat".to_owned().into(),
             anchor: None,
         },
     ];
@@ -1070,17 +1070,17 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
     let new_lines = vec![
         RenderedDiffLine {
             line: Line::from("repeat"),
-            raw_text: "repeat".to_owned(),
+            raw_text: "repeat".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("other"),
-            raw_text: "other".to_owned(),
+            raw_text: "other".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("repeat"),
-            raw_text: "repeat".to_owned(),
+            raw_text: "repeat".to_owned().into(),
             anchor: None,
         },
     ];
@@ -1091,23 +1091,23 @@ fn line_locator_falls_back_to_raw_text_occurrence() {
 
 #[test]
 fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
-    let anchor = DiffLineAnchor {
-        commit_id: "abc123".into(),
-        commit_summary: "summary".into(),
-        file_path: "src/lib.rs".into(),
-        hunk_header: "@@ -1,1 +1,1 @@".into(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
+    let anchor = DiffLineAnchor::new(
+        "abc123",
+        "summary",
+        "src/lib.rs",
+        "@@ -1,1 +1,1 @@",
+        Some(1),
+        Some(1),
+    );
     let old_lines = vec![
         RenderedDiffLine {
             line: Line::from("dup"),
-            raw_text: "dup".to_owned(),
+            raw_text: "dup".to_owned().into(),
             anchor: Some(anchor.clone()),
         },
         RenderedDiffLine {
             line: Line::from("dup"),
-            raw_text: "dup".to_owned(),
+            raw_text: "dup".to_owned().into(),
             anchor: Some(anchor.clone()),
         },
     ];
@@ -1124,22 +1124,22 @@ fn line_locator_disambiguates_duplicate_anchor_with_text_occurrence() {
     let new_lines = vec![
         RenderedDiffLine {
             line: Line::from("dup"),
-            raw_text: "dup".to_owned(),
+            raw_text: "dup".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("dup"),
-            raw_text: "dup".to_owned(),
+            raw_text: "dup".to_owned().into(),
             anchor: Some(anchor.clone()),
         },
         RenderedDiffLine {
             line: Line::from("x"),
-            raw_text: "x".to_owned(),
+            raw_text: "x".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("dup"),
-            raw_text: "dup".to_owned(),
+            raw_text: "dup".to_owned().into(),
             anchor: Some(anchor),
         },
     ];
@@ -1153,12 +1153,12 @@ fn line_locator_handles_empty_raw_text_occurrence() {
     let old_lines = vec![
         RenderedDiffLine {
             line: Line::from(""),
-            raw_text: String::new(),
+            raw_text: String::new().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from(""),
-            raw_text: String::new(),
+            raw_text: String::new().into(),
             anchor: None,
         },
     ];
@@ -1175,17 +1175,17 @@ fn line_locator_handles_empty_raw_text_occurrence() {
     let new_lines = vec![
         RenderedDiffLine {
             line: Line::from(""),
-            raw_text: String::new(),
+            raw_text: String::new().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("x"),
-            raw_text: "x".to_owned(),
+            raw_text: "x".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from(""),
-            raw_text: String::new(),
+            raw_text: String::new().into(),
             anchor: None,
         },
     ];
@@ -1913,20 +1913,15 @@ fn commit_banner_renders_only_when_commit_changes() {
 
 #[test]
 fn commit_anchor_marker_is_detected() {
-    let commit_anchor = DiffLineAnchor {
-        commit_id: "abc1234".into(),
-        commit_summary: "summary".into(),
-        file_path: "src/lib.rs".into(),
-        hunk_header: COMMIT_ANCHOR_HEADER.into(),
-        old_lineno: None,
-        new_lineno: None,
-    };
-    let hunk_anchor = DiffLineAnchor {
-        hunk_header: "@@ -1,1 +1,1 @@".into(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-        ..commit_anchor.clone()
-    };
+    let commit_anchor = DiffLineAnchor::new(
+        "abc1234",
+        "summary",
+        "src/lib.rs",
+        COMMIT_ANCHOR_HEADER,
+        None,
+        None,
+    );
+    let hunk_anchor = commit_anchor.with_hunk_header("@@ -1,1 +1,1 @@", Some(1), Some(1));
 
     assert!(is_commit_line_anchor(&commit_anchor));
     assert!(!is_commit_line_anchor(&hunk_anchor));
@@ -1934,14 +1929,14 @@ fn commit_anchor_marker_is_detected() {
 
 #[test]
 fn diff_line_anchor_match_requires_exact_line_mapping() {
-    let base = DiffLineAnchor {
-        commit_id: "abc".into(),
-        commit_summary: "summary".into(),
-        file_path: "src/lib.rs".into(),
-        hunk_header: "@@ -1,1 +1,1 @@".into(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-    };
+    let base = DiffLineAnchor::new(
+        "abc",
+        "summary",
+        "src/lib.rs",
+        "@@ -1,1 +1,1 @@",
+        Some(1),
+        Some(1),
+    );
     let same = base.clone();
     let mut different = base.clone();
     different.new_lineno = Some(2);
@@ -1955,17 +1950,17 @@ fn diff_search_wraps_forward() {
     let lines = vec![
         RenderedDiffLine {
             line: Line::from("alpha"),
-            raw_text: "alpha".to_owned(),
+            raw_text: "alpha".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("beta"),
-            raw_text: "beta".to_owned(),
+            raw_text: "beta".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("gamma"),
-            raw_text: "gamma".to_owned(),
+            raw_text: "gamma".to_owned().into(),
             anchor: None,
         },
     ];
@@ -1982,17 +1977,17 @@ fn diff_search_wraps_backward() {
     let lines = vec![
         RenderedDiffLine {
             line: Line::from("alpha"),
-            raw_text: "alpha".to_owned(),
+            raw_text: "alpha".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("beta"),
-            raw_text: "beta".to_owned(),
+            raw_text: "beta".to_owned().into(),
             anchor: None,
         },
         RenderedDiffLine {
             line: Line::from("gamma"),
-            raw_text: "gamma".to_owned(),
+            raw_text: "gamma".to_owned().into(),
             anchor: None,
         },
     ];
@@ -2008,7 +2003,7 @@ fn diff_search_wraps_backward() {
 fn diff_search_steps_between_occurrences_on_same_line() {
     let lines = vec![RenderedDiffLine {
         line: Line::from("alpha alpha beta"),
-        raw_text: "alpha alpha beta".to_owned(),
+        raw_text: "alpha alpha beta".to_owned().into(),
         anchor: None,
     }];
 
@@ -2029,7 +2024,7 @@ fn diff_search_steps_between_occurrences_on_same_line() {
 fn diff_search_steps_backward_between_occurrences_on_same_line() {
     let lines = vec![RenderedDiffLine {
         line: Line::from("alpha alpha beta"),
-        raw_text: "alpha alpha beta".to_owned(),
+        raw_text: "alpha alpha beta".to_owned().into(),
         anchor: None,
     }];
 
@@ -2042,29 +2037,24 @@ fn diff_search_steps_backward_between_occurrences_on_same_line() {
 
 #[test]
 fn hunk_header_detection_ignores_commit_banner() {
-    let commit_anchor = DiffLineAnchor {
-        commit_id: "abc1234".into(),
-        commit_summary: "summary".into(),
-        file_path: "src/lib.rs".into(),
-        hunk_header: COMMIT_ANCHOR_HEADER.into(),
-        old_lineno: None,
-        new_lineno: None,
-    };
-    let hunk_anchor = DiffLineAnchor {
-        hunk_header: "@@ -1,1 +1,1 @@".into(),
-        old_lineno: Some(1),
-        new_lineno: Some(1),
-        ..commit_anchor.clone()
-    };
+    let commit_anchor = DiffLineAnchor::new(
+        "abc1234",
+        "summary",
+        "src/lib.rs",
+        COMMIT_ANCHOR_HEADER,
+        None,
+        None,
+    );
+    let hunk_anchor = commit_anchor.with_hunk_header("@@ -1,1 +1,1 @@", Some(1), Some(1));
 
     let commit_line = RenderedDiffLine {
         line: Line::from("---- commit abc1234 summary"),
-        raw_text: "---- commit abc1234 summary".to_owned(),
+        raw_text: "---- commit abc1234 summary".to_owned().into(),
         anchor: Some(commit_anchor),
     };
     let hunk_line = RenderedDiffLine {
         line: Line::from("@@ -1,1 +1,1 @@"),
-        raw_text: "@@ -1,1 +1,1 @@".to_owned(),
+        raw_text: "@@ -1,1 +1,1 @@".to_owned().into(),
         anchor: Some(hunk_anchor),
     };
 
