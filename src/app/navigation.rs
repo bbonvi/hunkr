@@ -525,12 +525,9 @@ impl App {
         let top = scroll.min(self.domain.rendered_diff.len().saturating_sub(1));
         let file_range_idx = self.file_range_index_for_line(top)?;
         let file_range = self.ui.diff_cache.file_ranges.get(file_range_idx)?;
-        for idx in (file_range.start..=top).rev() {
-            if is_hunk_header_line(&self.domain.rendered_diff[idx]) {
-                return (idx < top).then_some(idx);
-            }
-        }
-        None
+        (file_range.start..top)
+            .rev()
+            .find(|&idx| is_hunk_header_line(&self.domain.rendered_diff[idx]))
     }
 
     pub(super) fn sticky_banner_indexes_for_scroll(

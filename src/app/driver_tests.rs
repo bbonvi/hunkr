@@ -659,6 +659,69 @@ fn draw_virtualized_diff_rows_keep_sticky_and_wrapped_mapping() {
 }
 
 #[test]
+fn sticky_hunk_header_switch_keeps_hunk_sticky_row_stable() {
+    let repo = init_test_repo();
+    let file = repo.path().join("src.txt");
+    let mut baseline = (1..=80).map(|line| format!("line {line}")).collect::<Vec<_>>();
+    std::fs::write(&file, baseline.join("\n") + "\n").expect("write baseline file");
+    run_git(repo.path(), &["add", "src.txt"]);
+    run_git(repo.path(), &["commit", "-m", "seed src file", "-q"]);
+
+    baseline[9] = "line 10 changed".to_owned();
+    baseline[39] = "line 40 changed".to_owned();
+    std::fs::write(&file, baseline.join("\n") + "\n").expect("write updated file");
+    run_git(repo.path(), &["add", "src.txt"]);
+    run_git(repo.path(), &["commit", "-m", "two separate hunks", "-q"]);
+
+    let mut app = bootstrap_driver(repo.path()).into_app();
+    draw_app(&mut app, 120, 22);
+
+    let hunk_headers = app
+        .domain
+        .rendered_diff
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| is_hunk_header_line(line).then_some(idx))
+        .collect::<Vec<_>>();
+    assert!(
+        hunk_headers.len() >= 2,
+        "fixture should produce at least two separate hunks",
+    );
+    let first_hunk = hunk_headers[0];
+    let second_hunk = hunk_headers[1];
+
+    let viewport_rows = app
+        .ui
+        .diff_ui
+        .pane_rects
+        .diff
+        .height
+        .saturating_sub(2)
+        .max(1) as usize;
+    let sticky_at_second = app.sticky_banner_indexes_for_scroll(second_hunk, viewport_rows);
+    let sticky_after_second = app.sticky_banner_indexes_for_scroll(second_hunk + 1, viewport_rows);
+
+    let sticky_hunk_at_second = sticky_at_second
+        .iter()
+        .copied()
+        .find(|idx| is_hunk_header_line(&app.domain.rendered_diff[*idx]));
+    let sticky_hunk_after_second = sticky_after_second
+        .iter()
+        .copied()
+        .find(|idx| is_hunk_header_line(&app.domain.rendered_diff[*idx]));
+    assert_eq!(
+        sticky_hunk_at_second,
+        Some(first_hunk),
+        "previous hunk should stay sticky while the next hunk header is the top body row",
+    );
+    assert_eq!(
+        sticky_hunk_after_second,
+        Some(second_hunk),
+        "sticky hunk should switch once the new hunk body scrolls under the top edge",
+    );
+}
+
+#[test]
 fn draw_perf_guardrail_counts_over_budget_frames() {
     let repo = init_test_repo();
     let driver = bootstrap_driver(repo.path());
