@@ -15,6 +15,7 @@ use crate::app::*;
 use crate::model::{CommitDecoration, CommitDecorationKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fs;
+use std::time::Duration;
 use tempfile::tempdir;
 
 fn commit_row(id: &str, selected: bool, status: ReviewStatus) -> CommitRow {
@@ -1728,7 +1729,13 @@ fn selected_rows_hidden_count_tracks_active_filter() {
 
 #[test]
 fn next_poll_timeout_uses_nearest_deadline() {
+    let auto_refresh_every = Duration::from_secs(4);
+    let relative_time_redraw_every = Duration::from_secs(30);
+    let theme_reload_poll_every = Duration::from_millis(250);
     let timeout = next_poll_timeout(
+        auto_refresh_every,
+        relative_time_redraw_every,
+        theme_reload_poll_every,
         Duration::from_secs(1),
         Duration::from_millis(100),
         Duration::from_millis(100),
@@ -1739,7 +1746,13 @@ fn next_poll_timeout_uses_nearest_deadline() {
 
 #[test]
 fn next_poll_timeout_zero_when_any_deadline_elapsed() {
+    let auto_refresh_every = Duration::from_secs(4);
+    let relative_time_redraw_every = Duration::from_secs(30);
+    let theme_reload_poll_every = Duration::from_millis(250);
     let timeout = next_poll_timeout(
+        auto_refresh_every,
+        relative_time_redraw_every,
+        theme_reload_poll_every,
         Duration::from_secs(5),
         Duration::from_secs(1),
         Duration::from_secs(1),
@@ -1750,18 +1763,30 @@ fn next_poll_timeout_zero_when_any_deadline_elapsed() {
 
 #[test]
 fn next_poll_timeout_after_refresh_waits_for_theme_poll_window() {
+    let auto_refresh_every = Duration::from_secs(4);
+    let relative_time_redraw_every = Duration::from_secs(30);
+    let theme_reload_poll_every = Duration::from_millis(250);
     let timeout = next_poll_timeout(
+        auto_refresh_every,
+        relative_time_redraw_every,
+        theme_reload_poll_every,
         Duration::from_secs(0),
         Duration::from_secs(0),
         Duration::from_secs(0),
         None,
     );
-    assert_eq!(timeout, THEME_RELOAD_POLL_EVERY);
+    assert_eq!(timeout, theme_reload_poll_every);
 }
 
 #[test]
 fn next_poll_timeout_honors_selection_rebuild_deadline() {
+    let auto_refresh_every = Duration::from_secs(4);
+    let relative_time_redraw_every = Duration::from_secs(30);
+    let theme_reload_poll_every = Duration::from_millis(250);
     let timeout = next_poll_timeout(
+        auto_refresh_every,
+        relative_time_redraw_every,
+        theme_reload_poll_every,
         Duration::from_secs(0),
         Duration::from_secs(0),
         Duration::from_secs(0),

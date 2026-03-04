@@ -71,7 +71,7 @@ use self::ui::style::{CursorSelectionPolicy, apply_row_highlight};
 use self::worktree_switcher::short_path_label;
 
 use crate::{
-    config::StartupTheme,
+    config::{AppConfig, StartupTheme},
     git_data::{GitService, WorktreeInfo},
     model::{
         AggregatedDiff, CommitInfo, DiffLineAnchor, DiffLineKind, FileChangeKind,
@@ -81,19 +81,12 @@ use crate::{
     store::StateStore,
 };
 
-const HISTORY_LIMIT: usize = 400;
-const AUTO_REFRESH_EVERY: Duration = Duration::from_secs(4);
-const RELATIVE_TIME_REDRAW_EVERY: Duration = Duration::from_secs(30);
-const THEME_RELOAD_POLL_EVERY: Duration = Duration::from_millis(250);
-const SELECTION_REBUILD_DEBOUNCE: Duration = Duration::from_millis(120);
 const LIST_DRAG_EDGE_MARGIN: u16 = 1;
 const COMMIT_ANCHOR_HEADER: &str = "__COMMIT__";
 const DELETED_FILE_TOGGLE_RAW_TEXT: &str = "__DELETED_FILE_TOGGLE__";
 const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
 const SHELL_HISTORY_LIMIT: usize = 1_000;
 const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
-const TERMINAL_CLEAR_EVERY: Duration = Duration::from_secs(120);
-const DIFF_CURSOR_SCROLL_OFF_LINES: usize = 3;
 const DRAW_BUDGET_WARNING: Duration = Duration::from_millis(24);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -565,6 +558,32 @@ struct RuntimeState {
     draw_perf: DrawPerfState,
 }
 
+/// Tunable runtime limits and cadences loaded from the app config file.
+#[derive(Debug, Clone, Copy)]
+struct RuntimeTuning {
+    history_limit: usize,
+    auto_refresh_every: Duration,
+    relative_time_redraw_every: Duration,
+    theme_reload_poll_every: Duration,
+    selection_rebuild_debounce: Duration,
+    terminal_clear_every: Duration,
+    diff_cursor_scroll_off_lines: usize,
+}
+
+impl RuntimeTuning {
+    fn from_config(config: &AppConfig) -> Self {
+        Self {
+            history_limit: config.history_limit,
+            auto_refresh_every: Duration::from_secs(config.auto_refresh_every_secs),
+            relative_time_redraw_every: Duration::from_secs(config.relative_time_redraw_every_secs),
+            theme_reload_poll_every: Duration::from_millis(config.theme_reload_poll_every_ms),
+            selection_rebuild_debounce: Duration::from_millis(config.selection_rebuild_debounce_ms),
+            terminal_clear_every: Duration::from_secs(config.terminal_clear_every_secs),
+            diff_cursor_scroll_off_lines: config.diff_cursor_scroll_off_lines,
+        }
+    }
+}
+
 /// Draw-loop performance metrics used as runtime guardrails.
 #[derive(Debug, Clone, Copy, Default)]
 struct DrawPerfState {
@@ -612,6 +631,7 @@ pub struct App {
     ui: AppUiState,
     theme: ThemeRuntimeState,
     runtime: RuntimeState,
+    tuning: RuntimeTuning,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

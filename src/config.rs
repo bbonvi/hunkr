@@ -10,6 +10,13 @@ use serde::Deserialize;
 
 const DEFAULT_DIFF_WHEEL_SCROLL_LINES: isize = 1;
 const DEFAULT_LIST_WHEEL_COALESCE_MS: u64 = 28;
+const DEFAULT_HISTORY_LIMIT: usize = 400;
+const DEFAULT_AUTO_REFRESH_EVERY_SECS: u64 = 4;
+const DEFAULT_RELATIVE_TIME_REDRAW_EVERY_SECS: u64 = 30;
+const DEFAULT_THEME_RELOAD_POLL_EVERY_MS: u64 = 250;
+const DEFAULT_SELECTION_REBUILD_DEBOUNCE_MS: u64 = 120;
+const DEFAULT_TERMINAL_CLEAR_EVERY_SECS: u64 = 120;
+const DEFAULT_DIFF_CURSOR_SCROLL_OFF_LINES: usize = 3;
 
 /// Startup UI theme name from config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
@@ -28,6 +35,13 @@ pub struct AppConfig {
     pub diff_wheel_scroll_lines: isize,
     pub list_wheel_coalesce_ms: u64,
     pub nerd_fonts: bool,
+    pub history_limit: usize,
+    pub auto_refresh_every_secs: u64,
+    pub relative_time_redraw_every_secs: u64,
+    pub theme_reload_poll_every_ms: u64,
+    pub selection_rebuild_debounce_ms: u64,
+    pub terminal_clear_every_secs: u64,
+    pub diff_cursor_scroll_off_lines: usize,
 }
 
 impl Default for AppConfig {
@@ -37,6 +51,13 @@ impl Default for AppConfig {
             diff_wheel_scroll_lines: DEFAULT_DIFF_WHEEL_SCROLL_LINES,
             list_wheel_coalesce_ms: DEFAULT_LIST_WHEEL_COALESCE_MS,
             nerd_fonts: true,
+            history_limit: DEFAULT_HISTORY_LIMIT,
+            auto_refresh_every_secs: DEFAULT_AUTO_REFRESH_EVERY_SECS,
+            relative_time_redraw_every_secs: DEFAULT_RELATIVE_TIME_REDRAW_EVERY_SECS,
+            theme_reload_poll_every_ms: DEFAULT_THEME_RELOAD_POLL_EVERY_MS,
+            selection_rebuild_debounce_ms: DEFAULT_SELECTION_REBUILD_DEBOUNCE_MS,
+            terminal_clear_every_secs: DEFAULT_TERMINAL_CLEAR_EVERY_SECS,
+            diff_cursor_scroll_off_lines: DEFAULT_DIFF_CURSOR_SCROLL_OFF_LINES,
         }
     }
 }
@@ -68,6 +89,27 @@ impl AppConfig {
         }
         if self.list_wheel_coalesce_ms == 0 {
             self.list_wheel_coalesce_ms = DEFAULT_LIST_WHEEL_COALESCE_MS;
+        }
+        if self.history_limit == 0 {
+            self.history_limit = DEFAULT_HISTORY_LIMIT;
+        }
+        if self.auto_refresh_every_secs == 0 {
+            self.auto_refresh_every_secs = DEFAULT_AUTO_REFRESH_EVERY_SECS;
+        }
+        if self.relative_time_redraw_every_secs == 0 {
+            self.relative_time_redraw_every_secs = DEFAULT_RELATIVE_TIME_REDRAW_EVERY_SECS;
+        }
+        if self.theme_reload_poll_every_ms == 0 {
+            self.theme_reload_poll_every_ms = DEFAULT_THEME_RELOAD_POLL_EVERY_MS;
+        }
+        if self.selection_rebuild_debounce_ms == 0 {
+            self.selection_rebuild_debounce_ms = DEFAULT_SELECTION_REBUILD_DEBOUNCE_MS;
+        }
+        if self.terminal_clear_every_secs == 0 {
+            self.terminal_clear_every_secs = DEFAULT_TERMINAL_CLEAR_EVERY_SECS;
+        }
+        if self.diff_cursor_scroll_off_lines == 0 {
+            self.diff_cursor_scroll_off_lines = DEFAULT_DIFF_CURSOR_SCROLL_OFF_LINES;
         }
     }
 }

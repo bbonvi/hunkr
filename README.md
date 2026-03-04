@@ -58,6 +58,7 @@ Optional config file:
 - `~/.config/hunkr/config.yaml`
 
 See [`config.example.yaml`](./config.example.yaml) for supported options.
+Config covers startup preferences plus review/runtime cadence tuning (refresh windows, theme reload checks, selection debounce, diff scroll gutter, history depth).
 
 Optional theme palette file (live-reloaded while app runs):
 

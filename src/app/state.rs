@@ -652,7 +652,8 @@ impl App {
     }
 
     pub(super) fn on_selection_changed_debounced(&mut self) {
-        self.runtime.selection_rebuild_due = Some(self.now_instant() + SELECTION_REBUILD_DEBOUNCE);
+        self.runtime.selection_rebuild_due =
+            Some(self.now_instant() + self.tuning.selection_rebuild_debounce);
         self.reset_diff_view_for_commit_selection_change();
         let selected = self
             .domain

@@ -62,6 +62,7 @@ impl App {
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
         let now = deps.clock.now_instant();
         let theme_path = config_path().with_file_name(THEME_FILE_NAME);
+        let tuning = RuntimeTuning::from_config(config);
         let shell_history = deps
             .store
             .load_shell_history()
@@ -181,6 +182,7 @@ impl App {
                 should_quit: false,
                 draw_perf: DrawPerfState::default(),
             },
+            tuning,
         }
     }
 
@@ -189,7 +191,10 @@ impl App {
     }
 
     fn complete_first_open_setup(&mut self) -> anyhow::Result<()> {
-        let history = self.deps.git.load_first_parent_history(HISTORY_LIMIT)?;
+        let history = self
+            .deps
+            .git
+            .load_first_parent_history(self.tuning.history_limit)?;
         let reviewed_ids = first_open_reviewed_commit_ids(&history);
         if !reviewed_ids.is_empty() {
             self.deps.store.set_many_status(
@@ -343,6 +348,9 @@ impl App {
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
             last_theme_reload_elapsed: self.runtime.last_theme_reload_check.elapsed(),
+            auto_refresh_every: self.tuning.auto_refresh_every,
+            relative_time_redraw_every: self.tuning.relative_time_redraw_every,
+            theme_reload_poll_every: self.tuning.theme_reload_poll_every,
             shell_running: self.ui.shell_command.running.is_some(),
             shell_flash_timeout: self.shell_output_flash_timeout(),
         })
@@ -427,10 +435,14 @@ impl App {
             onboarding_active: self.onboarding_active(),
             now,
             terminal_clear_elapsed: self.runtime.last_terminal_clear.elapsed(),
+            terminal_clear_every: self.tuning.terminal_clear_every,
             selection_rebuild_due: self.runtime.selection_rebuild_due,
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
             last_theme_reload_elapsed: self.runtime.last_theme_reload_check.elapsed(),
+            auto_refresh_every: self.tuning.auto_refresh_every,
+            relative_time_redraw_every: self.tuning.relative_time_redraw_every,
+            theme_reload_poll_every: self.tuning.theme_reload_poll_every,
         });
         for task in tasks {
             match task {

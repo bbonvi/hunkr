@@ -42,7 +42,10 @@ fn reload_commits_inner(app: &mut App, preserve_manual_selection: bool) -> anyho
     app.deps
         .store
         .sync_statuses_from_disk(&mut app.domain.review_state)?;
-    let history = app.deps.git.load_first_parent_history(HISTORY_LIMIT)?;
+    let history = app
+        .deps
+        .git
+        .load_first_parent_history(app.tuning.history_limit)?;
     let prior_cursor_idx = app.ui.commit_ui.list_state.selected();
     let prior_cursor_commit_id = app.selected_commit_id();
     let prior_visual_anchor_commit_id = app

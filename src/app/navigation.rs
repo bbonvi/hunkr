@@ -578,7 +578,7 @@ impl App {
             self.domain.diff_position.cursor,
             self.domain.diff_position.scroll,
             visible,
-            DIFF_CURSOR_SCROLL_OFF_LINES,
+            self.tuning.diff_cursor_scroll_off_lines,
         );
         self.set_diff_scroll(next_scroll);
         self.sync_diff_block_cursor_to_cursor_line();
