@@ -1,6 +1,6 @@
 # hunkr
 
-`hunkr` is a local-first terminal reviewer for local git work.
+`hunkr` is a terminal reviewer for git work.
 
 It lets you select one commit, a stack of commits, or your current worktree changes and inspect them as one net diff across changed files. The point is to review what the branch currently means, not to bounce between commit-by-commit patches or wait for a pull request.
 
@@ -14,7 +14,7 @@ It lets you select one commit, a stack of commits, or your current worktree chan
 ## Safety
 
 - Built-in repository actions are read-only.
-- `hunkr` inspects git state and writes only local review metadata under `.hunkr/`.
+- `hunkr` inspects git state and writes only review metadata under `.hunkr/`.
 - Branch switching, history editing, merges, rebases, and other mutating git actions stay outside the UI.
 
 ## Capabilities
@@ -25,9 +25,9 @@ It lets you select one commit, a stack of commits, or your current worktree chan
 - Use the interface from the keyboard first, with mouse support where it helps.
 - Tune behavior and colors with YAML config and theme files.
 
-## Local State
+## Project Data
 
-All local review state stays in your repo under `.hunkr/`:
+Review state lives under `.hunkr/` in the repo:
 
 - `.hunkr/state.json` for review status and session state
 - `.hunkr/shell-history.json` for `!` command history
@@ -73,7 +73,7 @@ Start from [`theme.example.yaml`](./theme.example.yaml) to override the built-in
 ## Non-goals
 
 - No built-in checkout, merge, rebase, reset, or other mutating git workflows.
-- No requirement to push branches or open pull requests just to review local work.
+- No requirement to push branches or open pull requests just to review a branch.
 
 ## Quality Checks
 
