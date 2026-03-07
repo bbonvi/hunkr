@@ -37,7 +37,9 @@ mod lifecycle_render;
 mod lifecycle_view;
 mod navigation;
 mod nerd_fonts;
+mod path_watch_driver;
 mod ports;
+mod review_state_sync;
 mod runtime;
 mod selection_helpers;
 mod services;
@@ -45,7 +47,6 @@ mod shell_command;
 mod state;
 mod text_edit;
 mod theme_palette;
-mod theme_reload_driver;
 mod tree_highlight;
 mod ui;
 mod worktree_switcher;
@@ -57,11 +58,12 @@ use self::nerd_fonts::{
     format_tree_dir_label, format_tree_file_label, list_highlight_symbol,
     list_highlight_symbol_width, uncommitted_badge, worktree_label_prefix,
 };
+use self::path_watch_driver::{PathWatchDriver, PathWatchTrigger};
 use self::ports::{AppBootstrapPorts, AppClock, AppRuntimePorts, SystemBootstrapPorts};
+use self::review_state_sync::ReviewStateSync;
 use self::selection_helpers::*;
 use self::text_edit::*;
 use self::theme_palette::ThemeRuntimeState;
-use self::theme_reload_driver::ThemeReloadDriver;
 use self::tree_highlight::*;
 use self::ui::diff_pane::{
     DiffPaneBody, DiffPaneRenderer, DiffPaneTitle, DiffViewportBuildInput, PendingDiffViewAnchor,
@@ -636,7 +638,9 @@ pub struct App {
     domain: AppDomainState,
     ui: AppUiState,
     theme: ThemeRuntimeState,
-    theme_reload_driver: ThemeReloadDriver,
+    theme_reload_driver: PathWatchDriver,
+    review_state_sync: ReviewStateSync,
+    review_state_sync_driver: PathWatchDriver,
     runtime: RuntimeState,
     tuning: RuntimeTuning,
 }

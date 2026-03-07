@@ -75,6 +75,8 @@ impl App {
         let shell_history = shell_history
             .map(ShellCommandHistoryEntry::new)
             .collect::<VecDeque<_>>();
+        let review_state_sync = ReviewStateSync::new(&deps.store);
+        let review_state_watch_dir = review_state_sync.watch_dir().to_path_buf();
         Self {
             deps: AppDependencies {
                 git: deps.git,
@@ -171,9 +173,15 @@ impl App {
                 helper_click_hitboxes: Vec::new(),
             },
             theme: ThemeRuntimeState::new(theme_path),
-            theme_reload_driver: ThemeReloadDriver::new(
+            theme_reload_driver: PathWatchDriver::new(
                 &theme_watch_dir,
                 tuning.theme_reload_poll_every,
+                now,
+            ),
+            review_state_sync,
+            review_state_sync_driver: PathWatchDriver::new(
+                &review_state_watch_dir,
+                tuning.auto_refresh_every,
                 now,
             ),
             runtime: RuntimeState {
@@ -289,6 +297,11 @@ impl App {
                     );
                     return;
                 }
+                self.review_state_sync_driver = PathWatchDriver::new(
+                    self.review_state_sync.watch_dir(),
+                    self.tuning.auto_refresh_every,
+                    self.now_instant(),
+                );
                 self.runtime.onboarding_step = Some(OnboardingStep::GitignoreChoice);
                 self.runtime.status.clear();
             }
@@ -449,8 +462,17 @@ impl App {
             auto_refresh_every: self.tuning.auto_refresh_every,
             relative_time_redraw_every: self.tuning.relative_time_redraw_every,
         });
-        if self.theme_reload_driver.should_reload(now) {
+        if self.theme_reload_driver.poll_trigger(now).is_some() {
             tasks.push(TickTask::ReloadTheme);
+        }
+        let review_state_trigger = self.review_state_sync_driver.poll_trigger(now);
+        if let Some(trigger) = review_state_trigger
+            && let Err(err) = self.sync_review_statuses_from_disk_if_changed(matches!(
+                trigger,
+                PathWatchTrigger::Event
+            ))
+        {
+            self.runtime.status = format!("review-state sync failed: {err:#}");
         }
         for task in tasks {
             match task {

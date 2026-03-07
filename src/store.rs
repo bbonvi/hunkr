@@ -47,6 +47,10 @@ impl StateStore {
         &self.root
     }
 
+    pub fn state_path(&self) -> &Path {
+        &self.state_path
+    }
+
     pub fn has_state_file(&self) -> bool {
         self.state_path.exists()
     }
