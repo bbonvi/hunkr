@@ -111,8 +111,7 @@ jobs:
         shell: bash
         run: |
           package_name="${{ needs.verify.outputs.package_name }}"
-          version="${{ needs.verify.outputs.version }}"
-          archive_stem="${package_name}-v${version}-${{ matrix.target }}"
+          archive_stem="${package_name}-${{ matrix.target }}"
           stage_dir="dist/${archive_stem}"
 
           mkdir -p "${stage_dir}"
