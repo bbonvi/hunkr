@@ -1,0 +1,171 @@
+name: release
+
+on:
+  push:
+    tags:
+      - v*.*.*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      package_name: ${{ steps.metadata.outputs.package_name }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install stable Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+          cache-on-failure: true
+
+      - name: Validate release metadata
+        id: metadata
+        shell: bash
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "release tags must be plain semver like v0.1.0" >&2
+            exit 1
+          fi
+
+          package_name="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | endswith("/Cargo.toml")) | .name')"
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | endswith("/Cargo.toml")) | .version')"
+          tag_version="${GITHUB_REF_NAME#v}"
+
+          if [[ -z "${package_name}" || -z "${version}" ]]; then
+            echo "failed to read package metadata from Cargo.toml" >&2
+            exit 1
+          fi
+
+          if [[ "${version}" != "${tag_version}" ]]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}" >&2
+            exit 1
+          fi
+
+          {
+            echo "package_name=${package_name}"
+            echo "version=${version}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install stable Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+          cache-on-failure: true
+
+      - name: Build release binary
+        run: cargo build --locked --release --target "${{ matrix.target }}"
+
+      - name: Package release archive
+        shell: bash
+        run: |
+          package_name="${{ needs.verify.outputs.package_name }}"
+          version="${{ needs.verify.outputs.version }}"
+          archive_stem="${package_name}-v${version}-${{ matrix.target }}"
+          stage_dir="dist/${archive_stem}"
+
+          mkdir -p "${stage_dir}"
+          install -m 0755 "target/${{ matrix.target }}/release/${package_name}" "${stage_dir}/${package_name}"
+          install -m 0644 README.md "${stage_dir}/README.md"
+          install -m 0644 config.example.yaml "${stage_dir}/config.example.yaml"
+          install -m 0644 theme.example.yaml "${stage_dir}/theme.example.yaml"
+
+          if [[ -f LICENSE ]]; then
+            install -m 0644 LICENSE "${stage_dir}/LICENSE"
+          fi
+
+          tar -C dist -czf "dist/${archive_stem}.tar.gz" "${archive_stem}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs:
+      - verify
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum ./*.tar.gz > SHA256SUMS.txt
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/*.tar.gz dist/SHA256SUMS.txt --clobber
+            exit 0
+          fi
+
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/*.tar.gz \
+            dist/SHA256SUMS.txt \
+            --verify-tag \
+            --generate-notes \
+            --fail-on-no-commits
