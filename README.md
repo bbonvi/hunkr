@@ -1,13 +1,15 @@
 # hunkr
 
-`hunkr` is a terminal reviewer for git work.
+`hunkr` is built for reviewing stacked, fast-turnaround git changes.
 
-It lets you select one commit, a stack of commits, or your current worktree changes and inspect them as one net diff across changed files. The point is to review what the branch currently means, not to bounce between commit-by-commit patches or wait for a pull request.
+It lets you select one commit, a stack of commits, or your current worktree changes and inspect them in a focused 3-pane workflow. The point is to review what the branch currently means without bouncing between patches or waiting for a pull request.
+
+![hunkr preview](https://github.com/user-attachments/assets/97b17f1a-eb1d-4d65-8383-798dbb93280b)
 
 ## Workflow
 
 - Select the commit range you want to review.
-- Review one aggregated diff in a focused 3-pane layout: commits, files, diff.
+- Review the selected changes in a focused 3-pane layout: commits, files, diff.
 - Track commit status as `UNREVIEWED`, `REVIEWED`, or `ISSUE_FOUND`.
 - Filter commits and files, then resume the same session on restart.
 
