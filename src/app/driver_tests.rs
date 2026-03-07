@@ -87,9 +87,10 @@ fn run_git(dir: &Path, args: &[&str]) {
 fn init_test_repo() -> TempDir {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    run_git(root, &["init", "-q"]);
+    run_git(root, &["init", "-q", "-b", "main"]);
     run_git(root, &["config", "user.name", "hunkr-test"]);
     run_git(root, &["config", "user.email", "hunkr-test@example.com"]);
+    std::fs::write(root.join(".gitignore"), "!/.hunkr/\n!/.hunkr/**\n").expect("seed gitignore");
     std::fs::write(root.join("README.md"), "init\n").expect("seed readme");
     run_git(root, &["add", "."]);
     run_git(root, &["commit", "-m", "init", "-q"]);

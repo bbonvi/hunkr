@@ -417,6 +417,41 @@ fn aggregate_uncommitted_records_file_change_kinds() {
 }
 
 #[test]
+fn aggregate_uncommitted_ignores_internal_hunkr_metadata() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    fs::write(
+        repo_dir.path().join(".gitignore"),
+        "!/.hunkr/\n!/.hunkr/**\n",
+    )
+    .expect("write gitignore");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["add", ".gitignore"]));
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["commit", "-m", "track gitignore"]));
+    commit_file(repo_dir.path(), "tracked.txt", "base\n", "base");
+    fs::create_dir_all(repo_dir.path().join(".hunkr")).expect("create hunkr");
+    fs::write(repo_dir.path().join(".hunkr/state.json"), "{}\n").expect("write state");
+
+    let service = GitService::open_at(repo_dir.path()).expect("service");
+    let aggregate = service.aggregate_uncommitted().expect("aggregate");
+    let file_count = service
+        .uncommitted_file_count()
+        .expect("uncommitted file count");
+
+    assert!(
+        aggregate.files.is_empty(),
+        "internal metadata should not render as diff"
+    );
+    assert_eq!(
+        file_count, 0,
+        "internal metadata should not create uncommitted rows"
+    );
+}
+
+#[test]
 fn uncommitted_file_count_includes_tracked_and_untracked_changes() {
     let repo_dir = tempdir().expect("tempdir");
     init_repo(repo_dir.path());
