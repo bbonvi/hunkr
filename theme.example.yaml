@@ -1,4 +1,3 @@
-# hunkr theme palette
 # Place as ~/.config/hunkr/theme.yaml to override built-in colors.
 # Values accept "#RRGGBB", [r,g,b], or "reset".
 dark:
