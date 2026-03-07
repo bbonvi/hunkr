@@ -8,9 +8,8 @@ use unicode_width::UnicodeWidthChar;
 
 use super::super::{
     DiffLineAnchor, DiffPosition, DiffVisibleRow, FocusPane, NerdFontTheme, RenderedDiffLine,
-    UiTheme, blend_colors, diff_line_anchor_matches, diff_line_coord_text,
-    format_path_with_icon, is_commit_line_anchor, is_diff_code_line, render_diff_line,
-    sanitized_span,
+    UiTheme, blend_colors, diff_line_anchor_matches, diff_line_coord_text, format_path_with_icon,
+    is_commit_line_anchor, is_diff_code_line, render_diff_line, sanitized_span,
 };
 use super::style::{CursorSelectionPolicy, apply_row_highlight, tint_line_background};
 

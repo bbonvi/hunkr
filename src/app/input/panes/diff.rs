@@ -171,8 +171,7 @@ impl App {
             return;
         };
         let line_text = diff_line_coord_text(line);
-        let Some(word) = word_at_char_column(line_text, self.ui.diff_ui.block_cursor_col)
-        else {
+        let Some(word) = word_at_char_column(line_text, self.ui.diff_ui.block_cursor_col) else {
             self.runtime.status = "No searchable word under diff block cursor".to_owned();
             return;
         };

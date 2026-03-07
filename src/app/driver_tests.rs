@@ -681,7 +681,9 @@ fn draw_virtualized_diff_rows_keep_sticky_and_wrapped_mapping() {
 fn sticky_hunk_header_switch_keeps_hunk_sticky_row_stable() {
     let repo = init_test_repo();
     let file = repo.path().join("src.txt");
-    let mut baseline = (1..=80).map(|line| format!("line {line}")).collect::<Vec<_>>();
+    let mut baseline = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>();
     std::fs::write(&file, baseline.join("\n") + "\n").expect("write baseline file");
     run_git(repo.path(), &["add", "src.txt"]);
     run_git(repo.path(), &["commit", "-m", "seed src file", "-q"]);
@@ -771,14 +773,16 @@ fn sticky_file_header_switch_keeps_file_sticky_row_stable() {
     let sticky_at_second = app.sticky_banner_indexes_for_scroll(second_file, viewport_rows);
     let sticky_after_second = app.sticky_banner_indexes_for_scroll(second_file + 1, viewport_rows);
 
-    let sticky_file_at_second = sticky_at_second
-        .iter()
-        .copied()
-        .find(|idx| app.domain.rendered_diff[*idx].raw_text.starts_with("==== file "));
-    let sticky_file_after_second = sticky_after_second
-        .iter()
-        .copied()
-        .find(|idx| app.domain.rendered_diff[*idx].raw_text.starts_with("==== file "));
+    let sticky_file_at_second = sticky_at_second.iter().copied().find(|idx| {
+        app.domain.rendered_diff[*idx]
+            .raw_text
+            .starts_with("==== file ")
+    });
+    let sticky_file_after_second = sticky_after_second.iter().copied().find(|idx| {
+        app.domain.rendered_diff[*idx]
+            .raw_text
+            .starts_with("==== file ")
+    });
     assert_eq!(
         sticky_file_at_second,
         Some(first_file),
@@ -986,8 +990,7 @@ fn diff_viewport_scroll_moves_exactly_requested_delta_without_scrolloff_correcti
     let expected_scroll = start_scroll.saturating_add(1).min(app.max_diff_scroll());
     app.scroll_diff_viewport(1);
     assert_eq!(
-        app.domain.diff_position.scroll,
-        expected_scroll,
+        app.domain.diff_position.scroll, expected_scroll,
         "viewport scroll should move by exactly requested delta even with non-zero scrolloff",
     );
 }
@@ -1009,7 +1012,10 @@ fn diff_viewport_scroll_applies_multi_line_delta_stepwise() {
     let start_scroll = second_file.saturating_sub(1).min(app.max_diff_scroll());
     app.set_diff_scroll(start_scroll);
     app.domain.diff_position.cursor = start_scroll
-        .saturating_add(app.visible_diff_rows_for_scroll(start_scroll).saturating_sub(1))
+        .saturating_add(
+            app.visible_diff_rows_for_scroll(start_scroll)
+                .saturating_sub(1),
+        )
         .min(app.domain.rendered_diff.len().saturating_sub(1));
     stepwise_app.set_diff_scroll(start_scroll);
     stepwise_app.domain.diff_position.cursor = start_scroll
