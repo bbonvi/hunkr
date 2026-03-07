@@ -1,54 +1,58 @@
 # hunkr
 
-`hunkr` is a local-first TUI commit reviewer built for fast iteration loops and optimized for agent-generated code changes.
+`hunkr` is a local-first terminal reviewer for local git work.
 
-It lets you review a selected commit range as one net diff across all changed files, without opening a pull request.
+It lets you select one commit, a stack of commits, or your current worktree changes and inspect them as one net diff across changed files. The point is to review what the branch currently means, not to bounce between commit-by-commit patches or wait for a pull request.
 
-## Highlights
+## Workflow
 
-- Multi-commit net diff review in a focused 3-pane workflow (commits, changed files, diff)
-- Fast commit range selection with per-commit review states: `Unreviewed`, `Reviewed`, `Issue Found`
-- First-run baseline: visible pushed commits are auto-marked `REVIEWED`; unpushed commits stay `UNREVIEWED`
-- Built-in filters/search for commits and files
-- In-app worktree switcher to move across linked git worktrees without leaving the session
-- Built-in git actions are read-only by product design
-- In-app shell command modal with streamed output and command history
-- Session restore across restarts (selected commits, pane focus, diff viewport context)
-- Keyboard-first UX with mouse support (drag-select commit ranges with edge auto-scroll, wheel scroll in list panes)
-- Responsive behavior on large diff sessions
+- Select the commit range you want to review.
+- Review one aggregated diff in a focused 3-pane layout: commits, files, diff.
+- Track commit status as `UNREVIEWED`, `REVIEWED`, or `ISSUE_FOUND`.
+- Filter commits and files, then resume the same session on restart.
 
-## Git Safety Model
+## Safety
 
-`hunkr` keeps built-in repository interactions read-only.
+- Built-in repository actions are read-only.
+- `hunkr` inspects git state and writes only local review metadata under `.hunkr/`.
+- Branch switching, history editing, merges, rebases, and other mutating git actions stay outside the UI.
 
-- Built-in flows inspect git state and update local `.hunkr/` review metadata only.
-- Mutating git actions (for example checkout/switch/merge/rebase/reset/prune) are intentionally out of scope for built-in UI actions.
-- Branch switching remains an external git workflow, not a built-in `hunkr` action.
+## Capabilities
 
-## Worktree Support
+- Review uncommitted worktree/index changes alongside commits.
+- Switch between linked git worktrees without restarting.
+- Run shell commands in-app with streamed output and command history.
+- Use the interface from the keyboard first, with mouse support where it helps.
+- Tune behavior and colors with YAML config and theme files.
 
-- Open the worktree switcher in-app and move between linked worktrees without restarting the session.
-- Worktree entries are ordered by latest commit activity (freshest first) while keeping the main repo worktree pinned at the top.
-- Review metadata remains anchored to the launch workspace `.hunkr/` directory, so commit statuses stay shared inside that session.
+## Local State
 
-## Local-First Data
+All local review state stays in your repo under `.hunkr/`:
 
-All review state stays in your repo under `.hunkr/`:
-
-- `.hunkr/state.json` for review statuses and session context
+- `.hunkr/state.json` for review status and session state
 - `.hunkr/shell-history.json` for `!` command history
 
 ## Quick Start
+
+Download the archive for your platform from the [GitHub Releases page](https://github.com/bbonvi/hunkr/releases), unpack it, and run `hunkr`:
+
+```bash
+tar -xzf hunkr-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
+cd hunkr-vX.Y.Z-x86_64-unknown-linux-gnu
+./hunkr
+```
+
+Build from source instead:
 
 ```bash
 cargo run
 ```
 
-On first run in a repository, `hunkr` opens a centered onboarding screen before showing review panes:
+On first run inside a git repository, `hunkr`:
 
-- Verifies you are inside a git repository.
-- Asks permission to create `.hunkr/` for local review state.
-- Offers to append `.hunkr` to the project `.gitignore` (or you can manage it globally).
+- asks before creating `.hunkr/`
+- can add `.hunkr` to the project `.gitignore`
+- starts from a useful initial selection instead of an empty diff
 
 ## Configuration
 
@@ -57,20 +61,24 @@ Optional config file:
 - `$XDG_CONFIG_HOME/hunkr/config.yaml`
 - `~/.config/hunkr/config.yaml`
 
-See [`config.example.yaml`](./config.example.yaml) for supported options.
-Config covers startup preferences plus review/runtime cadence tuning (refresh windows, theme reload checks, selection debounce, diff scroll gutter, diff hunk context/merge distance, history depth).
+Start from [`config.example.yaml`](./config.example.yaml). It covers startup theme, history depth, refresh cadence, diff context, and other runtime behavior.
 
-Optional theme palette file (live-reloaded while app runs):
+Optional theme file:
 
 - `$XDG_CONFIG_HOME/hunkr/theme.yaml`
 - `~/.config/hunkr/theme.yaml`
 
-Theme reload uses filesystem events on the config directory, with interval polling fallback only when watching is unavailable.
-Start from [`theme.example.yaml`](./theme.example.yaml).
+Start from [`theme.example.yaml`](./theme.example.yaml) to override the built-in palette.
+
+## Non-goals
+
+- No built-in checkout, merge, rebase, reset, or other mutating git workflows.
+- No requirement to push branches or open pull requests just to review local work.
 
 ## Quality Checks
 
 ```bash
+cargo fmt --all --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```

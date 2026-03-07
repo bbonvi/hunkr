@@ -2,6 +2,11 @@
 name = "hunkr"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.89"
+description = "Local-first TUI commit reviewer for multi-commit net diff review"
+readme = "README.md"
+repository = "https://github.com/bbonvi/hunkr"
+homepage = "https://github.com/bbonvi/hunkr"
 
 [dependencies]
 anyhow = "1.0"
