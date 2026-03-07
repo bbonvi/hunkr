@@ -285,6 +285,7 @@ where
     }
 }
 
+#[cfg(test)]
 pub(super) fn compose_sticky_banner_indexes(
     sticky_file_idx: Option<usize>,
     sticky_commit_idx: Option<usize>,
