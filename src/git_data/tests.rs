@@ -436,9 +436,16 @@ fn aggregate_uncommitted_records_file_change_kinds() {
 }
 
 #[test]
-fn aggregate_uncommitted_ignores_internal_hunkr_metadata() {
+fn aggregate_uncommitted_includes_hunkr_metadata_when_git_exposes_it() {
     let repo_dir = tempdir().expect("tempdir");
+    let excludes_dir = tempdir().expect("excludes");
     init_repo(repo_dir.path());
+    let excludes_path = excludes_dir.path().join("empty-excludes");
+    fs::write(&excludes_path, "").expect("write empty excludes");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["config", "core.excludesFile"])
+        .arg(&excludes_path));
     fs::write(
         repo_dir.path().join(".gitignore"),
         "!/.hunkr/\n!/.hunkr/**\n",
@@ -453,6 +460,16 @@ fn aggregate_uncommitted_ignores_internal_hunkr_metadata() {
     commit_file(repo_dir.path(), "tracked.txt", "base\n", "base");
     fs::create_dir_all(repo_dir.path().join(".hunkr")).expect("create hunkr");
     fs::write(repo_dir.path().join(".hunkr/state.json"), "{}\n").expect("write state");
+    assert_eq!(
+        git_out(Command::new("git").current_dir(repo_dir.path()).args([
+            "status",
+            "--short",
+            "--ignored",
+            ".hunkr"
+        ]),)
+        .trim(),
+        "?? .hunkr/"
+    );
 
     let service = GitService::open_at(repo_dir.path()).expect("service");
     let aggregate = service.aggregate_uncommitted().expect("aggregate");
@@ -460,13 +477,17 @@ fn aggregate_uncommitted_ignores_internal_hunkr_metadata() {
         .uncommitted_file_count()
         .expect("uncommitted file count");
 
+    let metadata = aggregate
+        .files
+        .get(".hunkr/state.json")
+        .expect("metadata patch should be visible");
     assert!(
-        aggregate.files.is_empty(),
-        "internal metadata should not render as diff"
+        !metadata.hunks.is_empty(),
+        "visible git changes should render diff hunks"
     );
     assert_eq!(
-        file_count, 0,
-        "internal metadata should not create uncommitted rows"
+        file_count, 1,
+        "visible git changes should contribute to uncommitted row count"
     );
 }
 

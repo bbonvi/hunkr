@@ -18,8 +18,6 @@ use crate::model::{
     FileChangeKind, FileChangeSummary, FilePatch, Hunk, HunkLine, UNCOMMITTED_COMMIT_ID,
     UNCOMMITTED_COMMIT_SHORT, UNCOMMITTED_COMMIT_SUMMARY,
 };
-use crate::store::PROJECT_DATA_DIR;
-
 /// Read-only git access tailored for multi-commit review workflows.
 pub struct GitService {
     repo: Repository,
@@ -353,12 +351,7 @@ impl GitService {
     /// Returns the number of changed files in the synthetic uncommitted draft.
     pub fn uncommitted_file_count(&self) -> anyhow::Result<usize> {
         let diff = self.uncommitted_diff()?;
-        Ok(diff
-            .deltas()
-            .filter(|delta| {
-                !is_internal_project_data_delta(delta.new_file().path(), delta.old_file().path())
-            })
-            .count())
+        Ok(diff.deltas().count())
     }
 
     pub fn commits_affecting_selection(
@@ -569,11 +562,6 @@ fn append_diff_files(
         &mut |delta, _| {
             let new_path = delta.new_file().path().map(path_to_string);
             let old_path = delta.old_file().path().map(path_to_string);
-            if is_internal_project_data_delta(delta.new_file().path(), delta.old_file().path()) {
-                *current_path.borrow_mut() = None;
-                *current_hunk_index.borrow_mut() = None;
-                return true;
-            }
             let path = new_path
                 .as_ref()
                 .or(old_path.as_ref())
@@ -730,15 +718,6 @@ fn current_branch_name(repo: &Repository) -> anyhow::Result<String> {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
-}
-
-fn is_internal_project_data_path(path: &Path) -> bool {
-    path.starts_with(PROJECT_DATA_DIR)
-}
-
-fn is_internal_project_data_delta(new_path: Option<&Path>, old_path: Option<&Path>) -> bool {
-    new_path.is_some_and(is_internal_project_data_path)
-        || old_path.is_some_and(is_internal_project_data_path)
 }
 
 fn short_id(id: &str) -> String {
