@@ -82,14 +82,6 @@ impl GitService {
         self.repo.commondir().join("info").join("exclude")
     }
 
-    /// Reports whether Git currently treats the given worktree-relative path as ignored.
-    pub fn path_is_ignored(&self, path: &Path) -> anyhow::Result<bool> {
-        let relative = path.strip_prefix(&self.root).unwrap_or(path);
-        self.repo
-            .status_should_ignore(relative)
-            .map_err(|err| anyhow!(err).context("failed to evaluate git ignore rules"))
-    }
-
     pub fn branch_name(&self) -> &str {
         &self.branch
     }

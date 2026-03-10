@@ -209,24 +209,11 @@ impl App {
             self.complete_first_open_setup()?;
         }
 
-        let startup_note = match append_ignore_file_entry(
-            &self.deps.git.local_exclude_path(),
-            "/.hunkr/",
-        ) {
-            Ok(IgnoreFileUpdate::Added | IgnoreFileUpdate::AlreadyPresent) => {
-                match self.deps.git.path_is_ignored(self.deps.store.state_path()) {
-                        Ok(true) => None,
-                        Ok(false) => Some(
-                            "Repo ignore rules override the local exclude; .hunkr may still appear in git status."
-                                .to_owned(),
-                        ),
-                        Err(err) => {
-                            Some(format!("Failed to verify local git exclude ({err:#})"))
-                        }
-                    }
-            }
-            Err(err) => Some(format!("Failed to update local git exclude ({err:#})")),
-        };
+        let startup_note =
+            match append_ignore_file_entry(&self.deps.git.local_exclude_path(), "/.hunkr/") {
+                Ok(IgnoreFileUpdate::Added | IgnoreFileUpdate::AlreadyPresent) => None,
+                Err(err) => Some(format!("Failed to update local git exclude ({err:#})")),
+            };
 
         Ok(startup_note)
     }

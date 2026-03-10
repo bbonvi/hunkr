@@ -484,12 +484,12 @@ fn startup_creates_local_exclude_entry_and_applies_starter_selection() {
 }
 
 #[test]
-fn startup_warns_when_repo_rules_override_local_exclude() {
+fn startup_stays_silent_when_repo_rules_override_local_exclude() {
     let repo = init_test_repo_with_hunkr_unignored();
     let app = bootstrap_app(repo.path());
 
     assert!(
-        app.runtime
+        !app.runtime
             .status
             .contains("Repo ignore rules override the local exclude")
     );
