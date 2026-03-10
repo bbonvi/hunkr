@@ -418,7 +418,7 @@ mod tests {
         let store = StateStore::for_project(repo.path());
         store
             .save(&ReviewState::default())
-            .expect("seed persisted state to bypass onboarding");
+            .expect("seed persisted state");
 
         let calls = Arc::new(RuntimePortCalls::default());
         let runtime_ports = Arc::new(TestRuntimePorts {
@@ -440,7 +440,7 @@ mod tests {
         let store = StateStore::for_project(repo.path());
         store
             .save(&ReviewState::default())
-            .expect("seed persisted state to bypass onboarding");
+            .expect("seed persisted state");
 
         let calls = Arc::new(RuntimePortCalls::default());
         let runtime_ports = Arc::new(TestRuntimePorts {
@@ -469,7 +469,7 @@ mod tests {
         let store = StateStore::for_project(repo.path());
         store
             .save(&ReviewState::default())
-            .expect("seed persisted state to bypass onboarding");
+            .expect("seed persisted state");
 
         let calls = Arc::new(RuntimePortCalls::default());
         let runtime_ports = Arc::new(TestRuntimePorts {
@@ -493,7 +493,7 @@ mod tests {
         let store = StateStore::for_project(repo.path());
         store
             .save(&ReviewState::default())
-            .expect("seed persisted state to bypass onboarding");
+            .expect("seed persisted state");
 
         let calls = Arc::new(RuntimePortCalls::default());
         let runtime_ports = Arc::new(TestRuntimePorts {
@@ -550,7 +550,7 @@ mod tests {
         let store = StateStore::for_project(repo.path());
         store
             .save(&ReviewState::default())
-            .expect("seed persisted state to bypass onboarding");
+            .expect("seed persisted state");
 
         let calls = Arc::new(RuntimePortCalls::default());
         let runtime_ports = Arc::new(TestRuntimePorts {
@@ -600,7 +600,7 @@ mod tests {
         let store = StateStore::for_project(repo.path());
         store
             .save(&ReviewState::default())
-            .expect("seed persisted state to bypass onboarding");
+            .expect("seed persisted state");
 
         let calls = Arc::new(RuntimePortCalls::default());
         let runtime_ports = Arc::new(TestRuntimePorts {

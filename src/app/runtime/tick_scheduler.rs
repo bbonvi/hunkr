@@ -3,7 +3,6 @@ use crate::app::*;
 /// Scheduler input snapshot for poll timeout calculation.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::app) struct PollTimeoutInputs {
-    pub onboarding_active: bool,
     pub selection_rebuild_due: Option<Instant>,
     pub now: Instant,
     pub last_refresh_elapsed: Duration,
@@ -18,7 +17,6 @@ pub(in crate::app) struct PollTimeoutInputs {
 /// Scheduler input snapshot for tick-cycle planning.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::app) struct TickPlanInputs {
-    pub onboarding_active: bool,
     pub now: Instant,
     pub terminal_clear_elapsed: Duration,
     pub terminal_clear_every: Duration,
@@ -43,10 +41,6 @@ pub(in crate::app) enum TickTask {
 
 /// Computes event-loop poll timeout from scheduler inputs.
 pub(in crate::app) fn compute_poll_timeout(inputs: PollTimeoutInputs) -> Duration {
-    if inputs.onboarding_active {
-        return Duration::from_millis(250);
-    }
-
     let selection_rebuild_in = inputs
         .selection_rebuild_due
         .map(|due| due.saturating_duration_since(inputs.now));
@@ -72,10 +66,6 @@ pub(in crate::app) fn compute_poll_timeout(inputs: PollTimeoutInputs) -> Duratio
 
 /// Plans due tasks for the current tick.
 pub(in crate::app) fn plan_tick(inputs: TickPlanInputs) -> Vec<TickTask> {
-    if inputs.onboarding_active {
-        return Vec::new();
-    }
-
     let mut tasks = vec![TickTask::PollShellStream, TickTask::PollShellFlash];
     if inputs.terminal_clear_elapsed >= inputs.terminal_clear_every {
         tasks.push(TickTask::RequestTerminalClear);
@@ -99,11 +89,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compute_poll_timeout_short_circuits_onboarding() {
+    fn compute_poll_timeout_allows_immediate_refresh_when_due() {
         let auto_refresh_every = Duration::from_secs(4);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
-            onboarding_active: true,
             selection_rebuild_due: None,
             now: Instant::now(),
             last_refresh_elapsed: Duration::from_secs(10),
@@ -114,7 +103,7 @@ mod tests {
             shell_running: true,
             shell_flash_timeout: Some(Duration::from_millis(1)),
         });
-        assert_eq!(timeout, Duration::from_millis(250));
+        assert_eq!(timeout, Duration::ZERO);
     }
 
     #[test]
@@ -122,7 +111,6 @@ mod tests {
         let auto_refresh_every = Duration::from_secs(4);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
-            onboarding_active: false,
             selection_rebuild_due: None,
             now: Instant::now(),
             last_refresh_elapsed: Duration::from_secs(0),
@@ -141,7 +129,6 @@ mod tests {
         let auto_refresh_every = Duration::from_secs(4);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
-            onboarding_active: false,
             selection_rebuild_due: None,
             now: Instant::now(),
             last_refresh_elapsed: Duration::from_secs(0),
@@ -161,7 +148,6 @@ mod tests {
         let relative_time_redraw_every = Duration::from_secs(30);
         let terminal_clear_every = Duration::from_secs(120);
         let tasks = plan_tick(TickPlanInputs {
-            onboarding_active: false,
             now: Instant::now(),
             terminal_clear_elapsed: Duration::from_secs(0),
             terminal_clear_every,
@@ -176,22 +162,24 @@ mod tests {
     }
 
     #[test]
-    fn plan_tick_skips_all_tasks_when_onboarding_is_active() {
+    fn plan_tick_schedules_due_tasks_without_startup_gate() {
+        let now = Instant::now();
         let auto_refresh_every = Duration::from_secs(4);
         let relative_time_redraw_every = Duration::from_secs(30);
         let terminal_clear_every = Duration::from_secs(120);
         let tasks = plan_tick(TickPlanInputs {
-            onboarding_active: true,
-            now: Instant::now(),
+            now,
             terminal_clear_elapsed: terminal_clear_every,
             terminal_clear_every,
-            selection_rebuild_due: Some(Instant::now()),
+            selection_rebuild_due: Some(now),
             last_refresh_elapsed: auto_refresh_every,
             last_relative_redraw_elapsed: relative_time_redraw_every,
             auto_refresh_every,
             relative_time_redraw_every,
         });
-        assert!(tasks.is_empty());
+        assert!(tasks.contains(&TickTask::RequestTerminalClear));
+        assert!(tasks.contains(&TickTask::FlushSelectionRebuild));
+        assert!(tasks.contains(&TickTask::ReloadCommits));
     }
 
     #[test]
@@ -201,7 +189,6 @@ mod tests {
         let relative_time_redraw_every = Duration::from_secs(30);
         let terminal_clear_every = Duration::from_secs(120);
         let tasks = plan_tick(TickPlanInputs {
-            onboarding_active: false,
             now,
             terminal_clear_elapsed: Duration::from_secs(0),
             terminal_clear_every,
@@ -220,7 +207,6 @@ mod tests {
         let auto_refresh_every = Duration::from_secs(4);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
-            onboarding_active: false,
             selection_rebuild_due: Some(now + Duration::from_millis(2)),
             now,
             last_refresh_elapsed: Duration::from_secs(0),
@@ -239,7 +225,6 @@ mod tests {
         let auto_refresh_every = Duration::from_secs(4);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
-            onboarding_active: false,
             selection_rebuild_due: None,
             now: Instant::now(),
             last_refresh_elapsed: Duration::from_secs(0),

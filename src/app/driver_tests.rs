@@ -90,18 +90,24 @@ fn init_test_repo() -> TempDir {
     run_git(root, &["init", "-q", "-b", "main"]);
     run_git(root, &["config", "user.name", "hunkr-test"]);
     run_git(root, &["config", "user.email", "hunkr-test@example.com"]);
-    std::fs::write(root.join(".gitignore"), "!/.hunkr/\n!/.hunkr/**\n").expect("seed gitignore");
     std::fs::write(root.join("README.md"), "init\n").expect("seed readme");
     run_git(root, &["add", "."]);
     run_git(root, &["commit", "-m", "init", "-q"]);
     tmp
 }
 
+fn init_test_repo_with_hunkr_unignored() -> TempDir {
+    let tmp = init_test_repo();
+    let root = tmp.path();
+    std::fs::write(root.join(".gitignore"), "!/.hunkr/\n!/.hunkr/**\n").expect("seed gitignore");
+    run_git(root, &["add", ".gitignore"]);
+    run_git(root, &["commit", "-m", "track gitignore", "-q"]);
+    tmp
+}
+
 fn bootstrap_driver_with_state(repo_root: &Path, state: ReviewState) -> AppDriver {
     let store = StateStore::for_project(repo_root);
-    store
-        .save(&state)
-        .expect("seed persisted state to bypass onboarding");
+    store.save(&state).expect("seed persisted state");
     let ports = TestBootstrapPorts {
         repo_root: repo_root.to_path_buf(),
     };
@@ -450,20 +456,47 @@ fn startup_with_stale_persisted_selection_falls_back_to_starter() {
 }
 
 #[test]
-fn onboarding_completion_applies_starter_selection() {
+fn startup_creates_local_exclude_entry_and_applies_starter_selection() {
     let repo = init_test_repo();
-    let mut app = bootstrap_app(repo.path());
-    assert!(app.onboarding_active());
+    let app = bootstrap_app(repo.path());
+    let exclude_path = git_stdout(
+        repo.path(),
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "info/exclude",
+        ],
+    );
+    let exclude_contents =
+        std::fs::read_to_string(exclude_path.trim()).expect("read local exclude file");
 
-    app.handle_event(Event::Key(press(KeyCode::Char('y'), KeyModifiers::NONE)));
-    app.handle_event(Event::Key(press(KeyCode::Char('n'), KeyModifiers::NONE)));
-
-    assert!(!app.onboarding_active());
     assert_eq!(
         app.domain.commits.iter().filter(|row| row.selected).count(),
         1
     );
     assert!(app.runtime.status.contains("Starter selection:"));
+    assert!(ignore_file_contains_entry(&exclude_contents, "/.hunkr/"));
+    assert_eq!(
+        git_stdout(repo.path(), &["status", "--short", "--ignored", ".hunkr"]),
+        "!! .hunkr/"
+    );
+}
+
+#[test]
+fn startup_warns_when_repo_rules_override_local_exclude() {
+    let repo = init_test_repo_with_hunkr_unignored();
+    let app = bootstrap_app(repo.path());
+
+    assert!(
+        app.runtime
+            .status
+            .contains("Repo ignore rules override the local exclude")
+    );
+    assert_eq!(
+        git_stdout(repo.path(), &["status", "--short", "--ignored", ".hunkr"]),
+        "?? .hunkr/"
+    );
 }
 
 #[test]

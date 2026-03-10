@@ -4,10 +4,6 @@ use crate::app::*;
 
 impl App {
     pub(super) fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
-        if self.onboarding_active() {
-            return;
-        }
-
         if self.dispatch_helper_click(mouse) {
             return;
         }

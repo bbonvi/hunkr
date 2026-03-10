@@ -62,6 +62,25 @@ fn default_unpushed_without_upstream_returns_local_commits() {
 }
 
 #[test]
+fn local_exclude_path_uses_common_git_dir_for_linked_worktrees() {
+    let repo_dir = tempdir().expect("tempdir");
+    init_repo(repo_dir.path());
+    commit_file(repo_dir.path(), "f.txt", "one\n", "init");
+
+    let worktree_dir = tempdir().expect("worktree");
+    run(Command::new("git")
+        .current_dir(repo_dir.path())
+        .args(["worktree", "add", "--detach"])
+        .arg(worktree_dir.path()));
+
+    let service = GitService::open_at(worktree_dir.path()).expect("service");
+    assert_eq!(
+        service.local_exclude_path(),
+        repo_dir.path().join(".git").join("info").join("exclude")
+    );
+}
+
+#[test]
 fn aggregate_for_multiple_commits_returns_only_net_changes() {
     let repo_dir = tempdir().expect("tempdir");
     init_repo(repo_dir.path());

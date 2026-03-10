@@ -1,4 +1,4 @@
-//! Shared UI/diff helper functions used across rendering, navigation, and onboarding flows.
+//! Shared UI and diff helper functions used across rendering, navigation, and startup flows.
 use crate::app::*;
 
 pub(super) fn blend_colors(base: Color, overlay: Color, overlay_weight: u8) -> Color {
@@ -378,15 +378,15 @@ pub(super) fn first_open_reviewed_commit_ids(commits: &[CommitInfo]) -> Vec<Stri
         .collect()
 }
 
-pub(super) fn canonical_gitignore_entry(entry: &str) -> String {
+pub(super) fn normalized_ignore_entry(entry: &str) -> String {
     let trimmed = entry.trim();
     let trimmed = trimmed.strip_prefix("./").unwrap_or(trimmed);
     let trimmed = trimmed.trim_start_matches('/');
     trimmed.trim_end_matches('/').to_owned()
 }
 
-pub(super) fn gitignore_contains_entry(contents: &str, entry: &str) -> bool {
-    let needle = canonical_gitignore_entry(entry);
+pub(super) fn ignore_file_contains_entry(contents: &str, entry: &str) -> bool {
+    let needle = normalized_ignore_entry(entry);
     if needle.is_empty() {
         return false;
     }
@@ -396,23 +396,31 @@ pub(super) fn gitignore_contains_entry(contents: &str, entry: &str) -> bool {
         if trimmed.is_empty() || trimmed.starts_with('#') {
             return false;
         }
-        canonical_gitignore_entry(trimmed) == needle
+        normalized_ignore_entry(trimmed) == needle
     })
 }
 
-pub(super) fn append_gitignore_entry(path: &Path, entry: &str) -> anyhow::Result<GitignoreUpdate> {
-    let canonical = canonical_gitignore_entry(entry);
-    if canonical.is_empty() {
-        return Ok(GitignoreUpdate::AlreadyPresent);
+pub(super) fn append_ignore_file_entry(
+    path: &Path,
+    entry: &str,
+) -> anyhow::Result<IgnoreFileUpdate> {
+    let normalized = normalized_ignore_entry(entry);
+    if normalized.is_empty() {
+        return Ok(IgnoreFileUpdate::AlreadyPresent);
     }
+    let rendered = entry.trim().strip_prefix("./").unwrap_or(entry.trim());
 
     let existing = if path.exists() {
         fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?
     } else {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
         String::new()
     };
-    if gitignore_contains_entry(&existing, &canonical) {
-        return Ok(GitignoreUpdate::AlreadyPresent);
+    if ignore_file_contains_entry(&existing, &normalized) {
+        return Ok(IgnoreFileUpdate::AlreadyPresent);
     }
 
     // Re-read right before write so concurrent updates that already added this entry noop.
@@ -421,18 +429,18 @@ pub(super) fn append_gitignore_entry(path: &Path, entry: &str) -> anyhow::Result
     } else {
         String::new()
     };
-    if gitignore_contains_entry(&latest, &canonical) {
-        return Ok(GitignoreUpdate::AlreadyPresent);
+    if ignore_file_contains_entry(&latest, &normalized) {
+        return Ok(IgnoreFileUpdate::AlreadyPresent);
     }
 
     let mut next = latest;
     if !next.is_empty() && !next.ends_with('\n') {
         next.push('\n');
     }
-    next.push_str(&canonical);
+    next.push_str(rendered);
     next.push('\n');
     fs::write(path, next).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(GitignoreUpdate::Added)
+    Ok(IgnoreFileUpdate::Added)
 }
 
 pub(super) fn matching_file_indices_with_parent_dirs(rows: &[TreeRow], query: &str) -> Vec<usize> {

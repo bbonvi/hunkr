@@ -186,7 +186,7 @@ mod tests {
         let store = crate::store::StateStore::for_project(repo_root);
         store
             .save(&crate::model::ReviewState::default())
-            .expect("seed persisted state to bypass onboarding");
+            .expect("seed persisted state");
 
         let ports = TestBootstrapPorts {
             repo_root: repo_root.to_path_buf(),

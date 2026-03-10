@@ -109,12 +109,6 @@ enum InputMode {
     ListSearch(FocusPane),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OnboardingStep {
-    ConsentProjectDataDir,
-    GitignoreChoice,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ThemeMode {
     Dark,
@@ -380,7 +374,7 @@ enum CommitMouseSelectionMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GitignoreUpdate {
+enum IgnoreFileUpdate {
     Added,
     AlreadyPresent,
 }
@@ -552,7 +546,6 @@ struct RuntimeState {
     status: String,
     selection_rebuild_due: Option<Instant>,
     show_help: bool,
-    onboarding_step: Option<OnboardingStep>,
     last_refresh: Instant,
     last_relative_time_redraw: Instant,
     last_terminal_clear: Instant,

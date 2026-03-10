@@ -50,11 +50,7 @@ Build from source instead:
 cargo run
 ```
 
-On first run inside a git repository, `hunkr`:
-
-- asks before creating `.hunkr/`
-- can add `.hunkr` to the project `.gitignore`
-- starts from a useful initial selection instead of an empty diff
+On first run inside a git repository, `hunkr` initializes `.hunkr/`, adds a repository-local exclude rule for it, and starts from a useful initial selection instead of an empty diff.
 
 ## Configuration
 

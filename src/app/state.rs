@@ -92,7 +92,7 @@ impl App {
 
     /// Persists current UI session state before process exit.
     pub fn persist_session_state_before_exit(&mut self) -> anyhow::Result<()> {
-        if self.onboarding_active() || !self.deps.store.root_dir().exists() {
+        if !self.deps.store.root_dir().exists() {
             return Ok(());
         }
         self.flush_pending_selection_rebuild();

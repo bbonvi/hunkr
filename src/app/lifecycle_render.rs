@@ -4,6 +4,7 @@ use super::runtime::tick_scheduler::{self, PollTimeoutInputs, TickPlanInputs, Ti
 use super::theme_palette::{THEME_FILE_NAME, ThemeReloadOutcome};
 use crate::app::*;
 use crate::config::{AppConfig, config_path};
+use anyhow::Context;
 
 /// Bootstrap-only dependencies loaded from disk/environment before UI startup.
 struct BootstrapDeps {
@@ -33,8 +34,9 @@ impl App {
             runtime_ports: ports.runtime_ports(),
             review_state,
         };
-        let mut app = Self::from_bootstrap_deps(deps, &config, first_open);
+        let mut app = Self::from_bootstrap_deps(deps, &config);
         app.reload_theme_from_disk(true);
+        let startup_note = app.initialize_project_data(first_open)?;
         let has_persisted_selection = !app
             .domain
             .review_state
@@ -42,24 +44,17 @@ impl App {
             .selected_commit_ids
             .is_empty();
 
-        if app.onboarding_active() {
-            app.runtime.status.clear();
-        } else {
-            app.reload_commits(true)?;
-            app.restore_persisted_ui_session()?;
-            let has_restored_selection = app.domain.commits.iter().any(|row| row.selected);
-            if !has_persisted_selection || !has_restored_selection {
-                app.apply_startup_starter_selection()?;
-            }
-            let selected = app.domain.commits.iter().filter(|row| row.selected).count();
-            if !app.runtime.status.starts_with("Starter selection:") {
-                app.runtime.status = format!("{selected} commit(s) selected");
-            }
+        app.reload_commits(true)?;
+        app.restore_persisted_ui_session()?;
+        let has_restored_selection = app.domain.commits.iter().any(|row| row.selected);
+        if !has_persisted_selection || !has_restored_selection {
+            app.apply_startup_starter_selection()?;
         }
+        app.finalize_startup_status(startup_note);
         Ok(app)
     }
 
-    fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig, first_open: bool) -> Self {
+    fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig) -> Self {
         let now = deps.clock.now_instant();
         let theme_path = config_path().with_file_name(THEME_FILE_NAME);
         let theme_watch_dir = theme_path
@@ -188,7 +183,6 @@ impl App {
                 status: String::new(),
                 selection_rebuild_due: None,
                 show_help: false,
-                onboarding_step: first_open.then_some(OnboardingStep::ConsentProjectDataDir),
                 last_refresh: now,
                 last_relative_time_redraw: now,
                 last_terminal_clear: now,
@@ -201,8 +195,40 @@ impl App {
         }
     }
 
-    pub(super) fn onboarding_active(&self) -> bool {
-        self.runtime.onboarding_step.is_some()
+    fn initialize_project_data(&mut self, first_open: bool) -> anyhow::Result<Option<String>> {
+        std::fs::create_dir_all(self.deps.store.root_dir()).with_context(|| {
+            format!("failed to create {}", self.deps.store.root_dir().display())
+        })?;
+        self.review_state_sync_driver = PathWatchDriver::new(
+            self.review_state_sync.watch_dir(),
+            self.tuning.auto_refresh_every,
+            self.now_instant(),
+        );
+
+        if first_open {
+            self.complete_first_open_setup()?;
+        }
+
+        let startup_note = match append_ignore_file_entry(
+            &self.deps.git.local_exclude_path(),
+            "/.hunkr/",
+        ) {
+            Ok(IgnoreFileUpdate::Added | IgnoreFileUpdate::AlreadyPresent) => {
+                match self.deps.git.path_is_ignored(self.deps.store.state_path()) {
+                        Ok(true) => None,
+                        Ok(false) => Some(
+                            "Repo ignore rules override the local exclude; .hunkr may still appear in git status."
+                                .to_owned(),
+                        ),
+                        Err(err) => {
+                            Some(format!("Failed to verify local git exclude ({err:#})"))
+                        }
+                    }
+            }
+            Err(err) => Some(format!("Failed to update local git exclude ({err:#})")),
+        };
+
+        Ok(startup_note)
     }
 
     fn complete_first_open_setup(&mut self) -> anyhow::Result<()> {
@@ -225,117 +251,23 @@ impl App {
         Ok(())
     }
 
-    fn finish_onboarding(&mut self, onboarding_note: Option<String>) {
-        if let Err(err) = self.complete_first_open_setup() {
-            self.runtime.status = format!("setup failed: {err:#}");
-            return;
-        }
-        if let Err(err) = self.reload_commits(true) {
-            self.runtime.status = format!("reload failed after setup: {err:#}");
-            return;
-        }
-        let starter_note = match self.apply_startup_starter_selection() {
-            Ok(true) => Some(self.runtime.status.clone()),
-            Ok(false) => None,
-            Err(err) => {
-                self.runtime.status = format!("failed to set starter selection: {err:#}");
-                return;
-            }
-        };
-        self.ensure_rendered_diff();
-        self.runtime.onboarding_step = None;
-        let now = self.deps.clock.now_instant();
-        self.runtime.last_refresh = now;
-        self.runtime.last_relative_time_redraw = now;
-
+    fn finalize_startup_status(&mut self, startup_note: Option<String>) {
         let selected = self
             .domain
             .commits
             .iter()
             .filter(|row| row.selected)
             .count();
-        let ready = starter_note.unwrap_or_else(|| format!("{selected} commit(s) selected"));
-        self.runtime.status = if let Some(note) = onboarding_note {
+        let ready = if self.runtime.status.starts_with("Starter selection:") {
+            self.runtime.status.clone()
+        } else {
+            format!("{selected} commit(s) selected")
+        };
+        self.runtime.status = if let Some(note) = startup_note {
             format!("{note} {ready}")
         } else {
             ready
         };
-    }
-
-    fn handle_onboarding_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
-                self.runtime.status = match self.runtime.onboarding_step {
-                    Some(OnboardingStep::ConsentProjectDataDir) => {
-                        "Setup canceled. Exiting without creating .hunkr".to_owned()
-                    }
-                    Some(OnboardingStep::GitignoreChoice) => {
-                        "Setup canceled before completion. Reopen hunkr to continue setup."
-                            .to_owned()
-                    }
-                    None => "Setup canceled".to_owned(),
-                };
-                self.runtime.should_quit = true;
-            }
-            _ => match self.runtime.onboarding_step {
-                Some(OnboardingStep::ConsentProjectDataDir) => {
-                    self.handle_project_data_dir_consent(key)
-                }
-                Some(OnboardingStep::GitignoreChoice) => self.handle_gitignore_choice(key),
-                None => {}
-            },
-        }
-    }
-
-    fn handle_project_data_dir_consent(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                if let Err(err) = std::fs::create_dir_all(self.deps.store.root_dir()) {
-                    self.runtime.status = format!(
-                        "failed to create {}: {err}",
-                        self.deps.store.root_dir().display()
-                    );
-                    return;
-                }
-                self.review_state_sync_driver = PathWatchDriver::new(
-                    self.review_state_sync.watch_dir(),
-                    self.tuning.auto_refresh_every,
-                    self.now_instant(),
-                );
-                self.runtime.onboarding_step = Some(OnboardingStep::GitignoreChoice);
-                self.runtime.status.clear();
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') => {
-                self.runtime.status = "Setup declined. Exiting without creating .hunkr".to_owned();
-                self.runtime.should_quit = true;
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_gitignore_choice(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                let gitignore_path = self.deps.git.root().join(".gitignore");
-                let note = match append_gitignore_entry(&gitignore_path, ".hunkr") {
-                    Ok(GitignoreUpdate::Added) => "Added .hunkr to .gitignore.".to_owned(),
-                    Ok(GitignoreUpdate::AlreadyPresent) => {
-                        ".hunkr is already ignored in .gitignore.".to_owned()
-                    }
-                    Err(err) => {
-                        self.runtime.status =
-                            format!("failed to update {}: {err:#}", gitignore_path.display());
-                        return;
-                    }
-                };
-                self.finish_onboarding(Some(note));
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') => self.finish_onboarding(Some(
-                "Skipped .gitignore update. You can ignore .hunkr per project or globally."
-                    .to_owned(),
-            )),
-            _ => {}
-        }
     }
 
     pub fn should_quit(&self) -> bool {
@@ -363,7 +295,6 @@ impl App {
     pub fn poll_timeout(&self) -> Duration {
         let now = self.now_instant();
         tick_scheduler::compute_poll_timeout(PollTimeoutInputs {
-            onboarding_active: self.onboarding_active(),
             selection_rebuild_due: self.runtime.selection_rebuild_due,
             now,
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
@@ -378,11 +309,6 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame<'_>) {
         let theme = self.active_theme().clone();
-        if self.onboarding_active() {
-            self.render_onboarding(frame, &theme);
-            return;
-        }
-
         self.ensure_rendered_diff();
         self.ui.shell_command.output_rect = None;
         self.ui.shell_command.output_viewport = 0;
@@ -452,7 +378,6 @@ impl App {
 
     pub(in crate::app) fn run_tick_cycle(&mut self, now: Instant) {
         let mut tasks = tick_scheduler::plan_tick(TickPlanInputs {
-            onboarding_active: self.onboarding_active(),
             now,
             terminal_clear_elapsed: self.runtime.last_terminal_clear.elapsed(),
             terminal_clear_every: self.tuning.terminal_clear_every,
@@ -513,11 +438,6 @@ impl App {
     }
 
     pub(super) fn handle_key(&mut self, key: KeyEvent) {
-        if self.onboarding_active() {
-            self.handle_onboarding_key(key);
-            return;
-        }
-
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('l') | KeyCode::Char('L'))
         {

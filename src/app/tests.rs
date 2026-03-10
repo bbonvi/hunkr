@@ -62,49 +62,50 @@ fn first_open_reviewed_commit_ids_excludes_unpushed_commits() {
 }
 
 #[test]
-fn gitignore_match_accepts_common_hunkr_variants() {
-    assert!(gitignore_contains_entry(".hunkr\n", ".hunkr"));
-    assert!(gitignore_contains_entry("/.hunkr/\n", ".hunkr"));
-    assert!(gitignore_contains_entry(".hunkr/\n", "/.hunkr"));
-    assert!(!gitignore_contains_entry("target\n", ".hunkr"));
+fn ignore_match_accepts_common_hunkr_variants() {
+    assert!(ignore_file_contains_entry(".hunkr\n", ".hunkr"));
+    assert!(ignore_file_contains_entry("/.hunkr/\n", ".hunkr"));
+    assert!(ignore_file_contains_entry(".hunkr/\n", "/.hunkr/"));
+    assert!(!ignore_file_contains_entry("target\n", ".hunkr"));
 }
 
 #[test]
-fn append_gitignore_entry_adds_once_and_skips_duplicates() {
+fn append_ignore_file_entry_adds_once_and_skips_duplicates() {
     let tmp = tempdir().expect("tempdir");
-    let path = tmp.path().join(".gitignore");
-    fs::write(&path, "target").expect("seed gitignore");
+    let path = tmp.path().join("info").join("exclude");
+    fs::create_dir_all(path.parent().expect("exclude parent")).expect("create info dir");
+    fs::write(&path, "target").expect("seed exclude");
 
     assert_eq!(
-        append_gitignore_entry(&path, ".hunkr").expect("append"),
-        GitignoreUpdate::Added
+        append_ignore_file_entry(&path, "/.hunkr/").expect("append"),
+        IgnoreFileUpdate::Added
     );
     assert_eq!(
         fs::read_to_string(&path).expect("read after append"),
-        "target\n.hunkr\n"
+        "target\n/.hunkr/\n"
     );
     assert_eq!(
-        append_gitignore_entry(&path, ".hunkr").expect("append duplicate"),
-        GitignoreUpdate::AlreadyPresent
+        append_ignore_file_entry(&path, ".hunkr").expect("append duplicate"),
+        IgnoreFileUpdate::AlreadyPresent
     );
     assert_eq!(
         fs::read_to_string(&path).expect("read after duplicate"),
-        "target\n.hunkr\n"
+        "target\n/.hunkr/\n"
     );
 }
 
 #[test]
-fn append_gitignore_entry_creates_file_when_missing() {
+fn append_ignore_file_entry_creates_parent_and_file_when_missing() {
     let tmp = tempdir().expect("tempdir");
-    let path = tmp.path().join(".gitignore");
+    let path = tmp.path().join("info").join("exclude");
 
     assert_eq!(
-        append_gitignore_entry(&path, ".hunkr").expect("append"),
-        GitignoreUpdate::Added
+        append_ignore_file_entry(&path, "/.hunkr/").expect("append"),
+        IgnoreFileUpdate::Added
     );
     assert_eq!(
         fs::read_to_string(&path).expect("read created gitignore"),
-        ".hunkr\n"
+        "/.hunkr/\n"
     );
 }
 
