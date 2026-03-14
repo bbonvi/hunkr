@@ -8,6 +8,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
 };
+use semver::Version;
 
 use super::super::{
     CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
@@ -543,23 +544,17 @@ impl<'a> ListLinePresenter<'a> {
                 right_width += display_width(&rendered) + usize::from(right_width > 0);
             }
         }
-        if commit_has_tag(row) {
-            let tag_badge = if self.nerd_fonts {
-                "".to_owned()
-            } else {
-                "tag".to_owned()
-            };
-            let tag_needed = display_width(&tag_badge) + usize::from(right_width > 0);
-            if right_width + tag_needed <= max_right_width {
-                if right_width > 0 {
-                    right_spans.push(Span::raw(" "));
-                }
-                right_spans.push(Span::styled(
-                    tag_badge,
-                    commit_tag_marker_style(row.selected, self.theme),
-                ));
-                right_width += tag_needed;
+        let tag_available_width =
+            max_right_width.saturating_sub(right_width + usize::from(right_width > 0));
+        if let Some(tag_badge) = commit_tag_badge_label(row, self.nerd_fonts, tag_available_width) {
+            if right_width > 0 {
+                right_spans.push(Span::raw(" "));
             }
+            right_width += display_width(&tag_badge) + usize::from(right_width > 0);
+            right_spans.push(Span::styled(
+                tag_badge,
+                commit_tag_marker_style(row.selected, self.theme),
+            ));
         }
         let status_badge = commit_status_badge(row.status, self.nerd_fonts).to_owned();
         let status_needed = display_width(&status_badge) + usize::from(right_width > 0);
@@ -770,6 +765,48 @@ fn commit_has_tag(row: &CommitRow) -> bool {
         .decorations
         .iter()
         .any(|item| item.kind == CommitDecorationKind::Tag)
+}
+
+fn commit_tag_badge_label(
+    row: &CommitRow,
+    nerd_fonts: bool,
+    available_width: usize,
+) -> Option<String> {
+    if !commit_has_tag(row) {
+        return None;
+    }
+
+    let generic_badge = if nerd_fonts {
+        "".to_owned()
+    } else {
+        "tag".to_owned()
+    };
+    let prefix = if nerd_fonts { "" } else { "tag" };
+
+    for version in row
+        .info
+        .decorations
+        .iter()
+        .filter(|item| item.kind == CommitDecorationKind::Tag)
+        .filter_map(|item| concise_semver_tag_label(&item.label))
+    {
+        let version_badge = format!("{prefix} {version}");
+        if display_width(&version_badge) <= available_width {
+            return Some(version_badge);
+        }
+    }
+
+    (display_width(&generic_badge) <= available_width).then_some(generic_badge)
+}
+
+fn concise_semver_tag_label(tag: &str) -> Option<String> {
+    let sanitized = sanitize_terminal_text(tag.trim());
+    let normalized = sanitized.trim_start_matches("tag: ").trim();
+    let version = normalized.strip_prefix('v').unwrap_or(normalized);
+
+    Version::parse(version)
+        .ok()
+        .map(|parsed| parsed.to_string())
 }
 
 fn commit_decoration_style(selected: bool, theme: &UiTheme) -> Style {
@@ -1019,7 +1056,7 @@ mod tests {
 
         let line = presenter.commit_row_line_with_push_chain(&row, None);
         assert!(line.spans.iter().any(|span| {
-            span.content.contains("tag")
+            span.content.contains("tag 1.0.0")
                 && !span.style.add_modifier.contains(Modifier::BOLD)
                 && span.style.fg == Some(theme.muted)
         }));
@@ -1126,6 +1163,120 @@ mod tests {
 
         let tokens = super::compact_ref_metadata_tokens(&decorations, true);
         assert_eq!(tokens, vec![" v1.2.3".to_owned()]);
+    }
+
+    #[test]
+    fn concise_semver_tag_label_drops_optional_v_prefix() {
+        assert_eq!(
+            super::concise_semver_tag_label("v1.2.3"),
+            Some("1.2.3".to_owned())
+        );
+        assert_eq!(
+            super::concise_semver_tag_label("1.2.3-beta.1+build.7"),
+            Some("1.2.3-beta.1+build.7".to_owned())
+        );
+    }
+
+    #[test]
+    fn concise_semver_tag_label_rejects_non_semver_tags() {
+        assert_eq!(super::concise_semver_tag_label("release-1.2.3"), None);
+        assert_eq!(super::concise_semver_tag_label("v1.2"), None);
+    }
+
+    #[test]
+    fn commit_row_tag_badge_uses_first_semver_tag_when_available() {
+        let row = CommitRow {
+            info: crate::model::CommitInfo {
+                id: "abc123".to_owned(),
+                short_id: "abc123".to_owned(),
+                summary: "Render concise tag".to_owned(),
+                author: "dev".to_owned(),
+                timestamp: 1_709_999_000,
+                unpushed: false,
+                decorations: vec![
+                    crate::model::CommitDecoration {
+                        kind: crate::model::CommitDecorationKind::Tag,
+                        label: "release".to_owned(),
+                    },
+                    crate::model::CommitDecoration {
+                        kind: crate::model::CommitDecorationKind::Tag,
+                        label: "v1.2.3".to_owned(),
+                    },
+                ],
+            },
+            selected: false,
+            status: ReviewStatus::Unreviewed,
+            is_uncommitted: false,
+        };
+
+        assert_eq!(
+            super::commit_tag_badge_label(&row, true, usize::MAX),
+            Some(" 1.2.3".to_owned())
+        );
+        assert_eq!(
+            super::commit_tag_badge_label(&row, false, usize::MAX),
+            Some("tag 1.2.3".to_owned())
+        );
+    }
+
+    #[test]
+    fn commit_row_tag_badge_falls_back_for_non_semver_tags() {
+        let row = CommitRow {
+            info: crate::model::CommitInfo {
+                id: "abc123".to_owned(),
+                short_id: "abc123".to_owned(),
+                summary: "Render generic tag".to_owned(),
+                author: "dev".to_owned(),
+                timestamp: 1_709_999_000,
+                unpushed: false,
+                decorations: vec![crate::model::CommitDecoration {
+                    kind: crate::model::CommitDecorationKind::Tag,
+                    label: "release-2026-03".to_owned(),
+                }],
+            },
+            selected: false,
+            status: ReviewStatus::Unreviewed,
+            is_uncommitted: false,
+        };
+
+        assert_eq!(
+            super::commit_tag_badge_label(&row, true, usize::MAX),
+            Some("".to_owned())
+        );
+        assert_eq!(
+            super::commit_tag_badge_label(&row, false, usize::MAX),
+            Some("tag".to_owned())
+        );
+    }
+
+    #[test]
+    fn commit_row_tag_badge_falls_back_to_generic_when_semver_badge_would_overflow() {
+        let row = CommitRow {
+            info: crate::model::CommitInfo {
+                id: "abc123".to_owned(),
+                short_id: "abc123".to_owned(),
+                summary: "Render narrow tag badge".to_owned(),
+                author: "dev".to_owned(),
+                timestamp: 1_709_999_000,
+                unpushed: false,
+                decorations: vec![crate::model::CommitDecoration {
+                    kind: crate::model::CommitDecorationKind::Tag,
+                    label: "v1.2.3".to_owned(),
+                }],
+            },
+            selected: false,
+            status: ReviewStatus::Unreviewed,
+            is_uncommitted: false,
+        };
+
+        assert_eq!(
+            super::commit_tag_badge_label(&row, true, display_width("")),
+            Some("".to_owned())
+        );
+        assert_eq!(
+            super::commit_tag_badge_label(&row, false, display_width("tag")),
+            Some("tag".to_owned())
+        );
     }
 
     #[test]

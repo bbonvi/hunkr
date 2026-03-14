@@ -436,6 +436,7 @@ dependencies = [
  "git2",
  "notify",
  "ratatui",
+ "semver",
  "serde",
  "serde_json",
  "serde_yaml",
