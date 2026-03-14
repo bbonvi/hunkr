@@ -760,19 +760,19 @@ fn dedupe_in_order(labels: Vec<String>) -> Vec<String> {
     deduped
 }
 
-fn commit_has_tag(row: &CommitRow) -> bool {
-    row.info
-        .decorations
-        .iter()
-        .any(|item| item.kind == CommitDecorationKind::Tag)
-}
-
 fn commit_tag_badge_label(
     row: &CommitRow,
     nerd_fonts: bool,
     available_width: usize,
 ) -> Option<String> {
-    if !commit_has_tag(row) {
+    let tag_labels = row
+        .info
+        .decorations
+        .iter()
+        .filter(|item| item.kind == CommitDecorationKind::Tag)
+        .map(|item| item.label.as_str())
+        .collect::<Vec<_>>();
+    if tag_labels.is_empty() {
         return None;
     }
 
@@ -781,16 +781,17 @@ fn commit_tag_badge_label(
     } else {
         "tag".to_owned()
     };
-    let prefix = if nerd_fonts { "" } else { "tag" };
+    let tag_suffix = if nerd_fonts { "" } else { "tag" };
 
-    for version in row
-        .info
-        .decorations
+    for version in tag_labels
         .iter()
-        .filter(|item| item.kind == CommitDecorationKind::Tag)
-        .filter_map(|item| concise_semver_tag_label(&item.label))
+        .filter_map(|label| concise_semver_tag_label(label))
     {
-        let version_badge = format!("{prefix} {version}");
+        let version_badge = if tag_labels.len() > 1 {
+            format!("{version} {tag_suffix}")
+        } else {
+            version
+        };
         if display_width(&version_badge) <= available_width {
             return Some(version_badge);
         }
@@ -1056,16 +1057,15 @@ mod tests {
 
         let line = presenter.commit_row_line_with_push_chain(&row, None);
         assert!(line.spans.iter().any(|span| {
-            span.content.contains("tag 1.0.0")
+            span.content.contains("1.0.0")
                 && !span.style.add_modifier.contains(Modifier::BOLD)
                 && span.style.fg == Some(theme.muted)
         }));
-        assert!(
-            !line
-                .spans
-                .iter()
-                .any(|span| span.content.contains("refs:") || span.content.contains("v1.0.0"))
-        );
+        assert!(!line.spans.iter().any(|span| {
+            span.content.contains("refs:")
+                || span.content.contains("v1.0.0")
+                || span.content.contains("tag")
+        }));
         assert!(line.spans.iter().any(|span| {
             span.style.fg == Some(theme.muted)
                 && !span.content.trim().is_empty()
@@ -1211,11 +1211,41 @@ mod tests {
 
         assert_eq!(
             super::commit_tag_badge_label(&row, true, usize::MAX),
-            Some(" 1.2.3".to_owned())
+            Some("1.2.3 ".to_owned())
         );
         assert_eq!(
             super::commit_tag_badge_label(&row, false, usize::MAX),
-            Some("tag 1.2.3".to_owned())
+            Some("1.2.3 tag".to_owned())
+        );
+    }
+
+    #[test]
+    fn commit_row_tag_badge_omits_marker_for_single_semver_tag() {
+        let row = CommitRow {
+            info: crate::model::CommitInfo {
+                id: "abc123".to_owned(),
+                short_id: "abc123".to_owned(),
+                summary: "Render lone semver tag".to_owned(),
+                author: "dev".to_owned(),
+                timestamp: 1_709_999_000,
+                unpushed: false,
+                decorations: vec![crate::model::CommitDecoration {
+                    kind: crate::model::CommitDecorationKind::Tag,
+                    label: "v1.2.3".to_owned(),
+                }],
+            },
+            selected: false,
+            status: ReviewStatus::Unreviewed,
+            is_uncommitted: false,
+        };
+
+        assert_eq!(
+            super::commit_tag_badge_label(&row, true, usize::MAX),
+            Some("1.2.3".to_owned())
+        );
+        assert_eq!(
+            super::commit_tag_badge_label(&row, false, usize::MAX),
+            Some("1.2.3".to_owned())
         );
     }
 
