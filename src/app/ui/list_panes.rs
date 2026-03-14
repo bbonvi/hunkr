@@ -785,7 +785,7 @@ fn commit_tag_badge_label(
 
     for version in tag_labels
         .iter()
-        .filter_map(|label| concise_semver_tag_label(label))
+        .filter_map(|label| semver_tag_display_label(label))
     {
         let version_badge = if tag_labels.len() > 1 {
             format!("{version} {tag_suffix}")
@@ -800,14 +800,12 @@ fn commit_tag_badge_label(
     (display_width(&generic_badge) <= available_width).then_some(generic_badge)
 }
 
-fn concise_semver_tag_label(tag: &str) -> Option<String> {
+fn semver_tag_display_label(tag: &str) -> Option<String> {
     let sanitized = sanitize_terminal_text(tag.trim());
     let normalized = sanitized.trim_start_matches("tag: ").trim();
     let version = normalized.strip_prefix('v').unwrap_or(normalized);
 
-    Version::parse(version)
-        .ok()
-        .map(|parsed| parsed.to_string())
+    Version::parse(version).ok().map(|_| normalized.to_owned())
 }
 
 fn commit_decoration_style(selected: bool, theme: &UiTheme) -> Style {
@@ -1166,21 +1164,21 @@ mod tests {
     }
 
     #[test]
-    fn concise_semver_tag_label_drops_optional_v_prefix() {
+    fn semver_tag_display_label_preserves_original_tag_text() {
         assert_eq!(
-            super::concise_semver_tag_label("v1.2.3"),
-            Some("1.2.3".to_owned())
+            super::semver_tag_display_label("v1.2.3"),
+            Some("v1.2.3".to_owned())
         );
         assert_eq!(
-            super::concise_semver_tag_label("1.2.3-beta.1+build.7"),
+            super::semver_tag_display_label("1.2.3-beta.1+build.7"),
             Some("1.2.3-beta.1+build.7".to_owned())
         );
     }
 
     #[test]
-    fn concise_semver_tag_label_rejects_non_semver_tags() {
-        assert_eq!(super::concise_semver_tag_label("release-1.2.3"), None);
-        assert_eq!(super::concise_semver_tag_label("v1.2"), None);
+    fn semver_tag_display_label_rejects_non_semver_tags() {
+        assert_eq!(super::semver_tag_display_label("release-1.2.3"), None);
+        assert_eq!(super::semver_tag_display_label("v1.2"), None);
     }
 
     #[test]
@@ -1211,11 +1209,11 @@ mod tests {
 
         assert_eq!(
             super::commit_tag_badge_label(&row, true, usize::MAX),
-            Some("1.2.3 ".to_owned())
+            Some("v1.2.3 ".to_owned())
         );
         assert_eq!(
             super::commit_tag_badge_label(&row, false, usize::MAX),
-            Some("1.2.3 tag".to_owned())
+            Some("v1.2.3 tag".to_owned())
         );
     }
 
@@ -1241,11 +1239,11 @@ mod tests {
 
         assert_eq!(
             super::commit_tag_badge_label(&row, true, usize::MAX),
-            Some("1.2.3".to_owned())
+            Some("v1.2.3".to_owned())
         );
         assert_eq!(
             super::commit_tag_badge_label(&row, false, usize::MAX),
-            Some("1.2.3".to_owned())
+            Some("v1.2.3".to_owned())
         );
     }
 
