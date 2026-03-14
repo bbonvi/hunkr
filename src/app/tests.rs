@@ -184,7 +184,8 @@ fn compose_commit_line_keeps_concise_git_decorations() {
         .map(|span| span.content.to_string())
         .collect::<String>();
 
-    assert!(flattened.contains("refs:main*,@origin/main"));
+    assert!(flattened.contains("refs:main*"));
+    assert!(!flattened.contains("@origin/main"));
     assert!(!flattened.contains("HEAD ->"));
 }
 

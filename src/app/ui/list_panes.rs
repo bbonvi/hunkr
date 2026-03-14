@@ -647,10 +647,69 @@ pub(in crate::app) fn commit_push_chain_kinds(
 }
 
 fn compact_ref_metadata_tokens(decorations: &[CommitDecoration], nerd_fonts: bool) -> Vec<String> {
+    let refs = collect_compact_commit_refs(decorations);
+
+    let mut tokens = Vec::new();
+    if let Some(token) = summarize_ref_group("refs ", &refs.local_head_refs, 2) {
+        tokens.push(token);
+    }
+    if let Some(token) = summarize_ref_group("", &refs.remote_refs, 1) {
+        tokens.push(token);
+    }
+    if let Some(token) =
+        summarize_ref_group(if nerd_fonts { " " } else { "tag " }, &refs.tag_refs, 2)
+    {
+        tokens.push(token);
+    }
+    tokens
+}
+
+fn compact_commit_line_decoration_label(
+    decorations: &[CommitDecoration],
+    nerd_fonts: bool,
+) -> String {
+    let refs = collect_compact_commit_refs(decorations);
+
+    let mut labels = Vec::<String>::new();
+    let shown_locals = refs
+        .local_head_refs
+        .iter()
+        .take(1)
+        .cloned()
+        .collect::<Vec<_>>();
+    let local_overflow = refs
+        .local_head_refs
+        .len()
+        .saturating_sub(shown_locals.len());
+    labels.extend(shown_locals);
+    if local_overflow > 0 {
+        labels.push(format!("+{local_overflow}"));
+    }
+
+    if labels.is_empty() {
+        return String::new();
+    }
+
+    if nerd_fonts {
+        format!(" {}", labels.join(","))
+    } else {
+        format!("refs:{}", labels.join(","))
+    }
+}
+
+#[derive(Default)]
+struct CompactCommitRefs {
+    local_head_refs: Vec<String>,
+    remote_refs: Vec<String>,
+    tag_refs: Vec<String>,
+}
+
+fn collect_compact_commit_refs(decorations: &[CommitDecoration]) -> CompactCommitRefs {
     let mut head_refs = Vec::<String>::new();
     let mut local_refs = Vec::<String>::new();
     let mut remote_refs = Vec::<String>::new();
     let mut tag_refs = Vec::<String>::new();
+
     for item in decorations {
         let label = sanitize_terminal_text(&item.label);
         match item.kind {
@@ -673,77 +732,10 @@ fn compact_ref_metadata_tokens(decorations: &[CommitDecoration], nerd_fonts: boo
         .collect::<BTreeSet<_>>();
     local_refs.retain(|label| !head_bases.contains(label));
 
-    let local_head_refs = dedupe_in_order(head_refs.into_iter().chain(local_refs).collect());
-    let remote_refs = dedupe_in_order(remote_refs);
-    let tag_refs = dedupe_in_order(tag_refs);
-
-    let mut tokens = Vec::new();
-    if let Some(token) = summarize_ref_group("refs ", &local_head_refs, 2) {
-        tokens.push(token);
-    }
-    if let Some(token) = summarize_ref_group("", &remote_refs, 1) {
-        tokens.push(token);
-    }
-    if let Some(token) = summarize_ref_group(if nerd_fonts { " " } else { "tag " }, &tag_refs, 2)
-    {
-        tokens.push(token);
-    }
-    tokens
-}
-
-fn compact_commit_line_decoration_label(
-    decorations: &[CommitDecoration],
-    nerd_fonts: bool,
-) -> String {
-    let mut head_refs = Vec::<String>::new();
-    let mut local_refs = Vec::<String>::new();
-    let mut remote_refs = Vec::<String>::new();
-    for item in decorations {
-        let label = sanitize_terminal_text(&item.label);
-        match item.kind {
-            CommitDecorationKind::Head => head_refs.push(label),
-            CommitDecorationKind::LocalBranch => local_refs.push(label),
-            CommitDecorationKind::RemoteBranch => {
-                if !label.ends_with("/HEAD") {
-                    remote_refs.push(label);
-                }
-            }
-            CommitDecorationKind::Tag => {}
-        }
-    }
-
-    let head_bases = head_refs
-        .iter()
-        .filter_map(|label| label.strip_suffix('*').map(str::to_owned))
-        .collect::<BTreeSet<_>>();
-    local_refs.retain(|label| !head_bases.contains(label));
-
-    let local_head_refs = dedupe_in_order(head_refs.into_iter().chain(local_refs).collect());
-    let remote_refs = dedupe_in_order(remote_refs);
-
-    let mut labels = Vec::<String>::new();
-    let shown_locals = local_head_refs.iter().take(2).cloned().collect::<Vec<_>>();
-    let local_overflow = local_head_refs.len().saturating_sub(shown_locals.len());
-    labels.extend(shown_locals);
-    if local_overflow > 0 {
-        labels.push(format!("+{local_overflow}"));
-    }
-
-    if let Some(remote) = remote_refs.first() {
-        labels.push(format!("@{remote}"));
-        if remote_refs.len() > 1 {
-            labels.push(format!("+{}", remote_refs.len() - 1));
-        }
-    }
-
-    if labels.is_empty() {
-        return String::new();
-    }
-
-    if nerd_fonts {
-        format!(" {}", labels.join(","))
-    } else {
-        format!("refs:{}", labels.join(","))
+    CompactCommitRefs {
+        local_head_refs: dedupe_in_order(head_refs.into_iter().chain(local_refs).collect()),
+        remote_refs: dedupe_in_order(remote_refs),
+        tag_refs: dedupe_in_order(tag_refs),
     }
 }
 
@@ -1162,7 +1154,8 @@ mod tests {
         ];
 
         let label = super::compact_commit_line_decoration_label(&decorations, false);
-        assert_eq!(label, "refs:main*,release,@origin/main");
+        assert_eq!(label, "refs:main*,+1");
         assert!(!label.contains("v1.0.0"));
+        assert!(!label.contains("origin/main"));
     }
 }
