@@ -518,9 +518,21 @@ impl<'a> ListLinePresenter<'a> {
             return Line::from(vec![
                 Span::styled(left_render, commit_text_style),
                 Span::raw(" "),
-                Span::styled(badge, Style::default().fg(self.theme.accent)),
+                Span::styled(
+                    badge,
+                    emphasize_selected_commit_row(
+                        Style::default().fg(self.theme.accent),
+                        row.selected,
+                    ),
+                ),
                 Span::raw(spaces),
-                Span::styled(right, Style::default().fg(self.theme.dimmed)),
+                Span::styled(
+                    right,
+                    emphasize_selected_commit_row(
+                        Style::default().fg(self.theme.dimmed),
+                        row.selected,
+                    ),
+                ),
             ]);
         }
 
@@ -540,7 +552,10 @@ impl<'a> ListLinePresenter<'a> {
                 if right_width > 0 {
                     right_spans.push(Span::raw(" "));
                 }
-                right_spans.push(Span::styled(rendered.clone(), decoration_style));
+                right_spans.push(Span::styled(
+                    rendered.clone(),
+                    emphasize_selected_commit_row(decoration_style, row.selected),
+                ));
                 right_width += display_width(&rendered) + usize::from(right_width > 0);
             }
         }
@@ -553,7 +568,10 @@ impl<'a> ListLinePresenter<'a> {
             right_width += display_width(&tag_badge) + usize::from(right_width > 0);
             right_spans.push(Span::styled(
                 tag_badge,
-                commit_tag_marker_style(row.selected, self.theme),
+                emphasize_selected_commit_row(
+                    commit_tag_marker_style(row.selected, self.theme),
+                    row.selected,
+                ),
             ));
         }
         let status_badge = commit_status_badge(row.status, self.nerd_fonts).to_owned();
@@ -564,7 +582,10 @@ impl<'a> ListLinePresenter<'a> {
             }
             right_spans.push(Span::styled(
                 status_badge.clone(),
-                status_style(row.status, self.theme).add_modifier(Modifier::BOLD),
+                emphasize_selected_commit_row(
+                    status_style(row.status, self.theme).add_modifier(Modifier::BOLD),
+                    row.selected,
+                ),
             ));
             right_width += status_needed;
         }
@@ -575,7 +596,10 @@ impl<'a> ListLinePresenter<'a> {
                 right_spans.push(Span::raw(" "));
                 right_spans.push(Span::styled(
                     marker.clone(),
-                    commit_push_chain_style(push_chain_kind, self.theme),
+                    emphasize_selected_commit_row(
+                        commit_push_chain_style(push_chain_kind, self.theme),
+                        row.selected,
+                    ),
                 ));
                 right_width += needed;
             }
@@ -587,7 +611,10 @@ impl<'a> ListLinePresenter<'a> {
         let age_width = display_width(&age);
         if right_width + 1 + age_width <= max_right_width {
             right_spans.push(Span::raw(" "));
-            right_spans.push(Span::styled(age.clone(), age_style));
+            right_spans.push(Span::styled(
+                age.clone(),
+                emphasize_selected_commit_row(age_style, row.selected),
+            ));
             right_width += 1 + age_width;
         }
         let max_left = self.width.saturating_sub(right_width + 1).max(1);
@@ -824,6 +851,14 @@ fn commit_tag_marker_style(selected: bool, theme: &UiTheme) -> Style {
     }
 }
 
+fn emphasize_selected_commit_row(style: Style, selected: bool) -> Style {
+    if selected {
+        style.add_modifier(Modifier::BOLD)
+    } else {
+        style
+    }
+}
+
 fn pad_min_width(value: String, min_width: usize) -> String {
     let width = display_width(&value);
     if width >= min_width {
@@ -1032,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_commit_row_tag_marker_is_subtle_while_age_is_bold() {
+    fn selected_commit_row_metadata_is_also_bold() {
         let theme = UiTheme::from_mode(ThemeMode::Light);
         let presenter = super::ListLinePresenter::new(120, 1_710_000_000, &theme, false);
         let row = CommitRow {
@@ -1043,31 +1078,55 @@ mod tests {
                 author: "dev".to_owned(),
                 timestamp: 1_709_999_000,
                 unpushed: false,
-                decorations: vec![crate::model::CommitDecoration {
-                    kind: crate::model::CommitDecorationKind::Tag,
-                    label: "v1.0.0".to_owned(),
-                }],
+                decorations: vec![
+                    crate::model::CommitDecoration {
+                        kind: crate::model::CommitDecorationKind::LocalBranch,
+                        label: "main".to_owned(),
+                    },
+                    crate::model::CommitDecoration {
+                        kind: crate::model::CommitDecorationKind::Tag,
+                        label: "v1.0.0".to_owned(),
+                    },
+                ],
             },
             selected: true,
             status: ReviewStatus::Reviewed,
             is_uncommitted: false,
         };
 
-        let line = presenter.commit_row_line_with_push_chain(&row, None);
-        assert!(line.spans.iter().any(|span| {
-            span.content.contains("1.0.0")
-                && !span.style.add_modifier.contains(Modifier::BOLD)
-                && span.style.fg == Some(theme.muted)
-        }));
-        assert!(!line.spans.iter().any(|span| {
-            span.content.contains("refs:")
-                || span.content.contains("v1.0.0")
-                || span.content.contains("tag")
-        }));
-        assert!(line.spans.iter().any(|span| {
-            span.style.fg == Some(theme.muted)
-                && !span.content.trim().is_empty()
-                && span.style.add_modifier.contains(Modifier::BOLD)
+        let line = presenter.commit_row_line_with_push_chain(
+            &row,
+            Some(crate::app::CommitPushChainMarkerKind::TopPushed),
+        );
+        let visible_spans = line
+            .spans
+            .iter()
+            .filter(|span| !span.content.trim().is_empty())
+            .collect::<Vec<_>>();
+
+        assert!(
+            visible_spans
+                .iter()
+                .all(|span| span.style.add_modifier.contains(Modifier::BOLD))
+        );
+        assert!(
+            visible_spans
+                .iter()
+                .any(|span| span.content.contains("v1.0.0"))
+        );
+        assert!(
+            visible_spans
+                .iter()
+                .any(|span| span.content.contains("refs:main"))
+        );
+        assert!(
+            visible_spans
+                .iter()
+                .any(|span| span.content.contains("[T]"))
+        );
+        assert!(visible_spans.iter().any(|span| {
+            span.content
+                .contains(commit_status_badge(ReviewStatus::Reviewed, false))
         }));
     }
 
