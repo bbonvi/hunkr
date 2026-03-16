@@ -616,11 +616,31 @@ extra_top_level:
         let ThemeReloadOutcome::LoadedFromFile { warnings } = outcome else {
             panic!("expected loaded theme outcome");
         };
-        assert!(warnings.iter().any(|warning| warning.contains("ignored unknown sections")));
-        assert!(warnings.iter().any(|warning| warning.contains("dark: missing fields defaulted")));
-        assert!(warnings.iter().any(|warning| warning.contains("light: missing fields defaulted")));
-        assert!(warnings.iter().any(|warning| warning.contains("dark: ignored unknown fields")));
-        assert!(warnings.iter().any(|warning| warning.contains("light: ignored unknown fields")));
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("ignored unknown sections"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("dark: missing fields defaulted"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("light: missing fields defaulted"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("dark: ignored unknown fields"))
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|warning| warning.contains("light: ignored unknown fields"))
+        );
         assert_eq!(state.for_mode(ThemeMode::Dark).accent, Color::Rgb(1, 2, 3));
         assert_eq!(state.for_mode(ThemeMode::Light).text, Color::Rgb(4, 5, 6));
         assert_eq!(
