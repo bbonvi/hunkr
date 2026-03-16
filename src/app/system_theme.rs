@@ -1,6 +1,10 @@
 //! System theme detection for `theme: auto`.
 
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::Result;
 
@@ -18,6 +22,9 @@ impl SystemThemeDetector {
 
         #[cfg(all(unix, not(target_os = "macos")))]
         {
+            if let Some(mode) = detect_orbstack_host_theme() {
+                return Ok(Some(mode));
+            }
             if let Some(mode) = detect_portal_theme() {
                 return Ok(Some(mode));
             }
@@ -36,8 +43,20 @@ impl SystemThemeDetector {
     }
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+fn detect_orbstack_host_theme() -> Option<ThemeMode> {
+    if !is_orbstack_guest() {
+        return None;
+    }
+    detect_defaults_theme()
+}
+
 #[cfg(target_os = "macos")]
 fn detect_macos_theme() -> Option<ThemeMode> {
+    detect_defaults_theme()
+}
+
+fn detect_defaults_theme() -> Option<ThemeMode> {
     let output = Command::new("defaults")
         .args(["read", "-g", "AppleInterfaceStyle"])
         .output()
@@ -47,6 +66,21 @@ fn detect_macos_theme() -> Option<ThemeMode> {
         output.status.success(),
         &stdout,
     ))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn is_orbstack_guest() -> bool {
+    orbstack_guest_markers(
+        Path::new("/opt/orbstack-guest").exists(),
+        command_stdout("uname", &["-r"]).as_deref(),
+    )
+}
+
+fn orbstack_guest_markers(orbstack_guest_dir_exists: bool, uname_release: Option<&str>) -> bool {
+    orbstack_guest_dir_exists
+        || uname_release
+            .map(|release| release.to_ascii_lowercase().contains("orbstack"))
+            .unwrap_or(false)
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -140,7 +174,6 @@ fn config_home() -> PathBuf {
     PathBuf::from(".config")
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn resolve_macos_defaults_output(command_succeeded: bool, output: &str) -> ThemeMode {
     if command_succeeded && output.trim() == "Dark" {
         ThemeMode::Dark
@@ -312,5 +345,12 @@ BackgroundNormal=32,34,36
             ThemeMode::Dark
         );
         assert_eq!(resolve_macos_defaults_output(false, ""), ThemeMode::Light);
+    }
+
+    #[test]
+    fn orbstack_markers_detect_guest_from_dir_or_kernel_release() {
+        assert!(orbstack_guest_markers(true, None));
+        assert!(orbstack_guest_markers(false, Some("6.17.8-orbstack-00308")));
+        assert!(!orbstack_guest_markers(false, Some("6.12.0-generic")));
     }
 }
