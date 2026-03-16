@@ -535,8 +535,8 @@ mod tests {
         fs::create_dir_all(&config_dir).expect("create config dir");
         let theme_path = config_dir.join(THEME_FILE_NAME);
         let legacy_theme = include_str!("../../theme.example.yaml")
-            .replace("  commit_selected_text: \"#d3e9ff\"\n", "")
-            .replace("  commit_selected_text: \"#123f5e\"\n", "");
+            .replace("  commit_selected_text: \"#78c4ff\"\n", "")
+            .replace("  commit_selected_text: \"#007bb8\"\n", "");
         fs::write(&theme_path, legacy_theme).expect("write theme");
 
         let mut state = ThemeRuntimeState::new(theme_path);
@@ -544,7 +544,10 @@ mod tests {
 
         assert!(matches!(
             outcome,
-            ThemeReloadOutcome::LoadedFromFile { warnings } if warnings.len() == 2
+            ThemeReloadOutcome::LoadedFromFile { warnings }
+                if warnings.iter().all(|warning| {
+                    warning.contains("missing fields defaulted: commit_selected_text")
+                }) && warnings.len() == 2
         ));
         assert_eq!(
             state.for_mode(ThemeMode::Dark).commit_selected_text,
@@ -578,11 +581,55 @@ mod tests {
         );
         assert_eq!(
             state.for_mode(ThemeMode::Dark).unpushed,
-            Color::Rgb(170, 170, 170),
+            Color::Rgb(115, 115, 115),
         );
         assert_eq!(
             state.for_mode(ThemeMode::Light).unpushed,
             Color::Rgb(165, 165, 165),
+        );
+    }
+
+    #[test]
+    fn reload_if_changed_warns_on_missing_and_unknown_fields_without_rejecting_theme() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_dir = temp.path().join("hunkr");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let theme_path = config_dir.join(THEME_FILE_NAME);
+        fs::write(
+            &theme_path,
+            r##"
+dark:
+  accent: "#010203"
+  extra_dark_field: "#ffffff"
+light:
+  text: "#040506"
+  extra_light_field: "#ffffff"
+extra_top_level:
+  ignored: true
+"##,
+        )
+        .expect("write theme");
+
+        let mut state = ThemeRuntimeState::new(theme_path);
+        let outcome = state.reload_if_changed(true).expect("reload");
+
+        let ThemeReloadOutcome::LoadedFromFile { warnings } = outcome else {
+            panic!("expected loaded theme outcome");
+        };
+        assert!(warnings.iter().any(|warning| warning.contains("ignored unknown sections")));
+        assert!(warnings.iter().any(|warning| warning.contains("dark: missing fields defaulted")));
+        assert!(warnings.iter().any(|warning| warning.contains("light: missing fields defaulted")));
+        assert!(warnings.iter().any(|warning| warning.contains("dark: ignored unknown fields")));
+        assert!(warnings.iter().any(|warning| warning.contains("light: ignored unknown fields")));
+        assert_eq!(state.for_mode(ThemeMode::Dark).accent, Color::Rgb(1, 2, 3));
+        assert_eq!(state.for_mode(ThemeMode::Light).text, Color::Rgb(4, 5, 6));
+        assert_eq!(
+            state.for_mode(ThemeMode::Dark).border,
+            UiTheme::from_mode(ThemeMode::Dark).border,
+        );
+        assert_eq!(
+            state.for_mode(ThemeMode::Light).accent,
+            UiTheme::from_mode(ThemeMode::Light).accent,
         );
     }
 
