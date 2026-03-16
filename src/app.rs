@@ -222,10 +222,6 @@ struct UiTheme {
 }
 
 impl UiTheme {
-    fn default_pushed_color(unpushed: Color, muted: Color) -> Color {
-        blend_colors(unpushed, muted, 110)
-    }
-
     fn from_mode(mode: ThemeMode) -> Self {
         match mode {
             ThemeMode::Dark => Self {
@@ -244,8 +240,8 @@ impl UiTheme {
                 block_cursor_fg: Color::Rgb(245, 245, 245),
                 block_cursor_bg: Color::Rgb(95, 128, 255),
                 visual_bg: Color::Rgb(62, 78, 108),
-                commit_selected_bg: Color::Rgb(62, 78, 108),
-                commit_selected_text: Color::Rgb(211, 233, 255),
+                commit_selected_bg: Color::Reset,
+                commit_selected_text: Color::Rgb(120, 196, 255),
                 search_match_fg: Color::Rgb(30, 30, 30),
                 search_match_bg: Color::Rgb(219, 196, 96),
                 search_current_fg: Color::Rgb(12, 12, 12),
@@ -253,11 +249,8 @@ impl UiTheme {
                 reviewed: Color::Rgb(85, 190, 120),
                 unreviewed: Color::Rgb(236, 92, 92),
                 issue: Color::Rgb(238, 184, 64),
-                pushed: Self::default_pushed_color(
-                    Color::Rgb(87, 181, 227),
-                    Color::Rgb(170, 170, 170),
-                ),
-                unpushed: Color::Rgb(170, 170, 170),
+                pushed: Color::Rgb(122, 176, 202),
+                unpushed: Color::Rgb(115, 115, 115),
                 diff_add: Color::Rgb(123, 214, 144),
                 diff_add_bg: Color::Rgb(19, 51, 30),
                 diff_remove: Color::Rgb(240, 124, 124),
@@ -277,17 +270,17 @@ impl UiTheme {
                 panel_title_bg: Color::Rgb(241, 241, 241),
                 panel_title_fg: Color::Rgb(52, 52, 52),
                 footer_chip_bg: Color::Reset,
-                text: Color::Rgb(40, 40, 40),
-                muted: Color::Rgb(90, 90, 90),
-                dimmed: Color::Rgb(140, 140, 140),
-                cursor_bg: Color::Rgb(236, 236, 236),
-                focused_cursor_bg: Color::Rgb(226, 226, 226),
-                cursor_visual_overlap_weight: 155,
+                text: Color::Rgb(57, 57, 57),
+                muted: Color::Rgb(106, 106, 106),
+                dimmed: Color::Rgb(165, 165, 165),
+                cursor_bg: Color::Rgb(226, 226, 226),
+                focused_cursor_bg: Color::Rgb(224, 224, 224),
+                cursor_visual_overlap_weight: 255,
                 block_cursor_fg: Color::Rgb(255, 255, 255),
                 block_cursor_bg: Color::Rgb(41, 94, 214),
-                visual_bg: Color::Rgb(207, 218, 230),
-                commit_selected_bg: Color::Rgb(207, 218, 230),
-                commit_selected_text: Color::Rgb(18, 63, 94),
+                visual_bg: Color::Rgb(198, 198, 240),
+                commit_selected_bg: Color::Reset,
+                commit_selected_text: Color::Rgb(0, 123, 184),
                 search_match_fg: Color::Rgb(35, 35, 35),
                 search_match_bg: Color::Rgb(247, 234, 172),
                 search_current_fg: Color::Rgb(28, 22, 0),
@@ -295,12 +288,9 @@ impl UiTheme {
                 reviewed: Color::Rgb(36, 141, 74),
                 unreviewed: Color::Rgb(194, 48, 48),
                 issue: Color::Rgb(170, 113, 0),
-                pushed: Self::default_pushed_color(
-                    Color::Rgb(10, 131, 163),
-                    Color::Rgb(90, 90, 90),
-                ),
-                unpushed: Color::Rgb(90, 90, 90),
-                diff_add: Color::Rgb(16, 127, 33),
+                pushed: Color::Rgb(44, 113, 131),
+                unpushed: Color::Rgb(165, 165, 165),
+                diff_add: Color::Rgb(106, 106, 106),
                 diff_add_bg: Color::Rgb(230, 248, 233),
                 diff_remove: Color::Rgb(168, 42, 42),
                 diff_remove_bg: Color::Rgb(253, 235, 235),
