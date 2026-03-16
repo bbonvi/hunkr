@@ -1735,61 +1735,73 @@ fn selected_rows_hidden_count_tracks_active_filter() {
 
 #[test]
 fn next_poll_timeout_uses_nearest_deadline() {
+    let auto_theme_sync_every = Duration::from_secs(5);
     let auto_refresh_every = Duration::from_secs(4);
     let relative_time_redraw_every = Duration::from_secs(30);
-    let timeout = next_poll_timeout(
+    let timeout = next_poll_timeout(NextPollTimeoutInputs {
+        auto_theme_sync_every,
         auto_refresh_every,
         relative_time_redraw_every,
-        Duration::from_secs(1),
-        Duration::from_millis(100),
-        None,
-        Some(Duration::from_millis(150)),
-    );
+        auto_theme_elapsed: Duration::from_secs(1),
+        refresh_elapsed: Duration::from_secs(1),
+        relative_elapsed: Duration::from_millis(100),
+        selection_rebuild_in: None,
+        theme_reload_fallback_poll_in: Some(Duration::from_millis(150)),
+    });
     assert_eq!(timeout, Duration::from_millis(150));
 }
 
 #[test]
 fn next_poll_timeout_zero_when_any_deadline_elapsed() {
+    let auto_theme_sync_every = Duration::from_secs(5);
     let auto_refresh_every = Duration::from_secs(4);
     let relative_time_redraw_every = Duration::from_secs(30);
-    let timeout = next_poll_timeout(
+    let timeout = next_poll_timeout(NextPollTimeoutInputs {
+        auto_theme_sync_every,
         auto_refresh_every,
         relative_time_redraw_every,
-        Duration::from_secs(5),
-        Duration::from_secs(1),
-        None,
-        Some(Duration::from_secs(1)),
-    );
+        auto_theme_elapsed: Duration::from_secs(5),
+        refresh_elapsed: Duration::from_secs(5),
+        relative_elapsed: Duration::from_secs(1),
+        selection_rebuild_in: None,
+        theme_reload_fallback_poll_in: Some(Duration::from_secs(1)),
+    });
     assert_eq!(timeout, Duration::from_secs(0));
 }
 
 #[test]
 fn next_poll_timeout_after_refresh_uses_refresh_deadline_without_theme_fallback() {
+    let auto_theme_sync_every = Duration::from_secs(5);
     let auto_refresh_every = Duration::from_secs(4);
     let relative_time_redraw_every = Duration::from_secs(30);
-    let timeout = next_poll_timeout(
+    let timeout = next_poll_timeout(NextPollTimeoutInputs {
+        auto_theme_sync_every,
         auto_refresh_every,
         relative_time_redraw_every,
-        Duration::from_secs(0),
-        Duration::from_secs(0),
-        None,
-        None,
-    );
+        auto_theme_elapsed: Duration::from_secs(0),
+        refresh_elapsed: Duration::from_secs(0),
+        relative_elapsed: Duration::from_secs(0),
+        selection_rebuild_in: None,
+        theme_reload_fallback_poll_in: None,
+    });
     assert_eq!(timeout, auto_refresh_every);
 }
 
 #[test]
 fn next_poll_timeout_honors_selection_rebuild_deadline() {
+    let auto_theme_sync_every = Duration::from_secs(5);
     let auto_refresh_every = Duration::from_secs(4);
     let relative_time_redraw_every = Duration::from_secs(30);
-    let timeout = next_poll_timeout(
+    let timeout = next_poll_timeout(NextPollTimeoutInputs {
+        auto_theme_sync_every,
         auto_refresh_every,
         relative_time_redraw_every,
-        Duration::from_secs(0),
-        Duration::from_secs(0),
-        Some(Duration::from_millis(80)),
-        Some(Duration::from_secs(1)),
-    );
+        auto_theme_elapsed: Duration::from_secs(0),
+        refresh_elapsed: Duration::from_secs(0),
+        relative_elapsed: Duration::from_secs(0),
+        selection_rebuild_in: Some(Duration::from_millis(80)),
+        theme_reload_fallback_poll_in: Some(Duration::from_secs(1)),
+    });
     assert_eq!(timeout, Duration::from_millis(80));
 }
 

@@ -45,6 +45,7 @@ mod selection_helpers;
 mod services;
 mod shell_command;
 mod state;
+mod system_theme;
 mod text_edit;
 mod theme_palette;
 mod tree_highlight;
@@ -75,7 +76,7 @@ use self::ui::style::{CursorSelectionPolicy, apply_row_highlight};
 use self::worktree_switcher::short_path_label;
 
 use crate::{
-    config::{AppConfig, StartupTheme},
+    config::{AppConfig, ThemePreference},
     git_data::{GitService, WorktreeInfo},
     model::{
         AggregatedDiff, CommitInfo, DiffLineAnchor, DiffLineAnchorMeta, DiffLineKind,
@@ -92,6 +93,7 @@ const SYNTAX_HIGHLIGHT_CACHE_CAPACITY: usize = 8_192;
 const SHELL_HISTORY_LIMIT: usize = 1_000;
 const SHELL_STREAM_POLL_EVERY: Duration = Duration::from_millis(30);
 const DRAW_BUDGET_WARNING: Duration = Duration::from_millis(24);
+const AUTO_THEME_SYNC_EVERY: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPane {
@@ -110,31 +112,73 @@ enum InputMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ThemeMode {
+pub(in crate::app) enum ThemeMode {
     Dark,
     Light,
 }
 
 impl ThemeMode {
-    fn from_startup_theme(theme: StartupTheme) -> Self {
-        match theme {
-            StartupTheme::Dark => Self::Dark,
-            StartupTheme::Light => Self::Light,
-        }
-    }
-
-    fn toggle(self) -> Self {
-        match self {
-            Self::Dark => Self::Light,
-            Self::Light => Self::Dark,
-        }
-    }
-
     fn label(self) -> &'static str {
         match self {
             Self::Dark => "dark",
             Self::Light => "light",
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ThemeSelectionState {
+    preference: ThemePreference,
+    resolved_mode: ThemeMode,
+    system_mode: Option<ThemeMode>,
+}
+
+impl ThemeSelectionState {
+    fn new(preference: ThemePreference, system_mode: Option<ThemeMode>) -> Self {
+        Self {
+            preference,
+            resolved_mode: resolve_theme_mode(preference, system_mode),
+            system_mode,
+        }
+    }
+
+    fn cycle_preference(&mut self) {
+        self.preference = match self.preference {
+            ThemePreference::Auto => ThemePreference::Dark,
+            ThemePreference::Dark => ThemePreference::Light,
+            ThemePreference::Light => ThemePreference::Auto,
+        };
+        self.resolved_mode = resolve_theme_mode(self.preference, self.system_mode);
+    }
+
+    fn sync_system_mode(&mut self, system_mode: Option<ThemeMode>) -> bool {
+        let Some(system_mode) = system_mode else {
+            return false;
+        };
+        let previous_mode = self.resolved_mode;
+        self.system_mode = Some(system_mode);
+        self.resolved_mode = resolve_theme_mode(self.preference, self.system_mode);
+        previous_mode != self.resolved_mode
+    }
+
+    fn resolved_mode(self) -> ThemeMode {
+        self.resolved_mode
+    }
+
+    fn preference_label(self) -> &'static str {
+        match self.preference {
+            ThemePreference::Dark => "dark",
+            ThemePreference::Light => "light",
+            ThemePreference::Auto => "auto",
+        }
+    }
+}
+
+fn resolve_theme_mode(preference: ThemePreference, system_mode: Option<ThemeMode>) -> ThemeMode {
+    match preference {
+        ThemePreference::Dark => ThemeMode::Dark,
+        ThemePreference::Light => ThemeMode::Light,
+        ThemePreference::Auto => system_mode.unwrap_or(ThemeMode::Dark),
     }
 }
 
@@ -401,7 +445,7 @@ struct FileUiState {
 struct UiPreferences {
     focused: FocusPane,
     input_mode: InputMode,
-    theme_mode: ThemeMode,
+    theme: ThemeSelectionState,
     diff_wheel_scroll_lines: isize,
     list_wheel_coalesce: Duration,
     nerd_fonts: bool,
@@ -549,6 +593,7 @@ struct RuntimeState {
     status: String,
     selection_rebuild_due: Option<Instant>,
     show_help: bool,
+    last_auto_theme_sync: Instant,
     last_refresh: Instant,
     last_relative_time_redraw: Instant,
     last_terminal_clear: Instant,
@@ -562,6 +607,7 @@ struct RuntimeState {
 #[derive(Debug, Clone, Copy)]
 struct RuntimeTuning {
     history_limit: usize,
+    auto_theme_sync_every: Duration,
     auto_refresh_every: Duration,
     relative_time_redraw_every: Duration,
     theme_reload_poll_every: Duration,
@@ -576,6 +622,7 @@ impl RuntimeTuning {
     fn from_config(config: &AppConfig) -> Self {
         Self {
             history_limit: config.history_limit,
+            auto_theme_sync_every: AUTO_THEME_SYNC_EVERY,
             auto_refresh_every: Duration::from_secs(config.auto_refresh_every_secs),
             relative_time_redraw_every: Duration::from_secs(config.relative_time_redraw_every_secs),
             theme_reload_poll_every: Duration::from_millis(config.theme_reload_poll_every_ms),
@@ -649,7 +696,8 @@ struct RenderedDiffKey {
 
 impl App {
     fn active_theme(&self) -> &UiTheme {
-        self.theme.for_mode(self.ui.preferences.theme_mode)
+        self.theme
+            .for_mode(self.ui.preferences.theme.resolved_mode())
     }
 
     pub(super) fn now_instant(&self) -> Instant {

@@ -208,7 +208,7 @@ impl App {
         let code_text = diff_line_coord_text(rendered);
         let mut spans = vec![base_line.spans[0].clone()];
         let mut highlighted = self.ui.diff_cache.highlighter.highlight_single_line(
-            self.ui.preferences.theme_mode,
+            self.ui.preferences.theme.resolved_mode(),
             anchor.file_path(),
             code_text,
         );
@@ -1044,7 +1044,7 @@ impl App {
                     key_chip("Ctrl-r", theme),
                     Span::raw(" refresh  "),
                     key_chip("t", theme),
-                    Span::raw(" toggle theme"),
+                    Span::raw(" cycle theme"),
                 ]),
                 vec![
                     helper_key("!", KeyCode::Char('!'), KeyModifiers::SHIFT),

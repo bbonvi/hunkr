@@ -357,6 +357,10 @@ mod tests {
             self.calls.open_git_at.fetch_add(1, Ordering::Relaxed);
             GitService::open_at(path)
         }
+
+        fn detect_system_theme(&self) -> anyhow::Result<Option<ThemeMode>> {
+            Ok(None)
+        }
     }
 
     struct TestBootstrapPorts {

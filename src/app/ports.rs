@@ -4,14 +4,16 @@ use chrono::{DateTime, Utc};
 
 use crate::{config::AppConfig, git_data::GitService, store::StateStore};
 
+use super::{ThemeMode, system_theme::SystemThemeDetector};
+
 /// Clock abstraction used by app workflows for deterministic tests.
-pub trait AppClock: Send + Sync {
+pub(in crate::app) trait AppClock: Send + Sync {
     fn now_utc(&self) -> DateTime<Utc>;
     fn now_instant(&self) -> Instant;
 }
 
 /// Dependency injection interface for app bootstrap wiring.
-pub trait AppBootstrapPorts: Send + Sync {
+pub(in crate::app) trait AppBootstrapPorts: Send + Sync {
     fn open_current_git(&self) -> anyhow::Result<GitService>;
     fn load_config(&self) -> anyhow::Result<AppConfig>;
     fn state_store_for_repo(&self, repo_root: &Path) -> StateStore;
@@ -20,8 +22,9 @@ pub trait AppBootstrapPorts: Send + Sync {
 }
 
 /// Runtime dependency ports used after initial bootstrap.
-pub trait AppRuntimePorts: Send + Sync {
+pub(in crate::app) trait AppRuntimePorts: Send + Sync {
     fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService>;
+    fn detect_system_theme(&self) -> anyhow::Result<Option<ThemeMode>>;
 }
 
 /// System clock implementation for production runtime.
@@ -44,6 +47,10 @@ pub struct SystemRuntimePorts;
 impl AppRuntimePorts for SystemRuntimePorts {
     fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService> {
         GitService::open_at(path)
+    }
+
+    fn detect_system_theme(&self) -> anyhow::Result<Option<ThemeMode>> {
+        SystemThemeDetector::detect()
     }
 }
 

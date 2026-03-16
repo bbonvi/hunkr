@@ -59,7 +59,7 @@ Optional config file:
 - `$XDG_CONFIG_HOME/hunkr/config.yaml`
 - `~/.config/hunkr/config.yaml`
 
-Start from [`config.example.yaml`](./config.example.yaml). It covers startup theme, history depth, refresh cadence, diff context, and other runtime behavior.
+Start from [`config.example.yaml`](./config.example.yaml). It covers theme preference, history depth, refresh cadence, diff context, and other runtime behavior.
 
 Optional theme file:
 

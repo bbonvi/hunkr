@@ -1,14 +1,14 @@
 use std::{
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
     time::Instant,
 };
 
 use super::driver::AppDriver;
 use crate::app::*;
-use crate::config::AppConfig;
+use crate::config::{AppConfig, ThemePreference};
 use crate::model::UNCOMMITTED_COMMIT_ID;
 use chrono::{DateTime, Utc};
 use ratatui::layout::Rect;
@@ -38,13 +38,21 @@ impl AppClock for TestClock {
 
 struct TestBootstrapPorts {
     repo_root: PathBuf,
+    config: AppConfig,
+    runtime_ports: Arc<dyn AppRuntimePorts>,
 }
 
-struct TestRuntimePorts;
+struct TestRuntimePorts {
+    system_theme: Arc<Mutex<Option<ThemeMode>>>,
+}
 
 impl AppRuntimePorts for TestRuntimePorts {
     fn open_git_at(&self, path: &Path) -> anyhow::Result<GitService> {
         GitService::open_at(path)
+    }
+
+    fn detect_system_theme(&self) -> anyhow::Result<Option<ThemeMode>> {
+        Ok(*self.system_theme.lock().expect("lock system theme"))
     }
 }
 
@@ -54,7 +62,7 @@ impl AppBootstrapPorts for TestBootstrapPorts {
     }
 
     fn load_config(&self) -> anyhow::Result<AppConfig> {
-        Ok(AppConfig::default())
+        Ok(self.config.clone())
     }
 
     fn state_store_for_repo(&self, repo_root: &Path) -> StateStore {
@@ -66,7 +74,7 @@ impl AppBootstrapPorts for TestBootstrapPorts {
     }
 
     fn runtime_ports(&self) -> Arc<dyn AppRuntimePorts> {
-        Arc::new(TestRuntimePorts)
+        Arc::clone(&self.runtime_ports)
     }
 }
 
@@ -106,10 +114,24 @@ fn init_test_repo_with_hunkr_unignored() -> TempDir {
 }
 
 fn bootstrap_driver_with_state(repo_root: &Path, state: ReviewState) -> AppDriver {
+    bootstrap_driver_with_state_and_theme(repo_root, state, AppConfig::default(), None)
+}
+
+fn bootstrap_driver_with_state_and_theme(
+    repo_root: &Path,
+    state: ReviewState,
+    config: AppConfig,
+    system_theme: Option<ThemeMode>,
+) -> AppDriver {
     let store = StateStore::for_project(repo_root);
     store.save(&state).expect("seed persisted state");
+    let runtime_ports = Arc::new(TestRuntimePorts {
+        system_theme: Arc::new(Mutex::new(system_theme)),
+    });
     let ports = TestBootstrapPorts {
         repo_root: repo_root.to_path_buf(),
+        config,
+        runtime_ports,
     };
     let app = App::bootstrap_with(&ports).expect("bootstrap app");
     AppDriver::new(app)
@@ -120,10 +142,25 @@ fn bootstrap_driver(repo_root: &Path) -> AppDriver {
 }
 
 fn bootstrap_app(repo_root: &Path) -> App {
+    bootstrap_app_with_theme(repo_root, AppConfig::default(), None).0
+}
+
+fn bootstrap_app_with_theme(
+    repo_root: &Path,
+    config: AppConfig,
+    system_theme: Option<ThemeMode>,
+) -> (App, Arc<Mutex<Option<ThemeMode>>>) {
+    let system_theme = Arc::new(Mutex::new(system_theme));
+    let runtime_ports = Arc::new(TestRuntimePorts {
+        system_theme: Arc::clone(&system_theme),
+    });
     let ports = TestBootstrapPorts {
         repo_root: repo_root.to_path_buf(),
+        config,
+        runtime_ports,
     };
-    App::bootstrap_with(&ports).expect("bootstrap app")
+    let app = App::bootstrap_with(&ports).expect("bootstrap app");
+    (app, system_theme)
 }
 
 fn draw_app(app: &mut App, width: u16, height: u16) {
@@ -203,6 +240,51 @@ fn driver_quit_key_sets_quit_flag() {
 
     driver.send_key(press(KeyCode::Char('q'), KeyModifiers::NONE));
     assert!(driver.snapshot().should_quit);
+}
+
+#[test]
+fn bootstrap_auto_theme_uses_detected_system_theme() {
+    let repo = init_test_repo();
+    let (app, _) =
+        bootstrap_app_with_theme(repo.path(), AppConfig::default(), Some(ThemeMode::Light));
+
+    assert_eq!(app.ui.preferences.theme.preference, ThemePreference::Auto);
+    assert_eq!(app.ui.preferences.theme.resolved_mode(), ThemeMode::Light);
+}
+
+#[test]
+fn tick_auto_theme_sync_switches_resolved_theme() {
+    let repo = init_test_repo();
+    let (mut app, system_theme) =
+        bootstrap_app_with_theme(repo.path(), AppConfig::default(), Some(ThemeMode::Light));
+
+    *system_theme.lock().expect("lock system theme") = Some(ThemeMode::Dark);
+    app.runtime.last_auto_theme_sync = app.now_instant() - app.tuning.auto_theme_sync_every;
+    app.tick();
+
+    assert_eq!(app.ui.preferences.theme.resolved_mode(), ThemeMode::Dark);
+    assert!(app.runtime.status.contains("Theme auto-switched to dark"));
+}
+
+#[test]
+fn toggle_theme_cycles_back_to_auto() {
+    let repo = init_test_repo();
+    let (mut app, system_theme) =
+        bootstrap_app_with_theme(repo.path(), AppConfig::default(), Some(ThemeMode::Light));
+
+    app.handle_event(Event::Key(press(KeyCode::Char('t'), KeyModifiers::NONE)));
+    assert_eq!(app.ui.preferences.theme.preference, ThemePreference::Dark);
+    assert_eq!(app.ui.preferences.theme.resolved_mode(), ThemeMode::Dark);
+
+    app.handle_event(Event::Key(press(KeyCode::Char('t'), KeyModifiers::NONE)));
+    assert_eq!(app.ui.preferences.theme.preference, ThemePreference::Light);
+    assert_eq!(app.ui.preferences.theme.resolved_mode(), ThemeMode::Light);
+
+    *system_theme.lock().expect("lock system theme") = Some(ThemeMode::Dark);
+    app.handle_event(Event::Key(press(KeyCode::Char('t'), KeyModifiers::NONE)));
+    assert_eq!(app.ui.preferences.theme.preference, ThemePreference::Auto);
+    assert_eq!(app.ui.preferences.theme.resolved_mode(), ThemeMode::Dark);
+    assert!(app.runtime.status.contains("Theme preference set to auto"));
 }
 
 #[test]

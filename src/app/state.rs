@@ -176,7 +176,7 @@ impl App {
 
         let ordered_paths = self.file_tree_paths_in_order();
         let key = RenderedDiffKey {
-            theme_mode: self.ui.preferences.theme_mode,
+            theme_mode: self.ui.preferences.theme.resolved_mode(),
             visible_paths: ordered_paths.clone(),
         };
         if self.ui.diff_cache.rendered_key.as_ref() == Some(&key) {

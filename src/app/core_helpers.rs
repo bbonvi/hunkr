@@ -662,24 +662,39 @@ pub(super) fn diff_empty_state_message(
     ))
 }
 
-pub(super) fn next_poll_timeout(
-    auto_refresh_every: Duration,
-    relative_time_redraw_every: Duration,
-    refresh_elapsed: Duration,
-    relative_elapsed: Duration,
-    selection_rebuild_in: Option<Duration>,
-    theme_reload_fallback_poll_in: Option<Duration>,
-) -> Duration {
-    // Sleep until the earliest maintenance deadline: git auto-refresh or coarse age-label repaint.
-    let timeout = auto_refresh_every
-        .saturating_sub(refresh_elapsed)
-        .min(relative_time_redraw_every.saturating_sub(relative_elapsed));
-    let timeout = if let Some(fallback_theme_poll_in) = theme_reload_fallback_poll_in {
+pub(super) struct NextPollTimeoutInputs {
+    pub auto_theme_sync_every: Duration,
+    pub auto_refresh_every: Duration,
+    pub relative_time_redraw_every: Duration,
+    pub auto_theme_elapsed: Duration,
+    pub refresh_elapsed: Duration,
+    pub relative_elapsed: Duration,
+    pub selection_rebuild_in: Option<Duration>,
+    pub theme_reload_fallback_poll_in: Option<Duration>,
+}
+
+pub(super) fn next_poll_timeout(inputs: NextPollTimeoutInputs) -> Duration {
+    // Sleep until the earliest maintenance deadline: system-theme sync, git auto-refresh,
+    // or coarse age-label repaint.
+    let timeout = inputs
+        .auto_theme_sync_every
+        .saturating_sub(inputs.auto_theme_elapsed)
+        .min(
+            inputs
+                .auto_refresh_every
+                .saturating_sub(inputs.refresh_elapsed),
+        )
+        .min(
+            inputs
+                .relative_time_redraw_every
+                .saturating_sub(inputs.relative_elapsed),
+        );
+    let timeout = if let Some(fallback_theme_poll_in) = inputs.theme_reload_fallback_poll_in {
         timeout.min(fallback_theme_poll_in)
     } else {
         timeout
     };
-    if let Some(selection_timeout) = selection_rebuild_in {
+    if let Some(selection_timeout) = inputs.selection_rebuild_in {
         timeout.min(selection_timeout)
     } else {
         timeout

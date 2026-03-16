@@ -20,20 +20,21 @@ const DEFAULT_DIFF_CURSOR_SCROLL_OFF_LINES: usize = 3;
 pub(crate) const DEFAULT_DIFF_CONTEXT_LINES: u32 = 3;
 pub(crate) const DEFAULT_DIFF_HUNK_MERGE_DISTANCE_LINES: u32 = 15;
 
-/// Startup UI theme name from config.
+/// Preferred UI theme selection from config.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum StartupTheme {
-    #[default]
+pub enum ThemePreference {
     Dark,
     Light,
+    #[default]
+    Auto,
 }
 
 /// Minimal runtime settings for hunkr.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
-    pub startup_theme: StartupTheme,
+    pub theme: ThemePreference,
     pub diff_wheel_scroll_lines: isize,
     pub list_wheel_coalesce_ms: u64,
     pub nerd_fonts: bool,
@@ -51,7 +52,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            startup_theme: StartupTheme::Dark,
+            theme: ThemePreference::Auto,
             diff_wheel_scroll_lines: DEFAULT_DIFF_WHEEL_SCROLL_LINES,
             list_wheel_coalesce_ms: DEFAULT_LIST_WHEEL_COALESCE_MS,
             nerd_fonts: true,

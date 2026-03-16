@@ -7,7 +7,7 @@ fn config_defaults_when_file_missing() {
     let path = temp.path().join("missing.yaml");
     let loaded = AppConfig::load_from_path(&path).expect("load");
 
-    assert_eq!(loaded.startup_theme, StartupTheme::Dark);
+    assert_eq!(loaded.theme, ThemePreference::Auto);
     assert_eq!(loaded.diff_wheel_scroll_lines, 1);
     assert_eq!(loaded.list_wheel_coalesce_ms, 28);
     assert!(loaded.nerd_fonts);
@@ -28,12 +28,12 @@ fn config_parses_lowercase_keys() {
     let path = temp.path().join("config.yaml");
     fs::write(
             &path,
-            "startup_theme: light\ndiff_wheel_scroll_lines: 3\nlist_wheel_coalesce_ms: 12\nnerd_fonts: false\nhistory_limit: 128\nauto_refresh_every_secs: 9\nrelative_time_redraw_every_secs: 17\ntheme_reload_poll_every_ms: 600\nselection_rebuild_debounce_ms: 90\nterminal_clear_every_secs: 40\ndiff_cursor_scroll_off_lines: 5\ndiff_context_lines: 2\ndiff_hunk_merge_distance_lines: 9\n",
+            "theme: light\ndiff_wheel_scroll_lines: 3\nlist_wheel_coalesce_ms: 12\nnerd_fonts: false\nhistory_limit: 128\nauto_refresh_every_secs: 9\nrelative_time_redraw_every_secs: 17\ntheme_reload_poll_every_ms: 600\nselection_rebuild_debounce_ms: 90\nterminal_clear_every_secs: 40\ndiff_cursor_scroll_off_lines: 5\ndiff_context_lines: 2\ndiff_hunk_merge_distance_lines: 9\n",
         )
         .expect("write");
 
     let loaded = AppConfig::load_from_path(&path).expect("load");
-    assert_eq!(loaded.startup_theme, StartupTheme::Light);
+    assert_eq!(loaded.theme, ThemePreference::Light);
     assert_eq!(loaded.diff_wheel_scroll_lines, 3);
     assert_eq!(loaded.list_wheel_coalesce_ms, 12);
     assert!(!loaded.nerd_fonts);
@@ -46,6 +46,16 @@ fn config_parses_lowercase_keys() {
     assert_eq!(loaded.diff_cursor_scroll_off_lines, 5);
     assert_eq!(loaded.diff_context_lines, 2);
     assert_eq!(loaded.diff_hunk_merge_distance_lines, 9);
+}
+
+#[test]
+fn config_parses_auto_theme_preference() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let path = temp.path().join("config.yaml");
+    fs::write(&path, "theme: auto\n").expect("write");
+
+    let loaded = AppConfig::load_from_path(&path).expect("load");
+    assert_eq!(loaded.theme, ThemePreference::Auto);
 }
 
 #[test]

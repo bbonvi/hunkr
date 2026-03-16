@@ -5,9 +5,11 @@ use crate::app::*;
 pub(in crate::app) struct PollTimeoutInputs {
     pub selection_rebuild_due: Option<Instant>,
     pub now: Instant,
+    pub last_auto_theme_sync_elapsed: Duration,
     pub last_refresh_elapsed: Duration,
     pub last_relative_redraw_elapsed: Duration,
     pub theme_reload_fallback_poll_in: Option<Duration>,
+    pub auto_theme_sync_every: Duration,
     pub auto_refresh_every: Duration,
     pub relative_time_redraw_every: Duration,
     pub shell_running: bool,
@@ -21,8 +23,10 @@ pub(in crate::app) struct TickPlanInputs {
     pub terminal_clear_elapsed: Duration,
     pub terminal_clear_every: Duration,
     pub selection_rebuild_due: Option<Instant>,
+    pub last_auto_theme_sync_elapsed: Duration,
     pub last_refresh_elapsed: Duration,
     pub last_relative_redraw_elapsed: Duration,
+    pub auto_theme_sync_every: Duration,
     pub auto_refresh_every: Duration,
     pub relative_time_redraw_every: Duration,
 }
@@ -33,6 +37,7 @@ pub(in crate::app) enum TickTask {
     PollShellStream,
     PollShellFlash,
     RequestTerminalClear,
+    SyncSystemTheme,
     ReloadTheme,
     FlushSelectionRebuild,
     ReloadCommits,
@@ -44,14 +49,16 @@ pub(in crate::app) fn compute_poll_timeout(inputs: PollTimeoutInputs) -> Duratio
     let selection_rebuild_in = inputs
         .selection_rebuild_due
         .map(|due| due.saturating_duration_since(inputs.now));
-    let timeout = next_poll_timeout(
-        inputs.auto_refresh_every,
-        inputs.relative_time_redraw_every,
-        inputs.last_refresh_elapsed,
-        inputs.last_relative_redraw_elapsed,
+    let timeout = next_poll_timeout(NextPollTimeoutInputs {
+        auto_theme_sync_every: inputs.auto_theme_sync_every,
+        auto_refresh_every: inputs.auto_refresh_every,
+        relative_time_redraw_every: inputs.relative_time_redraw_every,
+        auto_theme_elapsed: inputs.last_auto_theme_sync_elapsed,
+        refresh_elapsed: inputs.last_refresh_elapsed,
+        relative_elapsed: inputs.last_relative_redraw_elapsed,
         selection_rebuild_in,
-        inputs.theme_reload_fallback_poll_in,
-    );
+        theme_reload_fallback_poll_in: inputs.theme_reload_fallback_poll_in,
+    });
     let timeout = if inputs.shell_running {
         timeout.min(SHELL_STREAM_POLL_EVERY)
     } else {
@@ -76,6 +83,9 @@ pub(in crate::app) fn plan_tick(inputs: TickPlanInputs) -> Vec<TickTask> {
     {
         tasks.push(TickTask::FlushSelectionRebuild);
     }
+    if inputs.last_auto_theme_sync_elapsed >= inputs.auto_theme_sync_every {
+        tasks.push(TickTask::SyncSystemTheme);
+    }
     if inputs.last_refresh_elapsed >= inputs.auto_refresh_every {
         tasks.push(TickTask::ReloadCommits);
     } else if inputs.last_relative_redraw_elapsed >= inputs.relative_time_redraw_every {
@@ -91,13 +101,16 @@ mod tests {
     #[test]
     fn compute_poll_timeout_allows_immediate_refresh_when_due() {
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
             selection_rebuild_due: None,
             now: Instant::now(),
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: Duration::from_secs(10),
             last_relative_redraw_elapsed: Duration::from_secs(10),
             theme_reload_fallback_poll_in: None,
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
             shell_running: true,
@@ -109,13 +122,16 @@ mod tests {
     #[test]
     fn compute_poll_timeout_clamps_to_shell_stream_polling() {
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
             selection_rebuild_due: None,
             now: Instant::now(),
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
             theme_reload_fallback_poll_in: None,
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
             shell_running: true,
@@ -127,13 +143,16 @@ mod tests {
     #[test]
     fn compute_poll_timeout_prefers_flash_deadline_when_earlier() {
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
             selection_rebuild_due: None,
             now: Instant::now(),
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
             theme_reload_fallback_poll_in: None,
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
             shell_running: true,
@@ -145,6 +164,7 @@ mod tests {
     #[test]
     fn plan_tick_prefers_refresh_over_relative_redraw() {
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let terminal_clear_every = Duration::from_secs(120);
         let tasks = plan_tick(TickPlanInputs {
@@ -152,8 +172,10 @@ mod tests {
             terminal_clear_elapsed: Duration::from_secs(0),
             terminal_clear_every,
             selection_rebuild_due: None,
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: auto_refresh_every,
             last_relative_redraw_elapsed: relative_time_redraw_every,
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
         });
@@ -165,6 +187,7 @@ mod tests {
     fn plan_tick_schedules_due_tasks_without_startup_gate() {
         let now = Instant::now();
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let terminal_clear_every = Duration::from_secs(120);
         let tasks = plan_tick(TickPlanInputs {
@@ -172,8 +195,10 @@ mod tests {
             terminal_clear_elapsed: terminal_clear_every,
             terminal_clear_every,
             selection_rebuild_due: Some(now),
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: auto_refresh_every,
             last_relative_redraw_elapsed: relative_time_redraw_every,
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
         });
@@ -186,6 +211,7 @@ mod tests {
     fn plan_tick_includes_selection_rebuild_when_due() {
         let now = Instant::now();
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let terminal_clear_every = Duration::from_secs(120);
         let tasks = plan_tick(TickPlanInputs {
@@ -193,8 +219,10 @@ mod tests {
             terminal_clear_elapsed: Duration::from_secs(0),
             terminal_clear_every,
             selection_rebuild_due: Some(now),
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
         });
@@ -205,13 +233,16 @@ mod tests {
     fn compute_poll_timeout_respects_selection_rebuild_deadline() {
         let now = Instant::now();
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
             selection_rebuild_due: Some(now + Duration::from_millis(2)),
             now,
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
             theme_reload_fallback_poll_in: None,
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
             shell_running: false,
@@ -223,18 +254,42 @@ mod tests {
     #[test]
     fn compute_poll_timeout_honors_fallback_theme_poll_deadline() {
         let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
         let relative_time_redraw_every = Duration::from_secs(30);
         let timeout = compute_poll_timeout(PollTimeoutInputs {
             selection_rebuild_due: None,
             now: Instant::now(),
+            last_auto_theme_sync_elapsed: Duration::from_secs(0),
             last_refresh_elapsed: Duration::from_secs(0),
             last_relative_redraw_elapsed: Duration::from_secs(0),
             theme_reload_fallback_poll_in: Some(Duration::from_millis(50)),
+            auto_theme_sync_every,
             auto_refresh_every,
             relative_time_redraw_every,
             shell_running: false,
             shell_flash_timeout: None,
         });
         assert_eq!(timeout, Duration::from_millis(50));
+    }
+
+    #[test]
+    fn plan_tick_includes_system_theme_sync_when_due() {
+        let auto_refresh_every = Duration::from_secs(4);
+        let auto_theme_sync_every = Duration::from_secs(5);
+        let relative_time_redraw_every = Duration::from_secs(30);
+        let terminal_clear_every = Duration::from_secs(120);
+        let tasks = plan_tick(TickPlanInputs {
+            now: Instant::now(),
+            terminal_clear_elapsed: Duration::from_secs(0),
+            terminal_clear_every,
+            selection_rebuild_due: None,
+            last_auto_theme_sync_elapsed: auto_theme_sync_every,
+            last_refresh_elapsed: Duration::from_secs(0),
+            last_relative_redraw_elapsed: Duration::from_secs(0),
+            auto_theme_sync_every,
+            auto_refresh_every,
+            relative_time_redraw_every,
+        });
+        assert!(tasks.contains(&TickTask::SyncSystemTheme));
     }
 }

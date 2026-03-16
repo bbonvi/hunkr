@@ -3,7 +3,7 @@ use super::input::global_router;
 use super::runtime::tick_scheduler::{self, PollTimeoutInputs, TickPlanInputs, TickTask};
 use super::theme_palette::{THEME_FILE_NAME, ThemeReloadOutcome};
 use crate::app::*;
-use crate::config::{AppConfig, config_path};
+use crate::config::{AppConfig, ThemePreference, config_path};
 use anyhow::Context;
 
 /// Bootstrap-only dependencies loaded from disk/environment before UI startup.
@@ -21,7 +21,7 @@ impl App {
         Self::bootstrap_with(&ports)
     }
 
-    pub fn bootstrap_with(ports: &dyn AppBootstrapPorts) -> anyhow::Result<Self> {
+    pub(in crate::app) fn bootstrap_with(ports: &dyn AppBootstrapPorts) -> anyhow::Result<Self> {
         let git = ports.open_current_git()?;
         let config = ports.load_config()?;
         let store = ports.state_store_for_repo(git.root());
@@ -56,6 +56,7 @@ impl App {
 
     fn from_bootstrap_deps(deps: BootstrapDeps, config: &AppConfig) -> Self {
         let now = deps.clock.now_instant();
+        let initial_system_theme = deps.runtime_ports.detect_system_theme().ok().flatten();
         let theme_path = config_path().with_file_name(THEME_FILE_NAME);
         let theme_watch_dir = theme_path
             .parent()
@@ -103,7 +104,7 @@ impl App {
                 preferences: UiPreferences {
                     focused: FocusPane::Commits,
                     input_mode: InputMode::Normal,
-                    theme_mode: ThemeMode::from_startup_theme(config.startup_theme),
+                    theme: ThemeSelectionState::new(config.theme, initial_system_theme),
                     diff_wheel_scroll_lines: config.diff_wheel_scroll_lines,
                     list_wheel_coalesce: Duration::from_millis(config.list_wheel_coalesce_ms),
                     nerd_fonts: config.nerd_fonts,
@@ -183,6 +184,7 @@ impl App {
                 status: String::new(),
                 selection_rebuild_due: None,
                 show_help: false,
+                last_auto_theme_sync: now,
                 last_refresh: now,
                 last_relative_time_redraw: now,
                 last_terminal_clear: now,
@@ -284,9 +286,11 @@ impl App {
         tick_scheduler::compute_poll_timeout(PollTimeoutInputs {
             selection_rebuild_due: self.runtime.selection_rebuild_due,
             now,
+            last_auto_theme_sync_elapsed: self.runtime.last_auto_theme_sync.elapsed(),
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
             theme_reload_fallback_poll_in: self.theme_reload_driver.fallback_poll_in(now),
+            auto_theme_sync_every: self.tuning.auto_theme_sync_every,
             auto_refresh_every: self.tuning.auto_refresh_every,
             relative_time_redraw_every: self.tuning.relative_time_redraw_every,
             shell_running: self.ui.shell_command.running.is_some(),
@@ -369,8 +373,10 @@ impl App {
             terminal_clear_elapsed: self.runtime.last_terminal_clear.elapsed(),
             terminal_clear_every: self.tuning.terminal_clear_every,
             selection_rebuild_due: self.runtime.selection_rebuild_due,
+            last_auto_theme_sync_elapsed: self.runtime.last_auto_theme_sync.elapsed(),
             last_refresh_elapsed: self.runtime.last_refresh.elapsed(),
             last_relative_redraw_elapsed: self.runtime.last_relative_time_redraw.elapsed(),
+            auto_theme_sync_every: self.tuning.auto_theme_sync_every,
             auto_refresh_every: self.tuning.auto_refresh_every,
             relative_time_redraw_every: self.tuning.relative_time_redraw_every,
         });
@@ -391,6 +397,7 @@ impl App {
                 TickTask::PollShellStream => self.poll_shell_command_stream(),
                 TickTask::PollShellFlash => self.poll_shell_output_flash(),
                 TickTask::RequestTerminalClear => self.request_terminal_clear(),
+                TickTask::SyncSystemTheme => self.sync_system_theme(),
                 TickTask::ReloadTheme => self.reload_theme_from_disk(false),
                 TickTask::FlushSelectionRebuild => {
                     self.flush_pending_selection_rebuild();
@@ -456,8 +463,10 @@ impl App {
         if let Err(err) = self.reload_commits(true) {
             self.runtime.status = format!("reload failed: {err:#}");
         }
+        self.sync_system_theme();
         self.reload_theme_from_disk(true);
         let now = self.now_instant();
+        self.runtime.last_auto_theme_sync = now;
         self.runtime.last_refresh = now;
         self.runtime.last_relative_time_redraw = now;
     }
@@ -491,12 +500,60 @@ impl App {
     }
 
     pub(super) fn toggle_theme(&mut self) {
-        self.ui.preferences.theme_mode = self.ui.preferences.theme_mode.toggle();
-        self.ui.diff_cache.rendered_key = None;
+        let previous_mode = self.ui.preferences.theme.resolved_mode();
+        self.ui.preferences.theme.cycle_preference();
+        if matches!(self.ui.preferences.theme.preference, ThemePreference::Auto) {
+            let detected = self.deps.runtime_ports.detect_system_theme().ok().flatten();
+            self.ui.preferences.theme.sync_system_mode(detected);
+            self.runtime.last_auto_theme_sync = self.now_instant();
+        }
+        self.runtime.status = self.theme_preference_status();
+        if self.ui.preferences.theme.resolved_mode() != previous_mode {
+            self.invalidate_diff_cache();
+            self.runtime.needs_redraw = true;
+        }
+    }
+
+    fn sync_system_theme(&mut self) {
+        self.runtime.last_auto_theme_sync = self.now_instant();
+        let detected = match self.deps.runtime_ports.detect_system_theme() {
+            Ok(theme) => theme,
+            Err(err) => {
+                if matches!(self.ui.preferences.theme.preference, ThemePreference::Auto) {
+                    self.runtime.status = format!("system theme detection failed: {err:#}");
+                }
+                return;
+            }
+        };
+        if !self.ui.preferences.theme.sync_system_mode(detected) {
+            return;
+        }
+        self.invalidate_diff_cache();
+        self.runtime.needs_redraw = true;
         self.runtime.status = format!(
-            "Theme switched to {}",
-            self.ui.preferences.theme_mode.label()
+            "Theme auto-switched to {}",
+            self.ui.preferences.theme.resolved_mode().label()
         );
+    }
+
+    fn theme_preference_status(&self) -> String {
+        if !matches!(self.ui.preferences.theme.preference, ThemePreference::Auto) {
+            return format!(
+                "Theme preference set to {}",
+                self.ui.preferences.theme.preference_label()
+            );
+        }
+
+        match self.ui.preferences.theme.system_mode {
+            Some(system_mode) => format!(
+                "Theme preference set to auto (system: {})",
+                system_mode.label()
+            ),
+            None => format!(
+                "Theme preference set to auto (fallback: {})",
+                self.ui.preferences.theme.resolved_mode().label()
+            ),
+        }
     }
 }
 
@@ -532,6 +589,10 @@ mod tests {
     impl AppRuntimePorts for FailingRuntimePorts {
         fn open_git_at(&self, _path: &Path) -> anyhow::Result<GitService> {
             panic!("runtime open_git_at should not be called when bootstrap fails");
+        }
+
+        fn detect_system_theme(&self) -> anyhow::Result<Option<ThemeMode>> {
+            panic!("runtime detect_system_theme should not be called when bootstrap fails");
         }
     }
 
