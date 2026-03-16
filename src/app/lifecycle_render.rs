@@ -465,11 +465,18 @@ impl App {
     pub(super) fn reload_theme_from_disk(&mut self, force: bool) {
         match self.theme.reload_if_changed(force) {
             Ok(ThemeReloadOutcome::Unchanged) => {}
-            Ok(ThemeReloadOutcome::LoadedFromFile) => {
+            Ok(ThemeReloadOutcome::LoadedFromFile { warnings }) => {
                 self.invalidate_diff_cache();
                 self.runtime.needs_redraw = true;
-                self.runtime.status =
-                    format!("Theme reloaded from {}", self.theme.path().display());
+                self.runtime.status = if warnings.is_empty() {
+                    format!("Theme reloaded from {}", self.theme.path().display())
+                } else {
+                    format!(
+                        "Theme reloaded from {} with warnings: {}",
+                        self.theme.path().display(),
+                        warnings.join("; ")
+                    )
+                };
             }
             Ok(ThemeReloadOutcome::ResetToDefaults) => {
                 self.invalidate_diff_cache();

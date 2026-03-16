@@ -1,5 +1,6 @@
 # Place as ~/.config/hunkr/theme.yaml to override built-in colors.
 # Values accept "#RRGGBB", [r,g,b], or "reset".
+# Missing keys fall back to built-in defaults. Unknown keys are ignored with a warning.
 dark:
   border: "#444444"
   focus_border: "#ddbd28"

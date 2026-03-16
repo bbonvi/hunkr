@@ -66,7 +66,7 @@ Optional theme file:
 - `$XDG_CONFIG_HOME/hunkr/theme.yaml`
 - `~/.config/hunkr/theme.yaml`
 
-Start from [`theme.example.yaml`](./theme.example.yaml) to override the built-in palette.
+Start from [`theme.example.yaml`](./theme.example.yaml) to override the built-in palette. Theme files can omit keys and keep the built-in default for them; unknown keys are ignored with a warning.
 
 ## Non-goals
 
