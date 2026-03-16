@@ -12,7 +12,7 @@ use semver::Version;
 
 use super::super::{
     CommitPushChainMarkerKind, CommitRow, CommitStatusFilter, FocusPane, TreeRow, UiTheme,
-    blend_colors, commit_push_chain_marker, commit_selection_marker, commit_status_badge,
+    commit_push_chain_marker, commit_selection_marker, commit_status_badge,
     commit_status_filter_label_prefix, display_width, format_file_change_badge,
     format_relative_time, list_highlight_symbol, list_highlight_symbol_width,
     sanitize_terminal_text, sanitized_span, truncate, uncommitted_badge,
@@ -979,21 +979,15 @@ fn commit_push_chain_style(kind: CommitPushChainMarkerKind, theme: &UiTheme) -> 
     match kind {
         CommitPushChainMarkerKind::FirstUnpushed
         | CommitPushChainMarkerKind::TopUnpushed
-        | CommitPushChainMarkerKind::Unpushed => Style::default().fg(theme.muted),
+        | CommitPushChainMarkerKind::Unpushed => Style::default().fg(theme.unpushed),
         CommitPushChainMarkerKind::Pushed
         | CommitPushChainMarkerKind::FirstPushed
-        | CommitPushChainMarkerKind::TopPushed => {
-            Style::default().fg(subdued_pushed_chain_color(theme))
-        }
+        | CommitPushChainMarkerKind::TopPushed => Style::default().fg(theme.pushed),
     }
 }
 
 fn commit_selection_background(theme: &UiTheme) -> Color {
     theme.commit_selected_bg
-}
-
-fn subdued_pushed_chain_color(theme: &UiTheme) -> Color {
-    blend_colors(theme.unpushed, theme.muted, 110)
 }
 
 #[cfg(test)]
@@ -1162,6 +1156,22 @@ mod tests {
         assert!(!metadata.contains("author:"));
         assert!(!metadata.contains("state:"));
         assert!(metadata.find("2024-03-09 15:43") < metadata.find("dev"));
+    }
+
+    #[test]
+    fn commit_push_chain_style_uses_matching_theme_slots() {
+        let theme = UiTheme::from_mode(ThemeMode::Light);
+
+        assert_eq!(
+            super::commit_push_chain_style(crate::app::CommitPushChainMarkerKind::Unpushed, &theme)
+                .fg,
+            Some(theme.unpushed),
+        );
+        assert_eq!(
+            super::commit_push_chain_style(crate::app::CommitPushChainMarkerKind::Pushed, &theme)
+                .fg,
+            Some(theme.pushed),
+        );
     }
 
     #[test]

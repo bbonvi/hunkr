@@ -179,6 +179,7 @@ struct ThemeFileMode {
     reviewed: ThemeColor,
     unreviewed: ThemeColor,
     issue: ThemeColor,
+    pushed: ThemeColor,
     unpushed: ThemeColor,
     diff_add: ThemeColor,
     diff_add_bg: ThemeColor,
@@ -204,6 +205,9 @@ impl ThemeFileMode {
             .commit_selected_text
             .map(ThemeColor::into_color)
             .unwrap_or(accent);
+        let muted = self.muted.into_color();
+        let pushed = self.pushed.into_color();
+        let unpushed = self.unpushed.into_color();
 
         Ok(UiTheme {
             border: self.border.into_color(),
@@ -213,7 +217,7 @@ impl ThemeFileMode {
             panel_title_fg: self.panel_title_fg.into_color(),
             footer_chip_bg: self.footer_chip_bg.into_color(),
             text: self.text.into_color(),
-            muted: self.muted.into_color(),
+            muted,
             dimmed: self.dimmed.into_color(),
             cursor_bg: self.cursor_bg.into_color(),
             focused_cursor_bg: self.focused_cursor_bg.into_color(),
@@ -230,7 +234,8 @@ impl ThemeFileMode {
             reviewed: self.reviewed.into_color(),
             unreviewed: self.unreviewed.into_color(),
             issue: self.issue.into_color(),
-            unpushed: self.unpushed.into_color(),
+            pushed,
+            unpushed,
             diff_add: self.diff_add.into_color(),
             diff_add_bg: self.diff_add_bg.into_color(),
             diff_remove: self.diff_remove.into_color(),
@@ -382,6 +387,36 @@ mod tests {
         assert_eq!(
             state.for_mode(ThemeMode::Light).commit_selected_text,
             state.for_mode(ThemeMode::Light).accent,
+        );
+    }
+
+    #[test]
+    fn reload_if_changed_loads_explicit_push_state_colors() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_dir = temp.path().join("hunkr");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let theme_path = config_dir.join(THEME_FILE_NAME);
+        fs::write(&theme_path, include_str!("../../theme.example.yaml")).expect("write theme");
+
+        let mut state = ThemeRuntimeState::new(theme_path);
+        let outcome = state.reload_if_changed(true).expect("reload");
+
+        assert_eq!(outcome, ThemeReloadOutcome::LoadedFromFile);
+        assert_eq!(
+            state.for_mode(ThemeMode::Dark).pushed,
+            Color::Rgb(122, 176, 202),
+        );
+        assert_eq!(
+            state.for_mode(ThemeMode::Light).pushed,
+            Color::Rgb(44, 113, 131),
+        );
+        assert_eq!(
+            state.for_mode(ThemeMode::Dark).unpushed,
+            Color::Rgb(170, 170, 170),
+        );
+        assert_eq!(
+            state.for_mode(ThemeMode::Light).unpushed,
+            Color::Rgb(90, 90, 90),
         );
     }
 }

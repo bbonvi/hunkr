@@ -206,6 +206,7 @@ struct UiTheme {
     reviewed: Color,
     unreviewed: Color,
     issue: Color,
+    pushed: Color,
     unpushed: Color,
     diff_add: Color,
     diff_add_bg: Color,
@@ -221,6 +222,10 @@ struct UiTheme {
 }
 
 impl UiTheme {
+    fn default_pushed_color(unpushed: Color, muted: Color) -> Color {
+        blend_colors(unpushed, muted, 110)
+    }
+
     fn from_mode(mode: ThemeMode) -> Self {
         match mode {
             ThemeMode::Dark => Self {
@@ -248,7 +253,11 @@ impl UiTheme {
                 reviewed: Color::Rgb(85, 190, 120),
                 unreviewed: Color::Rgb(236, 92, 92),
                 issue: Color::Rgb(238, 184, 64),
-                unpushed: Color::Rgb(87, 181, 227),
+                pushed: Self::default_pushed_color(
+                    Color::Rgb(87, 181, 227),
+                    Color::Rgb(170, 170, 170),
+                ),
+                unpushed: Color::Rgb(170, 170, 170),
                 diff_add: Color::Rgb(123, 214, 144),
                 diff_add_bg: Color::Rgb(19, 51, 30),
                 diff_remove: Color::Rgb(240, 124, 124),
@@ -286,7 +295,11 @@ impl UiTheme {
                 reviewed: Color::Rgb(36, 141, 74),
                 unreviewed: Color::Rgb(194, 48, 48),
                 issue: Color::Rgb(170, 113, 0),
-                unpushed: Color::Rgb(10, 131, 163),
+                pushed: Self::default_pushed_color(
+                    Color::Rgb(10, 131, 163),
+                    Color::Rgb(90, 90, 90),
+                ),
+                unpushed: Color::Rgb(90, 90, 90),
                 diff_add: Color::Rgb(16, 127, 33),
                 diff_add_bg: Color::Rgb(230, 248, 233),
                 diff_remove: Color::Rgb(168, 42, 42),
